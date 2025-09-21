@@ -17,15 +17,22 @@ research for orion
     ```
 4. Install conda:
     ```zsh
-    brew install conda
+    brew install --cask anaconda
     ```
 5. Setup the conda environment:
     ```zsh
     conda create --name orion python=3.10
     conda activate orion
-    pip -r requirements.txt
+    pip install -e .
     ```
 ## Other
 
+### Project Structure
+- `/data`: Directory for storing datasets.
+- `/notebooks`: Jupyter notebooks for experiments and analysis.
+- `/testing`: Put random testing scripts and files in here...you may need them later.
+- `/development`: Directory for development scripts and modules.
+- `/proudction`: Directory for production-ready code and models.
+
+
 You can use `conda deactivate` to exit the conda environment
-If you install any other new python dependencies, run `pip freeze > requirements.txt` to update the requirements file
