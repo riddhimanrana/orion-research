@@ -600,36 +600,106 @@ class RealTimeObjectProcessor:
 # MODULE 3: TIER 2 - ASYNCHRONOUS DESCRIPTION PROCESS
 # ============================================================================
 
-def generate_rich_description(image: np.ndarray, object_class: str = "") -> str:
+# Global FastVLM model instance (loaded once per worker)
+_FASTVLM_MODEL = None
+
+def load_fastvlm_model():
     """
-    PLACEHOLDER: Generate rich description using FastVLM
+    Load FastVLM model (singleton pattern for worker processes)
     
-    In the full implementation, this would:
-    1. Load the FastVLM model from ml-fastvlm directory
-    2. Prepare the image and prompt
-    3. Run inference with the model
-    4. Return the generated description
+    Returns:
+        FastVLMModel instance or None if loading fails
+    """
+    global _FASTVLM_MODEL
+    
+    if _FASTVLM_MODEL is not None:
+        return _FASTVLM_MODEL
+    
+    try:
+        from production.fastvlm_wrapper import load_fastvlm
+        logger.info("Loading FastVLM model (apple/FastVLM-0.5B)...")
+        
+        # Load model with appropriate device
+        _FASTVLM_MODEL = load_fastvlm(
+            model_id="apple/FastVLM-0.5B",
+            device=None,  # Auto-detect
+            dtype=None,   # Auto-select based on device
+        )
+        
+        logger.info("FastVLM model loaded successfully")
+        return _FASTVLM_MODEL
+        
+    except Exception as e:
+        logger.error(f"Failed to load FastVLM model: {e}")
+        logger.warning("Falling back to placeholder descriptions")
+        return None
+
+
+def generate_rich_description(
+    image: np.ndarray,
+    object_class: str = "",
+    use_fastvlm: bool = True
+) -> str:
+    """
+    Generate rich description using Apple FastVLM-0.5B
+    
+    This function uses the official Apple FastVLM model from HuggingFace Hub
+    to generate detailed, contextual descriptions of detected objects.
     
     Args:
-        image: Cropped object image (BGR)
-        object_class: Object class from YOLO
+        image: Cropped object image (BGR format from OpenCV)
+        object_class: Object class from YOLO (for context)
+        use_fastvlm: Whether to use FastVLM or fallback to placeholder
         
     Returns:
         Rich textual description
     """
-    # PLACEHOLDER IMPLEMENTATION
-    # In production, this would use the FastVLM model from ml-fastvlm/
+    # Try to load and use FastVLM model
+    if use_fastvlm:
+        try:
+            model = load_fastvlm_model()
+            
+            if model is not None:
+                # Convert BGR to RGB
+                image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                pil_image = Image.fromarray(image_rgb)
+                
+                # Create context-aware prompt
+                if object_class:
+                    prompt = (
+                        f"This is a {object_class}. "
+                        f"{Config.DESCRIPTION_PROMPT}"
+                    )
+                else:
+                    prompt = Config.DESCRIPTION_PROMPT
+                
+                # Generate description
+                description = model.generate_description(
+                    image=pil_image,
+                    prompt=prompt,
+                    max_new_tokens=Config.DESCRIPTION_MAX_TOKENS,
+                    temperature=Config.DESCRIPTION_TEMPERATURE,
+                    do_sample=True,
+                )
+                
+                return description
+                
+        except Exception as e:
+            logger.warning(f"FastVLM generation failed: {e}, using fallback")
     
-    # Simulate processing time
-    time.sleep(0.1)
+    # Fallback to placeholder descriptions
+    time.sleep(0.1)  # Simulate processing
     
-    # Generate placeholder description based on object class
     descriptions = {
         'person': 'A person wearing casual clothing, standing upright with neutral posture.',
         'car': 'A four-wheeled vehicle with standard automotive features, stationary.',
         'dog': 'A medium-sized dog with brown fur, alert and attentive.',
         'cat': 'A small feline with sleek fur, sitting in a relaxed position.',
-        'default': f'An object of type {object_class} with distinct visual features.'
+        'bicycle': 'A two-wheeled bicycle with standard frame and components.',
+        'motorcycle': 'A motorized two-wheeled vehicle with visible engine components.',
+        'truck': 'A large commercial vehicle designed for cargo transport.',
+        'bus': 'A large passenger vehicle with multiple windows and seating.',
+        'default': f'An object of class "{object_class}" with distinct visual characteristics.'
     }
     
     return descriptions.get(object_class, descriptions['default'])
