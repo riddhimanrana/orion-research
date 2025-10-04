@@ -23,13 +23,13 @@ from datetime import datetime
 # Add production directory to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from production.part1_perception_engine import run_perception_engine
-from production.part2_semantic_uplift import run_semantic_uplift
+from perception_engine import run_perception_engine
+from semantic_uplift import run_semantic_uplift
 
 # Optional: Use configurations
 try:
-    from production.part1_config import apply_config as apply_part1_config, BALANCED_CONFIG as PART1_BALANCED
-    from production.part2_config import apply_config as apply_part2_config, BALANCED_CONFIG as PART2_BALANCED
+    from perception_config import apply_config as apply_part1_config, BALANCED_CONFIG as PART1_BALANCED
+    from semantic_config import apply_config as apply_part2_config, BALANCED_CONFIG as PART2_BALANCED
     CONFIGS_AVAILABLE = True
 except ImportError:
     CONFIGS_AVAILABLE = False
@@ -255,7 +255,7 @@ def run_integrated_pipeline(
             }
             if part1_config in config_map:
                 try:
-                    from production.part1_config import FAST_CONFIG, BALANCED_CONFIG, ACCURATE_CONFIG
+                    from perception_config import FAST_CONFIG, BALANCED_CONFIG, ACCURATE_CONFIG
                     config_dict = {
                         'fast': FAST_CONFIG,
                         'balanced': BALANCED_CONFIG,
@@ -268,7 +268,7 @@ def run_integrated_pipeline(
         
         # Update config for FastVLM usage
         try:
-            from production.part1_perception_engine import Config
+            from perception_engine import Config
             # Note: We can't change Config values here since they're class attributes
             # The use_fastvlm parameter is passed to generate_rich_description
             logger.info(f"FastVLM mode: {'ENABLED' if use_fastvlm else 'DISABLED (using placeholders)'}")
@@ -349,7 +349,7 @@ def run_integrated_pipeline(
             }
             if part2_config in config_map:
                 try:
-                    from production.part2_config import FAST_CONFIG, BALANCED_CONFIG, ACCURATE_CONFIG
+                    from semantic_config import FAST_CONFIG, BALANCED_CONFIG, ACCURATE_CONFIG
                     config_dict = {
                         'fast': FAST_CONFIG,
                         'balanced': BALANCED_CONFIG,

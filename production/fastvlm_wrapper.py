@@ -1,38 +1,48 @@
 """
 FastVLM Wrapper for Orion Research Project
-Uses official Apple FastVLM-0.5B from HuggingFace Hub
+Uses custom fine-tuned FastVLM-0.5B model (4-bit quantized, caption-optimized)
 
 This module provides a clean interface to the FastVLM model for generating
 rich descriptions of video frames in the perception engine.
+
+Model Details:
+- Base: FastVLM-0.5B (Qwen2-0.5B language model)
+- Fine-tuned: Caption generation
+- Quantized: 4-bit (group_size=64)
+- Vision encoder: FastViTHD (mobileclip_l_1024) - 3072-dim features
+- Location: models/fastvlm-0.5b-captions/
 """
 
 import logging
 import torch
+import os
+from pathlib import Path
 from PIL import Image
-from typing import Optional, Union
+from typing import Optional, Union, List, Dict, Any
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
 # Try to import transformers
 try:
-    from transformers import AutoTokenizer, AutoModelForCausalLM
+    from transformers import AutoTokenizer, AutoModelForCausalLM, AutoProcessor
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
-    logger.warning("transformers not available. Install with: pip install transformers")
+    logger.warning("transformers not available. Install with: pip install transformers>=4.36.0")
 
 
 class FastVLMModel:
     """
-    Wrapper for Apple FastVLM-0.5B model.
+    Wrapper for custom fine-tuned FastVLM-0.5B model.
     
     Handles model loading, image preprocessing, and inference.
+    Uses local fine-tuned model from models/fastvlm-0.5b-captions/
     """
     
     def __init__(
         self,
-        model_id: str = "apple/FastVLM-0.5B",
+        model_path: Optional[str] = None,
         device: Optional[str] = None,
         dtype: Optional[torch.dtype] = None,
     ):
@@ -40,18 +50,30 @@ class FastVLMModel:
         Initialize FastVLM model.
         
         Args:
-            model_id: HuggingFace model ID
+            model_path: Path to local model directory (default: models/fastvlm-0.5b-captions)
             device: Device to load model on ('cuda', 'mps', 'cpu')
-            dtype: Data type for model (default: float16 on GPU, float32 on CPU)
+            dtype: Data type for model (default: auto-detect based on device)
         """
         if not TRANSFORMERS_AVAILABLE:
             raise ImportError(
                 "transformers is required for FastVLM. "
-                "Install with: pip install transformers>=4.36.0"
+                "Install with: pip install transformers>=4.36.0 safetensors"
             )
         
-        self.model_id = model_id
-        self.IMAGE_TOKEN_INDEX = -200  # Special token for image placeholder
+        # Set default model path to local fine-tuned model
+        if model_path is None:
+            # Try to find the model relative to this file
+            current_dir = Path(__file__).parent.parent
+            model_path = str(current_dir / "models" / "fastvlm-0.5b-captions")
+            
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(
+                f"Model not found at: {model_path}\n"
+                f"Please ensure your fine-tuned model is in models/fastvlm-0.5b-captions/"
+            )
+        
+        self.model_path = model_path
+        self.IMAGE_TOKEN_INDEX = 151646  # From config.json - specific to this model
         
         # Auto-detect device if not specified
         if device is None:
@@ -64,6 +86,7 @@ class FastVLMModel:
         self.device = device
         
         # Set dtype based on device
+        # Note: Model is 4-bit quantized, so dtype mainly affects intermediate computations
         if dtype is None:
             if device in ["cuda", "mps"]:
                 dtype = torch.float16
@@ -71,21 +94,34 @@ class FastVLMModel:
                 dtype = torch.float32
         self.dtype = dtype
         
-        logger.info(f"Initializing FastVLM model: {model_id}")
+        logger.info(f"Initializing FastVLM model from: {model_path}")
         logger.info(f"Device: {device}, dtype: {dtype}")
+        logger.info("Loading 4-bit quantized model (fine-tuned for captions)")
         
         # Load tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(
-            model_id,
+            model_path,
             trust_remote_code=True
         )
         
-        # Load model
+        # Load processor (includes image preprocessing)
+        try:
+            self.processor = AutoProcessor.from_pretrained(
+                model_path,
+                trust_remote_code=True
+            )
+            logger.info("Loaded image processor")
+        except Exception as e:
+            logger.warning(f"Could not load processor: {e}. Using manual preprocessing.")
+            self.processor = None
+        
+        # Load model (4-bit quantized)
         self.model = AutoModelForCausalLM.from_pretrained(
-            model_id,
+            model_path,
             torch_dtype=dtype,
             device_map="auto" if device == "cuda" else None,
             trust_remote_code=True,
+            # low_cpu_mem_usage=True,  # Helpful for quantized models
         )
         
         # Move to device if not using device_map
@@ -94,6 +130,8 @@ class FastVLMModel:
         
         self.model.eval()
         logger.info("FastVLM model loaded successfully")
+        logger.info(f"Model size: 0.5B parameters (4-bit quantized)")
+        logger.info(f"Vision encoder: FastViTHD (3072-dim features)")
     
     def generate_description(
         self,
@@ -247,7 +285,7 @@ class FastVLMModel:
 
 
 def load_fastvlm(
-    model_id: str = "apple/FastVLM-0.5B",
+    model_path: Optional[str] = None,
     device: Optional[str] = None,
     dtype: Optional[torch.dtype] = None,
 ) -> FastVLMModel:
@@ -255,14 +293,14 @@ def load_fastvlm(
     Convenience function to load FastVLM model.
     
     Args:
-        model_id: HuggingFace model ID
+        model_path: Path to local model directory (default: models/fastvlm-0.5b-captions)
         device: Device to load on ('cuda', 'mps', 'cpu')
         dtype: Data type for model
     
     Returns:
         Loaded FastVLMModel instance
     """
-    return FastVLMModel(model_id=model_id, device=device, dtype=dtype)
+    return FastVLMModel(model_path=model_path, device=device, dtype=dtype)
 
 
 # Example usage
@@ -270,19 +308,43 @@ if __name__ == "__main__":
     import sys
     
     # Test the model
-    print("Loading FastVLM model...")
-    model = load_fastvlm()
+    print("="*80)
+    print("FastVLM Model Test - Custom Fine-tuned 0.5B (4-bit quantized)")
+    print("="*80)
+    print("\nLoading FastVLM model from: models/fastvlm-0.5b-captions/")
+    
+    try:
+        model = load_fastvlm()
+        print("✓ Model loaded successfully!")
+        print(f"  Device: {model.device}")
+        print(f"  dtype: {model.dtype}")
+        print(f"  Image token index: {model.IMAGE_TOKEN_INDEX}")
+    except Exception as e:
+        print(f"✗ Failed to load model: {e}")
+        sys.exit(1)
     
     # Test with an image if provided
     if len(sys.argv) > 1:
         image_path = sys.argv[1]
         prompt = sys.argv[2] if len(sys.argv) > 2 else "Describe this image in detail."
         
-        print(f"\nGenerating description for: {image_path}")
+        print(f"\n{'='*80}")
+        print(f"Generating description for: {image_path}")
         print(f"Prompt: {prompt}")
+        print(f"{'='*80}\n")
         
-        description = model(image_path, prompt)
-        print(f"\nDescription:\n{description}")
+        try:
+            description = model(image_path, prompt)
+            print(f"Description:\n{description}")
+            print(f"\n{'='*80}")
+        except Exception as e:
+            print(f"✗ Error generating description: {e}")
     else:
-        print("\nModel loaded successfully!")
-        print("Usage: python fastvlm_wrapper.py <image_path> [prompt]")
+        print("\n" + "="*80)
+        print("Model ready for use!")
+        print("="*80)
+        print("\nUsage: python fastvlm_wrapper.py <image_path> [prompt]")
+        print("\nExample:")
+        print("  python fastvlm_wrapper.py data/examples/example1.jpg")
+        print("  python fastvlm_wrapper.py image.jpg 'What objects are in this image?'")
+

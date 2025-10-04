@@ -51,7 +51,7 @@ ARCHITECTURE_DIAGRAM = """
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                               │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │ 1. Object Detection (YOLOv11m)                                       │    │
+│  │ 1. Object Detection (YOLO11m)                                       │    │
 │  │    - Confidence threshold: 0.25                                      │    │
 │  │    - IoU threshold: 0.45                                             │    │
 │  │    - Max detections: 100 per frame                                   │    │
@@ -226,7 +226,7 @@ ARCHITECTURE_DIAGRAM = """
 
 Per Frame (Tier 1):
   - Scene detection:     10-20 ms  (FastViT)
-  - Object detection:    50-100 ms (YOLOv11m)
+  - Object detection:    50-100 ms (YOLO11m)
   - Embedding per obj:   5-10 ms   (ResNet50)
   - Total Tier 1:        ~100-200 ms per frame
 
@@ -271,7 +271,7 @@ The visual_embedding field is crucial for Part 2's clustering algorithm!
 
 
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║                               FILE STRUCTURE                                  ║
+║                               FILE STRUCTURE                                 ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 production/
