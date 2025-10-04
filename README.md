@@ -1,5 +1,5 @@
-# orion-research
-research for orion
+# Orion Research
+Research repository for the Orion architecture.
 
 ## Installation Instructions
 
