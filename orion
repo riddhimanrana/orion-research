@@ -14,24 +14,72 @@ sys.path.insert(0, str(Path(__file__).parent / 'production'))
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 from rich import box
+from rich.align import Align
+from rich.console import Group
+
 
 console = Console()
 
 
 def print_banner():
-    """Print Orion banner"""
-    banner = """
-[bold cyan]
-   ___  ____  ____  ___  _   _ 
-  / _ \|  _ \|  _ \|_ _|/ \ | |
- | | | | |_) | |_) || |/ _ \| |
- | |_| |  _ <|  _ < | / ___ \ |
-  \___/|_| \_\_| \_\___/   \_\_|[/bold cyan]
-  
-[dim]Video → Knowledge Graph → Q&A[/dim]
-    """
-    console.print(Panel(banner, border_style="cyan", box=box.DOUBLE))
+    """Prints the final, proportionally balanced Orion banner."""
+    
+    # A precise color palette based on the logo
+    outer_ring = "#8e44ad"
+    inner_fill = "#9b59b6"
+    lines_shade = "#af7ac5" # A lighter purple for the horizontal line texture
+    sphere_fill = "#e5e7e9"
+    sphere_highlight = "#fdfefe"
+
+    # A new, compact ASCII logo, designed to match the height of the text.
+    logo_art = [
+        f"   [bold {outer_ring}]██████[/]",
+        f" [bold {outer_ring}]██[{inner_fill}]▓▓▓▓▓▓[{outer_ring}]██[/]",
+        f"[bold {outer_ring}]██[{inner_fill}]▓▓[{lines_shade}]▒▒[{sphere_fill}]██[{sphere_highlight}]▒[{lines_shade}]▒▒[{inner_fill}]▓▓[{outer_ring}]██[/]",
+        f"[bold {outer_ring}]██[{inner_fill}]▓▓[{lines_shade}]▒▒[{sphere_fill}]██[{sphere_highlight}]▒[{lines_shade}]▒▒[{inner_fill}]▓▓[{outer_ring}]██[/]",
+        f" [bold {outer_ring}]██[{inner_fill}]▓▓▓▓▓▓[{outer_ring}]██[/]",
+        f"   [bold {outer_ring}]██████[/]",
+    ]
+
+    # Block text for "ORION" - now perfectly aligned with the 6-line logo
+    text_lines = [
+        " ██████╗ ██████╗ ██╗ ██████╗ ███╗   ██╗",
+        "██╔═══██╗██╔══██╗██║██╔═══██╗████╗  ██║",
+        "██║   ██║██████╔╝██║██║   ██║██╔██╗ ██║",
+        "██║   ██║██╔══██╗██║██║   ██║██║╚██╗██║",
+        "╚██████╔╝██║  ██║██║╚██████╔╝██║ ╚████║",
+        " ╚═════╝ ╚═╝  ╚═╝╚═╝ ╚═════╝ ╚═╝  ╚═══╝",
+    ]
+
+    # Create renderable objects from the art
+    logo = Group(*(Text.from_markup(line) for line in logo_art))
+    orion_text = Text("\n".join(text_lines), style=f"bold {inner_fill}")
+
+    # Use a grid to perfectly align the art and text
+    grid = Table.grid(expand=False, padding=(0, 4))
+    grid.add_column()
+    grid.add_column()
+    grid.add_row(logo, orion_text)
+
+    # Group the grid and tagline for centering
+    render_group = Group(
+        Align.center(grid),
+        Align.center(Text("\nVideo → Knowledge Graph → Q&A", style="dim"))
+    )
+
+    # Use Panel.fit to create a perfectly sized border
+    console.print(
+        Panel.fit(
+            render_group,
+            box=box.HEAVY,
+            border_style=outer_ring,
+            title=f"[bold {inner_fill}]ORION[/]",
+            title_align="center",
+            padding=(1, 4)
+        )
+    )
 
 
 def show_models():
@@ -76,9 +124,9 @@ Examples:
   orion analyze video.mp4                     # Run full pipeline
   orion analyze video.mp4 -i                  # With interactive Q&A
   orion analyze video.mp4 --fast              # Fast mode
-  orion qa                                     # Q&A only mode
-  orion models                                 # Show model info
-  
+  orion qa                                      # Q&A only mode
+  orion models                                  # Show model info
+ 
 For more help: orion <command> --help
         """
     )
@@ -109,8 +157,9 @@ For more help: orion <command> --help
     
     args = parser.parse_args()
     
-    # Show banner
-    print_banner()
+    # Show banner only if a command is given
+    if args.command:
+        print_banner()
     
     # Handle commands
     if args.command == 'analyze':
@@ -169,6 +218,8 @@ For more help: orion <command> --help
         show_modes()
     
     else:
+        # Show banner and help if no command is given
+        print_banner()
         parser.print_help()
 
 

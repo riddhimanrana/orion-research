@@ -72,8 +72,9 @@ class Config:
     MIN_EVENTS_PER_WINDOW = 2  # Minimum state changes to trigger event composition
     
     # LLM Event Composition (Ollama)
+    USE_LLM_COMPOSITION = True  # Enable LLM composition with gemma3:4b
     OLLAMA_API_URL = "http://localhost:11434/api/generate"
-    OLLAMA_MODEL = "gemma3-1b"
+    OLLAMA_MODEL = "gemma3:4b"  # Use gemma3:4b for better Cypher generation (was gemma3:1b)
     OLLAMA_TEMPERATURE = 0.3  # More deterministic for structured output
     OLLAMA_MAX_TOKENS = 2000
     OLLAMA_TIMEOUT = 60  # seconds
@@ -651,24 +652,29 @@ ACTIVE ENTITIES:
         
         prompt += """
 Generate Cypher queries to:
-1. Create or merge entity nodes
+1. Create or merge entity nodes with their labels
 2. Create event nodes for significant state changes
 3. Create relationships between entities and events
 
-IMPORTANT:
-- Generate ONLY Cypher queries, one per line
+CRITICAL SYNTAX RULES:
 - Use MERGE for entities to avoid duplicates
-- Use CREATE for events
-- Include proper syntax and semicolons
-- No explanations or comments
-- Use parameter syntax: $param_name
+- Use MERGE for events with unique IDs
+- NEVER use WHERE after SET (invalid syntax!)
+- Use literal values, not parameters
+- Each query must end with semicolon
+- No explanations, only Cypher code
 
-Example:
-MERGE (e:Entity {id: $entity_id}) SET e.label = $label;
-CREATE (ev:Event {type: 'state_change', timestamp: datetime($timestamp), description: $desc});
-MATCH (e:Entity {id: $entity_id}), (ev:Event {description: $desc}) CREATE (e)-[:PARTICIPATED_IN]->(ev);
+CORRECT EXAMPLES:
+MERGE (e:Entity {id: 'entity_cluster_0001'}) SET e.label = 'laptop';
+MERGE (ev:Event {id: 'event_001'}) SET ev.type = 'movement', ev.timestamp = datetime({epochSeconds: 5}), ev.description = 'Laptop moved across desk';
+MATCH (e:Entity {id: 'entity_cluster_0001'}), (ev:Event {id: 'event_001'}) MERGE (e)-[:PARTICIPATED_IN]->(ev);
 
-Your Cypher queries:
+WRONG EXAMPLES (DO NOT DO THIS):
+MERGE (e:Entity {id: '1'}) SET e.label = 'Laptop' WHERE e.type = 'Laptop';  // WRONG: WHERE after SET
+CREATE (e:Entity {id: '1'}) SET e.label = 'Laptop';  // WRONG: Use MERGE not CREATE for entities
+MERGE (e:Entity {id: '1'})  // WRONG: Missing semicolon
+
+Now generate Cypher queries for the state changes above:
 """
         
         return prompt
@@ -702,6 +708,43 @@ Your Cypher queries:
         
         return queries
     
+    def validate_cypher_queries(self, queries: List[str]) -> List[str]:
+        """
+        Validate Cypher queries for common syntax errors
+        
+        Args:
+            queries: List of Cypher queries to validate
+            
+        Returns:
+            List of valid queries (invalid ones filtered out)
+        """
+        valid_queries = []
+        
+        for query in queries:
+            query_upper = query.upper()
+            
+            # Check for invalid patterns
+            invalid = False
+            
+            # Pattern 1: WHERE after SET (invalid in Cypher)
+            if 'SET' in query_upper and 'WHERE' in query_upper:
+                set_pos = query_upper.index('SET')
+                where_pos = query_upper.index('WHERE')
+                if where_pos > set_pos:
+                    logger.warning(f"Invalid query (WHERE after SET): {query[:50]}...")
+                    invalid = True
+            
+            # Pattern 2: Missing required keywords
+            if not any(kw in query_upper for kw in ['MERGE', 'CREATE', 'MATCH', 'SET', 'RETURN']):
+                logger.warning(f"Invalid query (no valid keywords): {query[:50]}...")
+                invalid = True
+            
+            if not invalid:
+                valid_queries.append(query)
+        
+        return valid_queries
+
+    
     def compose_events_for_window(
         self,
         window: TemporalWindow,
@@ -719,6 +762,11 @@ Your Cypher queries:
         """
         logger.info(f"Composing events for window {window.start_time:.1f}s - {window.end_time:.1f}s")
         
+        # Use fallback if LLM is disabled
+        if not Config.USE_LLM_COMPOSITION:
+            logger.info("Using fallback query generation (LLM disabled)")
+            return self.generate_fallback_queries(window, entity_tracker)
+        
         # Create prompt
         prompt = self.create_prompt_for_window(window, entity_tracker)
         
@@ -732,9 +780,16 @@ Your Cypher queries:
         # Parse queries
         queries = self.parse_cypher_queries(llm_output)
         
-        logger.info(f"Generated {len(queries)} Cypher queries")
+        # Validate queries before returning
+        validated_queries = self.validate_cypher_queries(queries)
         
-        return queries
+        if not validated_queries:
+            logger.warning("LLM generated invalid queries, using fallback")
+            return self.generate_fallback_queries(window, entity_tracker)
+        
+        logger.info(f"Generated {len(validated_queries)} valid Cypher queries")
+        
+        return validated_queries
     
     def generate_fallback_queries(
         self,
@@ -764,21 +819,21 @@ Your Cypher queries:
                     f"SET e.label = '{safe_label}';"
                 )
         
-        # Create event nodes for state changes
-        for change in window.state_changes:
-            event_id = f"event_{change.entity_id}_{int(change.timestamp_after)}"
+        # Create event nodes for state changes (use counter to ensure unique IDs)
+        for idx, change in enumerate(window.state_changes):
+            event_id = f"event_{change.entity_id}_{int(change.timestamp_after)}_{idx}"
             queries.append(
-                f"CREATE (ev:Event {{id: '{event_id}', "
-                f"type: 'state_change', "
-                f"timestamp: datetime({{epochSeconds: {int(change.timestamp_after)}}}), "
-                f"description: 'Entity changed state'}});"
+                f"MERGE (ev:Event {{id: '{event_id}'}}) "
+                f"SET ev.type = 'state_change', "
+                f"ev.timestamp = datetime({{epochSeconds: {int(change.timestamp_after)}}}), "
+                f"ev.description = 'Entity changed state';"
             )
             
             # Link entity to event
             queries.append(
                 f"MATCH (e:Entity {{id: '{change.entity_id}'}}), "
                 f"(ev:Event {{id: '{event_id}'}}) "
-                f"CREATE (e)-[:PARTICIPATED_IN]->(ev);"
+                f"MERGE (e)-[:PARTICIPATED_IN]->(ev);"
             )
         
         return queries

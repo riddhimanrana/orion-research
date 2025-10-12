@@ -264,7 +264,7 @@ pip install timm transformers
 ### "Ollama not found"
 ```bash
 brew install ollama
-ollama pull gemma2:2b
+ollama pull gemma3:4b
 ollama pull embeddinggemma
 ```
 

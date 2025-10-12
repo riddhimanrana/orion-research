@@ -175,12 +175,21 @@ Answer:"""
         
         # Check model is available
         try:
-            models = [m['name'] for m in ollama.list()['models']]
+            models_response = ollama.list()
+            # Handle both dictionary and list responses
+            if isinstance(models_response, dict) and 'models' in models_response:
+                models = [m.get('name', m.get('model', '')) for m in models_response['models']]
+            elif isinstance(models_response, list):
+                models = [m.get('name', m.get('model', '')) for m in models_response]
+            else:
+                models = []
+            
             if self.model not in models:
                 console.print(f"[yellow]Downloading {self.model} model...[/yellow]")
                 ollama.pull(self.model)
         except Exception as e:
             console.print(f"[red]Error checking models: {e}[/red]")
+            # Continue anyway - model might still work
         
         # Connect to Neo4j
         if not self.connect():
