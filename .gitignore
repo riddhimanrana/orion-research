@@ -1,6 +1,8 @@
 # orion research
 /ml-fastvlm
 /models
+yolo11m.pt
+*.pt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -9,6 +11,10 @@ __pycache__/
 
 # C extensions
 *.so
+
+.DS_Store
+
+
 
 # Distribution / packaging
 .Python

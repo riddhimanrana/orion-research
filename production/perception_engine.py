@@ -11,11 +11,12 @@ Models Used:
 - Object Detection: YOLO11m (ultralytics) - 80 COCO classes, 20.1M params
 - Scene Detection: FastViT-T8 (timm) - Lightweight vision transformer
 - Visual Embeddings: ResNet50 (timm) - 512-dim feature vectors
-- Description Generation: FastVLM-0.5B (custom fine-tuned)
+- Description Generation: FastVLM-0.5B (custom fine-tuned, MLX format)
   * Location: models/fastvlm-0.5b-captions/
-  * Quantization: 4-bit (group_size=64)
-  * Vision encoder: FastViTHD (3072-dim features)
-  * Fine-tuned for caption generation
+  * Format: MLX (Apple Silicon optimized)
+  * Vision encoder: CoreML FastViTHD (.mlpackage)
+  * Language model: MLX 4-bit quantized
+  * Framework: mlx-vlm with FastVLM patch
 
 Author: Orion Research Team
 Date: January 2025
@@ -27,10 +28,23 @@ import time
 import logging
 import multiprocessing as mp
 from multiprocessing import Queue, Process, Manager
+from queue import Empty as QueueEmpty
 from typing import List, Dict, Optional, Tuple, Any
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
+from enum import Enum
 import warnings
+
+# Set multiprocessing start method to 'spawn' for CoreML/MLX compatibility
+# CRITICAL: CoreML and MLX models DO NOT work properly with 'fork' on macOS
+# 'fork' copies the parent's memory, which breaks Metal/CoreML compute resources
+# 'spawn' starts fresh processes, allowing models to initialize properly
+try:
+    mp.set_start_method('spawn', force=True)
+    logging.info("Set multiprocessing start method to 'spawn' for CoreML/MLX compatibility")
+except RuntimeError:
+    # Already set
+    pass
 
 import numpy as np
 import cv2
@@ -42,16 +56,27 @@ from tqdm import tqdm
 # Suppress warnings for cleaner output
 warnings.filterwarnings('ignore')
 
+# Fix tokenizers parallelism warning (must be set before importing tokenizers)
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+
 # ============================================================================
 # CONFIGURATION CONSTANTS
 # ============================================================================
+
+class DescriptionMode(Enum):
+    """Mode for FastVLM description generation"""
+    SCENE = "scene"      # One description per frame (shared by all objects)
+    OBJECT = "object"    # One description per object (focused on individual object)
+    HYBRID = "hybrid"    # Both scene + object descriptions (most comprehensive)
+
 
 class Config:
     """Configuration parameters for the perception engine"""
     
     # Video Processing
     TARGET_FPS = 4.0  # Sample frames at 4 FPS
-    SCENE_SIMILARITY_THRESHOLD = 0.98  # Threshold for scene change detection
+    USE_SCENE_DETECTION = False  # Set to False to process all frames (faster startup)
+    SCENE_SIMILARITY_THRESHOLD = 0.98  # Threshold for scene change detection (only if USE_SCENE_DETECTION=True)
     FRAME_RESIZE_DIM = 768  # Resize frames to 768x768 for scene detection
     
     # Object Detection (YOLO)
@@ -71,16 +96,14 @@ class Config:
     QUEUE_TIMEOUT = 0.5  # Seconds
     WORKER_SHUTDOWN_TIMEOUT = 30  # Seconds
     
-    # FastVLM Description Generation
-    DESCRIPTION_MAX_TOKENS = 150
-    DESCRIPTION_TEMPERATURE = 0.7
-    DESCRIPTION_PROMPT = (
-        "Describe this object in detail, including its appearance, state, "
-        "actions, and any notable features. Be specific and concise."
-    )
+    # FastVLM Description Generation (Graph-Optimized)
+    DESCRIPTION_MODE = DescriptionMode.OBJECT  # SCENE, OBJECT, or HYBRID
+    DESCRIPTION_MAX_TOKENS = 200  # Optimized for <200 tokens (graph DB friendly)
+    DESCRIPTION_TEMPERATURE = 0.3  # Lower temp for more focused, consistent outputs
+    # Note: Prompts are handled by FastVLM wrapper based on mode
     
     # Performance & Logging
-    LOG_LEVEL = logging.INFO
+    LOG_LEVEL = logging.DEBUG  # Temporarily DEBUG for troubleshooting
     PROGRESS_BAR = True
     CHECKPOINT_INTERVAL = 100  # Save checkpoint every N frames
 
@@ -170,6 +193,10 @@ class ModelManager:
     
     def get_scene_detector(self):
         """Load FastViT model for scene change detection"""
+        if not Config.USE_SCENE_DETECTION:
+            logger.info("Scene detection disabled (USE_SCENE_DETECTION=False)")
+            return None
+            
         if 'scene_detector' not in self._models:
             try:
                 import timm
@@ -203,12 +230,17 @@ class ModelManager:
                 from ultralytics import YOLO
                 logger.info("Loading YOLO11m model...")
                 
-                # Load YOLO11m - will auto-download to ~/.ultralytics/weights/ if not present
-                model = YOLO('yolo11m.pt')
+                # Load YOLO11m from models/weights directory
+                model_path = 'models/weights/yolo11m.pt'
+                if not os.path.exists(model_path):
+                    # Fall back to auto-download if not in models/weights
+                    model_path = 'yolo11m.pt'
+                
+                model = YOLO(model_path)
                 
                 self._models['object_detector'] = model
                 logger.info("✓ YOLO11m model loaded successfully")
-                logger.info(f"  Model: yolo11m.pt (20.1M params, 80 COCO classes)")
+                logger.info(f"  Model: {model_path} (20.1M params, 80 COCO classes)")
             except Exception as e:
                 logger.error(f"Failed to load YOLO11m model: {e}")
                 logger.error("Install with: pip install ultralytics")
@@ -558,6 +590,11 @@ class RealTimeObjectProcessor:
         """
         Process single frame: detect objects, generate embeddings, queue for description
         
+        Queuing strategy depends on DESCRIPTION_MODE:
+        - SCENE: Queue frame once with all object indices
+        - OBJECT: Queue each object crop separately
+        - HYBRID: Queue each object crop with full frame
+        
         Args:
             frame: BGR frame
             frame_number: Frame index
@@ -570,12 +607,30 @@ class RealTimeObjectProcessor:
         """
         detections = self.detect_objects(frame)
         
+        if not detections:
+            return 0
+        
+        # Gather all detections for this frame (for context)
+        frame_width = frame.shape[1]
+        frame_detections = []
+        object_indices = []
+        
         for detection in detections:
             # Crop object
             crop, crop_size = self.crop_object(frame, detection['bbox'])
             
             # Generate visual embedding
             embedding = self.generate_visual_embedding(crop)
+            
+            # Calculate spatial position
+            bbox = detection['bbox']
+            center_x = (bbox[0] + bbox[2]) / 2
+            if center_x < frame_width / 3:
+                position = "left"
+            elif center_x < 2 * frame_width / 3:
+                position = "center"
+            else:
+                position = "right"
             
             # Create perception object
             temp_id = f"det_{self.detection_count:06d}"
@@ -596,15 +651,53 @@ class RealTimeObjectProcessor:
             obj_dict = perception_obj.to_dict()
             shared_perception_log.append(obj_dict)
             obj_index = len(shared_perception_log) - 1
+            object_indices.append(obj_index)
             
-            # Queue for description generation
+            # Build detection info for context
+            frame_detections.append({
+                'label': detection['class_name'],
+                'bbox': detection['bbox'],
+                'position': position,
+                'confidence': detection['confidence']
+            })
+            
+            # Queue for description generation based on mode
+            mode = Config.DESCRIPTION_MODE
+            
+            if mode == DescriptionMode.OBJECT:
+                # OBJECT MODE: Queue each object crop
+                try:
+                    background_queue.put(
+                        (crop.copy(), obj_index, temp_id, frame_number, 
+                         detection['class_name'], position, frame_detections.copy()),
+                        timeout=Config.QUEUE_TIMEOUT
+                    )
+                    logger.debug(f"Queued object {temp_id} (index {obj_index})")
+                except Exception as e:
+                    logger.error(f"Failed to queue {temp_id}: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+            
+            elif mode == DescriptionMode.HYBRID:
+                # HYBRID MODE: Queue crop + full frame
+                try:
+                    background_queue.put(
+                        (crop.copy(), obj_index, temp_id, frame_number,
+                         detection['class_name'], position, frame.copy(), frame_detections.copy()),
+                        timeout=Config.QUEUE_TIMEOUT
+                    )
+                except:
+                    logger.warning(f"Queue full, skipping description for {temp_id}")
+        
+        # SCENE MODE: Queue frame once for all objects
+        if Config.DESCRIPTION_MODE == DescriptionMode.SCENE and detections:
             try:
                 background_queue.put(
-                    (crop.copy(), obj_index, temp_id),
+                    (frame.copy(), frame_number, frame_detections, object_indices),
                     timeout=Config.QUEUE_TIMEOUT
                 )
             except:
-                logger.warning(f"Queue full, skipping description for {temp_id}")
+                logger.warning(f"Queue full, skipping scene description for frame {frame_number}")
         
         return len(detections)
 
@@ -618,16 +711,16 @@ _FASTVLM_MODEL = None
 
 def load_fastvlm_model():
     """
-    Load custom fine-tuned FastVLM model (singleton pattern for worker processes)
+    Load custom fine-tuned FastVLM-MLX model (singleton pattern for worker processes)
     
-    Uses the locally fine-tuned FastVLM-0.5B model optimized for captions:
+    Uses the locally fine-tuned FastVLM-0.5B model optimized for captions (MLX format):
     - Location: models/fastvlm-0.5b-captions/
-    - Quantization: 4-bit (group_size=64)
-    - Vision encoder: FastViTHD (3072-dim features)
-    - Size: ~300MB
+    - Format: MLX (Apple Silicon optimized)
+    - Vision encoder: CoreML FastViTHD (.mlpackage)
+    - Language model: MLX 4-bit quantized
     
     Returns:
-        FastVLMModel instance or None if loading fails
+        FastVLMMLXWrapper instance or None if loading fails
     """
     global _FASTVLM_MODEL
     
@@ -635,103 +728,165 @@ def load_fastvlm_model():
         return _FASTVLM_MODEL
     
     try:
-        from fastvlm_wrapper import load_fastvlm
-        logger.info("Loading custom fine-tuned FastVLM-0.5B model...")
-        logger.info("  Model: models/fastvlm-0.5b-captions/ (4-bit quantized)")
+        from fastvlm_mlx_wrapper import FastVLMMLXWrapper
+        logger.info("Loading custom fine-tuned FastVLM-0.5B model (MLX format)...")
+        logger.info("  Model: models/fastvlm-0.5b-captions/ (MLX + CoreML)")
         
-        # Load local fine-tuned model
-        _FASTVLM_MODEL = load_fastvlm(
-            model_path=None,  # Uses default: models/fastvlm-0.5b-captions/
-            device=None,      # Auto-detect (MPS/CUDA/CPU)
-            dtype=None,       # Auto-select based on device
+        # Get model path
+        model_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "models", "fastvlm-0.5b-captions"
         )
         
-        logger.info("✓ FastVLM model loaded successfully")
-        logger.info(f"  Device: {_FASTVLM_MODEL.device}")
-        logger.info(f"  Vision encoder: FastViTHD (3072-dim)")
+        # Load MLX model (device is auto-managed by MLX)
+        _FASTVLM_MODEL = FastVLMMLXWrapper(model_path=model_path)
+        
+        logger.info("✓ FastVLM-MLX model loaded successfully")
+        logger.info(f"  Vision encoder: CoreML FastViTHD (.mlpackage)")
+        logger.info(f"  Language model: MLX 4-bit quantized")
+        logger.info(f"  Optimized for Apple Silicon")
         return _FASTVLM_MODEL
         
     except Exception as e:
-        logger.error(f"Failed to load FastVLM model: {e}")
-        logger.error("Make sure the model exists at: models/fastvlm-0.5b-captions/")
+        logger.error(f"Failed to load FastVLM-MLX model: {e}")
+        logger.error("Make sure:")
+        logger.error("  1. Model exists at: models/fastvlm-0.5b-captions/")
+        logger.error("  2. mlx-vlm is installed with FastVLM patch")
+        logger.error("  3. See production/docs/INSTALL_MLX_VLM.md for setup")
         logger.warning("Falling back to placeholder descriptions")
+        import traceback
+        logger.debug(traceback.format_exc())
         return None
 
 
 def generate_rich_description(
     image: np.ndarray,
+    mode: DescriptionMode,
     object_class: str = "",
+    object_position: str = "",
+    all_frame_detections: List[Dict[str, Any]] = None,
     use_fastvlm: bool = True
 ) -> str:
     """
-    Generate rich description using custom fine-tuned FastVLM-0.5B
+    Generate rich description using custom fine-tuned FastVLM-0.5B (MLX format)
     
-    This function uses the locally fine-tuned FastVLM model optimized for
-    generating detailed, contextual descriptions of detected objects.
+    Supports three modes:
+    - SCENE: Full frame description with all objects
+    - OBJECT: Focused object description with contextual awareness
+    - HYBRID: Both scene + object (not implemented in this function, handled at worker level)
     
     Model details:
-    - Base: FastVLM-0.5B (Qwen2-0.5B language model)
-    - Fine-tuned for caption generation
-    - 4-bit quantized for efficiency
-    - Vision encoder: FastViTHD (3072-dim features)
+    - Format: MLX (Apple Silicon optimized)
+    - Vision encoder: CoreML FastViTHD (.mlpackage)
+    - Language model: MLX 4-bit quantized
+    - Framework: mlx-vlm with FastVLM patch
     
     Args:
-        image: Cropped object image (BGR format from OpenCV)
-        object_class: Object class from YOLO11 (for context)
+        image: Full frame (SCENE mode) or object crop (OBJECT mode) - BGR format from OpenCV
+        mode: Description mode (SCENE, OBJECT, or HYBRID)
+        object_class: Object class for OBJECT mode (e.g., "person", "chair")
+        object_position: Spatial position for OBJECT mode (e.g., "center", "left")
+        all_frame_detections: List of all YOLO detections in frame with:
+            - label: object class
+            - bbox: bounding box coordinates
+            - position: spatial position (left/center/right)
         use_fastvlm: Whether to use FastVLM or fallback to placeholder
         
     Returns:
         Rich textual description
     """
-    # Try to load and use FastVLM model
+    logger.debug(f"generate_rich_description called with mode={mode}, object_class={object_class}")
+    
+    # Try to load and use FastVLM-MLX model
     if use_fastvlm:
         try:
+            logger.debug("Loading FastVLM model...")
             model = load_fastvlm_model()
+            logger.debug(f"Model loaded: {model is not None}")
             
             if model is not None:
+                logger.debug("Converting image to RGB...")
                 # Convert BGR to RGB
                 image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                 pil_image = Image.fromarray(image_rgb)
+                logger.debug(f"Image converted, size: {pil_image.size}")
                 
-                # Create context-aware prompt
-                if object_class:
-                    prompt = (
-                        f"This is a {object_class}. "
-                        f"{Config.DESCRIPTION_PROMPT}"
+                if mode == DescriptionMode.SCENE:
+                    logger.debug("Building SCENE mode prompt...")
+                    # SCENE MODE: Full frame description with all objects
+                    # Build context-aware prompt with detections
+                    if all_frame_detections:
+                        objects = [d.get('label', 'object') for d in all_frame_detections[:5]]
+                        object_str = ", ".join(objects)
+                        prompt = f"Describe this scene in detail. Objects detected: {object_str}."
+                    else:
+                        prompt = "Describe this scene in detail, including all visible objects and their arrangement."
+                    
+                    logger.debug(f"Calling model.generate_description with prompt: {prompt[:50]}...")
+                    # Use MLX wrapper's generate_description method
+                    description = model.generate_description(
+                        image=pil_image,
+                        prompt=prompt,
+                        max_tokens=Config.DESCRIPTION_MAX_TOKENS,
+                        temperature=Config.DESCRIPTION_TEMPERATURE
                     )
-                else:
-                    prompt = Config.DESCRIPTION_PROMPT
+                    logger.debug(f"Got SCENE description: {description[:50] if description else 'None'}...")
                 
-                # Generate description
-                description = model.generate_description(
-                    image=pil_image,
-                    prompt=prompt,
-                    max_new_tokens=Config.DESCRIPTION_MAX_TOKENS,
-                    temperature=Config.DESCRIPTION_TEMPERATURE,
-                    do_sample=True,
-                )
+                elif mode == DescriptionMode.OBJECT:
+                    logger.debug("Building OBJECT mode prompt...")
+                    # OBJECT MODE: Focused object description with context
+                    # Build object-focused prompt
+                    if all_frame_detections:
+                        context_objects = [d.get('label', 'object') for d in all_frame_detections[:5]]
+                        context_str = ", ".join(context_objects)
+                        prompt = f"Describe this {object_class or 'object'} in detail. It is positioned {object_position or 'in the scene'}. Other objects in the scene: {context_str}."
+                    else:
+                        prompt = f"Describe this {object_class or 'object'} in detail, including its appearance, color, and characteristics."
+                    
+                    logger.debug(f"Calling model.generate_description with prompt: {prompt[:50]}...")
+                    # Use MLX wrapper's generate_description method
+                    description = model.generate_description(
+                        image=pil_image,
+                        prompt=prompt,
+                        max_tokens=150,  # Shorter for object-level
+                        temperature=Config.DESCRIPTION_TEMPERATURE
+                    )
+                    logger.debug(f"Got OBJECT description: {description[:50] if description else 'None'}...")
+                
+                else:  # HYBRID mode
+                    # For hybrid, this function should be called twice (once for scene, once for object)
+                    # This shouldn't happen - hybrid is handled at worker level
+                    logger.warning(f"HYBRID mode should be handled at worker level, defaulting to OBJECT mode")
+                    return generate_rich_description(
+                        image, DescriptionMode.OBJECT, object_class, 
+                        object_position, all_frame_detections, use_fastvlm
+                    )
                 
                 return description
                 
         except Exception as e:
-            logger.warning(f"FastVLM generation failed: {e}, using fallback")
+            logger.warning(f"FastVLM-MLX generation failed: {e}, using fallback")
+            import traceback
+            logger.debug(traceback.format_exc())
     
     # Fallback to placeholder descriptions
     time.sleep(0.1)  # Simulate processing
     
-    descriptions = {
-        'person': 'A person wearing casual clothing, standing upright with neutral posture.',
-        'car': 'A four-wheeled vehicle with standard automotive features, stationary.',
-        'dog': 'A medium-sized dog with brown fur, alert and attentive.',
-        'cat': 'A small feline with sleek fur, sitting in a relaxed position.',
-        'bicycle': 'A two-wheeled bicycle with standard frame and components.',
-        'motorcycle': 'A motorized two-wheeled vehicle with visible engine components.',
-        'truck': 'A large commercial vehicle designed for cargo transport.',
-        'bus': 'A large passenger vehicle with multiple windows and seating.',
-        'default': f'An object of class "{object_class}" with distinct visual characteristics.'
-    }
+    if mode == DescriptionMode.SCENE:
+        # Build fallback based on detections if available
+        if all_frame_detections:
+            obj_list = ", ".join([d.get('label', 'object') for d in all_frame_detections[:3]])
+            return f"Scene containing {obj_list} with typical visual characteristics."
+        return "A scene with various objects and visual elements."
     
-    return descriptions.get(object_class, descriptions['default'])
+    elif mode == DescriptionMode.OBJECT:
+        # Object-specific fallback
+        if object_class:
+            return f"A {object_class} with typical appearance and features, positioned {object_position or 'in the scene'}."
+        return "An object with distinct visual characteristics."
+    
+    else:  # HYBRID
+        return "Scene with objects (hybrid mode fallback)."
 
 
 def description_worker(
@@ -741,52 +896,136 @@ def description_worker(
     stop_event: mp.Event
 ):
     """
-    Worker process for generating rich descriptions
+    Worker process for generating rich descriptions with YOLO context
+    
+    Supports three modes:
+    - SCENE: Processes full frame once per frame, all objects share description
+    - OBJECT: Processes object crop, generates unique description per object
+    - HYBRID: Generates both scene + object descriptions
     
     Args:
         worker_id: Worker identifier
-        background_queue: Input queue with (image, index, temp_id) tuples
+        background_queue: Input queue with tuples based on mode:
+            - SCENE: (frame, frame_number, all_detections)
+            - OBJECT: (crop, obj_index, temp_id, frame_number, object_class, position)
+            - HYBRID: (crop, obj_index, temp_id, frame_number, object_class, position, frame, all_detections)
         shared_perception_log: Shared list to update with descriptions
         stop_event: Event to signal worker shutdown
     """
     worker_logger = setup_logger(f'Worker-{worker_id}')
-    worker_logger.info(f"Description worker {worker_id} started")
+    worker_logger.info(f"Description worker {worker_id} started (Mode: {Config.DESCRIPTION_MODE.value})")
+    
+    # PRE-LOAD FastVLM model before processing (to avoid delays during queue processing)
+    worker_logger.info(f"Worker {worker_id} pre-loading FastVLM model...")
+    load_fastvlm_model()
+    worker_logger.info(f"Worker {worker_id} model loaded, ready to process")
     
     processed_count = 0
+    mode = Config.DESCRIPTION_MODE
     
     try:
+        worker_logger.info(f"Worker {worker_id} entering processing loop...")
         while not stop_event.is_set():
             try:
                 # Get item from queue with timeout
+                worker_logger.debug(f"Worker {worker_id} waiting for item from queue...")
                 item = background_queue.get(timeout=Config.QUEUE_TIMEOUT)
+                worker_logger.debug(f"Worker {worker_id} got item from queue: {type(item)}")
                 
                 if item is None:  # Poison pill
                     worker_logger.info(f"Worker {worker_id} received stop signal")
                     break
                 
-                crop, obj_index, temp_id = item
+                if mode == DescriptionMode.SCENE:
+                    # SCENE MODE: (frame, frame_number, all_detections, object_indices)
+                    frame, frame_number, frame_detections, object_indices = item
+                    
+                    # Generate scene description once
+                    scene_description = generate_rich_description(
+                        image=frame,
+                        mode=DescriptionMode.SCENE,
+                        all_frame_detections=frame_detections
+                    )
+                    
+                    # Update all objects from this frame with the same scene description
+                    # CRITICAL: Manager proxy requires getting, modifying, then re-assigning
+                    for obj_idx in object_indices:
+                        obj_data = shared_perception_log[obj_idx]
+                        obj_data['rich_description'] = scene_description
+                        shared_perception_log[obj_idx] = obj_data
+                    
+                    processed_count += len(object_indices)
                 
-                # Get object class for context-aware description
-                object_class = shared_perception_log[obj_index].get('object_class', '')
+                elif mode == DescriptionMode.OBJECT:
+                    # OBJECT MODE: (crop, obj_index, temp_id, frame_number, object_class, position, frame_detections)
+                    crop, obj_index, temp_id, frame_number, object_class, position, frame_detections = item
+                    
+                    worker_logger.debug(f"Worker {worker_id} unpacked item: obj_index={obj_index}, temp_id={temp_id}")
+                    
+                    # Generate object-focused description
+                    worker_logger.debug(f"Worker {worker_id} calling generate_rich_description for {temp_id}")
+                    object_description = generate_rich_description(
+                        image=crop,
+                        mode=DescriptionMode.OBJECT,
+                        object_class=object_class,
+                        object_position=position,
+                        all_frame_detections=frame_detections
+                    )
+                    worker_logger.debug(f"Worker {worker_id} got description for {temp_id}: {object_description[:50] if object_description else 'None'}...")
+                    
+                    # Update this specific object
+                    # CRITICAL: Manager proxy requires getting, modifying, then re-assigning
+                    obj_data = shared_perception_log[obj_index]
+                    obj_data['rich_description'] = object_description
+                    shared_perception_log[obj_index] = obj_data
+                    worker_logger.debug(f"Worker {worker_id} updated shared_perception_log[{obj_index}]")
+                    
+                    processed_count += 1
+                    worker_logger.debug(f"Worker {worker_id} processed_count now: {processed_count}")
                 
-                # Generate description
-                description = generate_rich_description(crop, object_class)
-                
-                # Update shared perception log
-                shared_perception_log[obj_index]['rich_description'] = description
-                
-                processed_count += 1
+                elif mode == DescriptionMode.HYBRID:
+                    # HYBRID MODE: Generate both scene + object descriptions
+                    crop, obj_index, temp_id, frame_number, object_class, position, frame, frame_detections = item
+                    
+                    # Generate scene description (if not already done for this frame)
+                    # Note: In production, you'd want to cache scene descriptions per frame
+                    scene_description = generate_rich_description(
+                        image=frame,
+                        mode=DescriptionMode.SCENE,
+                        all_frame_detections=frame_detections
+                    )
+                    
+                    # Generate object description
+                    object_description = generate_rich_description(
+                        image=crop,
+                        mode=DescriptionMode.OBJECT,
+                        object_class=object_class,
+                        object_position=position,
+                        all_frame_detections=frame_detections
+                    )
+                    
+                    # Store both descriptions
+                    # CRITICAL: Manager proxy requires getting, modifying, then re-assigning
+                    obj_data = shared_perception_log[obj_index]
+                    obj_data['rich_description'] = object_description
+                    obj_data['scene_description'] = scene_description
+                    shared_perception_log[obj_index] = obj_data
+                    
+                    processed_count += 1
                 
                 if processed_count % 10 == 0:
-                    worker_logger.debug(f"Worker {worker_id} processed {processed_count} objects")
+                    worker_logger.debug(f"Worker {worker_id} processed {processed_count} items")
             
-            except mp.queues.Empty:
+            except QueueEmpty:
                 continue
             except Exception as e:
                 worker_logger.error(f"Worker {worker_id} error: {e}")
+                import traceback
+                worker_logger.error(traceback.format_exc())
     
     finally:
-        worker_logger.info(f"Worker {worker_id} shutting down. Processed {processed_count} objects.")
+        worker_logger.info(f"Worker {worker_id} shutting down. Processed {processed_count} items.")
+        worker_logger.info(f"Worker {worker_id} stop_event.is_set() = {stop_event.is_set()}")
 
 
 # ============================================================================

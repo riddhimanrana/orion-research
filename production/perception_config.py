@@ -7,12 +7,17 @@ Import and apply these configurations before running the perception engine.
 
 Usage:
     from perception_config import apply_config, FAST_CONFIG, ACCURATE_CONFIG
+    from perception_engine import DescriptionMode
     
     apply_config(FAST_CONFIG)
     perception_log = run_perception_engine(video_path)
+    
+    # Or switch description modes:
+    from perception_config import set_description_mode
+    set_description_mode(DescriptionMode.OBJECT)  # SCENE, OBJECT, or HYBRID
 """
 
-from perception_engine import Config
+from perception_engine import Config, DescriptionMode
 import logging
 
 
@@ -223,6 +228,71 @@ def recommend_config(video_duration: float, available_memory_gb: float = 8.0):
         else:
             print("Recommendation: LOW_RESOURCE_CONFIG (long video, limited memory)")
             return LOW_RESOURCE_CONFIG
+
+
+# ============================================================================
+# DESCRIPTION MODE CONFIGURATION
+# ============================================================================
+
+def set_description_mode(mode: DescriptionMode):
+    """
+    Set the FastVLM description generation mode
+    
+    Args:
+        mode: DescriptionMode.SCENE, DescriptionMode.OBJECT, or DescriptionMode.HYBRID
+    
+    Modes:
+        - SCENE: One description per frame, shared by all objects
+          * Pros: Most efficient (1 FastVLM call per frame)
+          * Cons: No object-specific details
+          * Best for: Scene understanding, minimizing compute time
+          
+        - OBJECT: One description per object, focused on individual object
+          * Pros: Detailed entity attributes, unique per object
+          * Cons: More expensive (N FastVLM calls per frame)
+          * Best for: Entity-centric knowledge graphs, object queries
+          
+        - HYBRID: Both scene + object descriptions  
+          * Pros: Most comprehensive, both scene context + object details
+          * Cons: Most expensive (1 + N FastVLM calls per frame)
+          * Best for: Complete knowledge graphs, rich queries
+    """
+    Config.DESCRIPTION_MODE = mode
+    print(f"Description mode set to: {mode.value.upper()}")
+    print(f"  - FastVLM calls per frame: ", end="")
+    if mode == DescriptionMode.SCENE:
+        print("1 (shared by all objects)")
+    elif mode == DescriptionMode.OBJECT:
+        print("N (one per object)")
+    else:  # HYBRID
+        print("1 + N (scene + objects)")
+    print()
+
+
+def get_mode_config(mode: DescriptionMode) -> dict:
+    """
+    Get a configuration dict with the specified description mode
+    
+    Args:
+        mode: DescriptionMode enum value
+    
+    Returns:
+        Configuration dictionary
+    """
+    return {
+        'DESCRIPTION_MODE': mode,
+        'DESCRIPTION': f'Mode: {mode.value}'
+    }
+
+
+# Scene mode preset (most efficient)
+SCENE_MODE_CONFIG = get_mode_config(DescriptionMode.SCENE)
+
+# Object mode preset (balanced, recommended)
+OBJECT_MODE_CONFIG = get_mode_config(DescriptionMode.OBJECT)
+
+# Hybrid mode preset (most comprehensive)
+HYBRID_MODE_CONFIG = get_mode_config(DescriptionMode.HYBRID)
 
 
 # ============================================================================

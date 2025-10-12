@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""
+Orion - Video Analysis Pipeline CLI
+Transform videos into queryable knowledge graphs
+"""
+
+import sys
+import argparse
+from pathlib import Path
+
+# Add production directory to path
+sys.path.insert(0, str(Path(__file__).parent / 'production'))
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich import box
+
+console = Console()
+
+
+def print_banner():
+    """Print Orion banner"""
+    banner = """
+[bold cyan]
+   ___  ____  ____  ___  _   _ 
+  / _ \|  _ \|  _ \|_ _|/ \ | |
+ | | | | |_) | |_) || |/ _ \| |
+ | |_| |  _ <|  _ < | / ___ \ |
+  \___/|_| \_\_| \_\___/   \_\_|[/bold cyan]
+  
+[dim]Video → Knowledge Graph → Q&A[/dim]
+    """
+    console.print(Panel(banner, border_style="cyan", box=box.DOUBLE))
+
+
+def show_models():
+    """Show information about models"""
+    table = Table(title="Orion Models", box=box.ROUNDED)
+    table.add_column("Model", style="cyan", no_wrap=True)
+    table.add_column("Job", style="yellow")
+    table.add_column("Size", style="green")
+    table.add_column("Speed", style="magenta")
+    
+    table.add_row("YOLO11m", "Object Detection", "20MB", "⚡⚡⚡ Very Fast")
+    table.add_row("FastVLM", "Description", "600MB", "⚡⚡ Fast")
+    table.add_row("ResNet50", "Visual ID", "100MB", "⚡⚡⚡ Very Fast")
+    table.add_row("EmbeddingGemma", "Text Meaning", "622MB", "⚡⚡ Fast")
+    table.add_row("Gemma3:4b", "Q&A", "1.6GB", "⚡ Medium")
+    
+    console.print(table)
+
+
+def show_modes():
+    """Show processing modes"""
+    table = Table(title="Processing Modes", box=box.ROUNDED)
+    table.add_column("Mode", style="cyan")
+    table.add_column("FPS", style="yellow")
+    table.add_column("Descriptions", style="green")
+    table.add_column("Best For", style="magenta")
+    
+    table.add_row("fast", "3", "Every 10th", "Long videos, testing")
+    table.add_row("balanced", "5", "Every 5th", "General use ⭐")
+    table.add_row("accurate", "10", "Every 2nd", "Short clips, detail")
+    
+    console.print(table)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog='orion',
+        description='Orion Video Analysis Pipeline - Transform videos into knowledge',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  orion analyze video.mp4                     # Run full pipeline
+  orion analyze video.mp4 -i                  # With interactive Q&A
+  orion analyze video.mp4 --fast              # Fast mode
+  orion qa                                     # Q&A only mode
+  orion models                                 # Show model info
+  
+For more help: orion <command> --help
+        """
+    )
+    
+    subparsers = parser.add_subparsers(dest='command', help='Available commands')
+    
+    # Analyze command
+    analyze_parser = subparsers.add_parser('analyze', help='Analyze a video')
+    analyze_parser.add_argument('video', help='Path to video file')
+    analyze_parser.add_argument('--fast', action='store_true', help='Use fast mode')
+    analyze_parser.add_argument('--accurate', action='store_true', help='Use accurate mode')
+    analyze_parser.add_argument('-i', '--interactive', action='store_true', help='Start Q&A after processing')
+    analyze_parser.add_argument('--skip-perception', action='store_true', help='Skip visual perception (Part 1)')
+    analyze_parser.add_argument('--skip-graph', action='store_true', help='Skip knowledge graph (Part 2)')
+    analyze_parser.add_argument('--keep-db', action='store_true', help='Keep existing Neo4j data')
+    analyze_parser.add_argument('-o', '--output', default='data/testing', help='Output directory')
+    analyze_parser.add_argument('--neo4j-password', default='orion123', help='Neo4j password')
+    analyze_parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
+    
+    # Q&A command
+    qa_parser = subparsers.add_parser('qa', help='Q&A mode only')
+    qa_parser.add_argument('--model', default='gemma3:4b', help='Ollama model to use')
+    qa_parser.add_argument('--neo4j-password', default='orion123', help='Neo4j password')
+    
+    # Info commands
+    subparsers.add_parser('models', help='Show model information')
+    subparsers.add_parser('modes', help='Show processing modes')
+    
+    args = parser.parse_args()
+    
+    # Show banner
+    print_banner()
+    
+    # Handle commands
+    if args.command == 'analyze':
+        # Import here to avoid loading if just showing help
+        from run_pipeline import run_pipeline
+        
+        # Determine config
+        config = 'balanced'
+        if args.fast:
+            config = 'fast'
+        elif args.accurate:
+            config = 'accurate'
+        
+        console.print(f"\n[bold]Analyzing:[/bold] [cyan]{args.video}[/cyan]")
+        console.print(f"[bold]Mode:[/bold] [yellow]{config}[/yellow]\n")
+        
+        # Run pipeline
+        results = run_pipeline(
+            video_path=args.video,
+            output_dir=args.output,
+            neo4j_password=args.neo4j_password,
+            clear_db=not args.keep_db,
+            part1_config=config,
+            part2_config=config,
+            skip_part1=args.skip_perception,
+            skip_part2=args.skip_graph,
+            verbose=args.verbose
+        )
+        
+        # Start Q&A if requested
+        if args.interactive and results.get('success'):
+            console.print("\n[bold cyan]Starting Q&A mode...[/bold cyan]\n")
+            try:
+                from video_qa import VideoQASystem
+                qa = VideoQASystem(neo4j_password=args.neo4j_password)
+                qa.start_interactive_session()
+            except ImportError:
+                console.print("[red]Q&A not available. Install: pip install ollama[/red]")
+    
+    elif args.command == 'qa':
+        console.print("\n[bold cyan]Starting Q&A mode...[/bold cyan]\n")
+        try:
+            from video_qa import VideoQASystem
+            qa = VideoQASystem(
+                neo4j_password=args.neo4j_password,
+                model=args.model
+            )
+            qa.start_interactive_session()
+        except ImportError:
+            console.print("[red]Q&A not available. Install: pip install ollama[/red]")
+    
+    elif args.command == 'models':
+        show_models()
+    
+    elif args.command == 'modes':
+        show_modes()
+    
+    else:
+        parser.print_help()
+
+
+if __name__ == '__main__':
+    main()

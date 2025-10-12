@@ -278,9 +278,9 @@ def update_neo4j_credentials(uri: str = None, user: str = None, password: str = 
 def use_neo4j_docker():
     """Configure for Neo4j running in Docker"""
     update_neo4j_credentials(
-        uri="bolt://localhost:7687",
+        uri="neo4j://127.0.0.1:7687",
         user="neo4j",
-        password="test1234"
+        password="orion123"
     )
     print("\nConfigured for Neo4j Docker (default setup)")
 
@@ -288,9 +288,9 @@ def use_neo4j_docker():
 def use_neo4j_desktop():
     """Configure for Neo4j Desktop"""
     update_neo4j_credentials(
-        uri="bolt://localhost:7687",
+        uri="neo4j://127.0.0.1:7687",
         user="neo4j",
-        password="password"
+        password="orion123"
     )
     print("\nConfigured for Neo4j Desktop (default setup)")
 

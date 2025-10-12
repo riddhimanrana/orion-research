@@ -41,11 +41,11 @@ except ImportError:
     print("Warning: hdbscan not available. Install with: pip install hdbscan")
 
 try:
-    from sentence_transformers import SentenceTransformer
-    SENTENCE_TRANSFORMERS_AVAILABLE = True
+    from embedding_model import create_embedding_model
+    EMBEDDING_MODEL_AVAILABLE = True
 except ImportError:
-    SENTENCE_TRANSFORMERS_AVAILABLE = False
-    print("Warning: sentence-transformers not available. Install with: pip install sentence-transformers")
+    EMBEDDING_MODEL_AVAILABLE = False
+    print("Warning: embedding_model not available. Ensure embedding_model.py is present.")
 
 
 # ============================================================================
@@ -64,7 +64,8 @@ class Config:
     
     # State Change Detection
     STATE_CHANGE_THRESHOLD = 0.85  # Cosine similarity threshold
-    SENTENCE_MODEL = 'all-MiniLM-L6-v2'  # Sentence transformer model
+    EMBEDDING_MODEL_TYPE = 'embeddinggemma'  # 'embeddinggemma' (Ollama) or 'sentence-transformer'
+    SENTENCE_MODEL_FALLBACK = 'all-MiniLM-L6-v2'  # Fallback if embeddinggemma unavailable
     
     # Temporal Windowing
     TIME_WINDOW_SIZE = 30.0  # seconds
@@ -72,15 +73,15 @@ class Config:
     
     # LLM Event Composition (Ollama)
     OLLAMA_API_URL = "http://localhost:11434/api/generate"
-    OLLAMA_MODEL = "llama3"
+    OLLAMA_MODEL = "gemma3-1b"
     OLLAMA_TEMPERATURE = 0.3  # More deterministic for structured output
     OLLAMA_MAX_TOKENS = 2000
     OLLAMA_TIMEOUT = 60  # seconds
     
     # Neo4j Configuration
-    NEO4J_URI = "bolt://localhost:7687"
+    NEO4J_URI = "neo4j://127.0.0.1:7687"
     NEO4J_USER = "neo4j"
-    NEO4J_PASSWORD = "password"
+    NEO4J_PASSWORD = "orion123"  # Local Neo4j password
     NEO4J_DATABASE = "neo4j"
     MAX_CONNECTION_LIFETIME = 3600
     MAX_CONNECTION_POOL_SIZE = 50
@@ -367,18 +368,21 @@ class StateChangeDetector:
         self.state_changes: List[StateChange] = []
         
     def load_model(self):
-        """Load sentence transformer model"""
-        if not SENTENCE_TRANSFORMERS_AVAILABLE:
-            logger.error("Sentence transformers not available")
+        """Load embedding model (EmbeddingGemma or SentenceTransformer)"""
+        if not EMBEDDING_MODEL_AVAILABLE:
+            logger.error("Embedding model not available")
             return False
         
         try:
-            logger.info(f"Loading sentence transformer model: {Config.SENTENCE_MODEL}")
-            self.model = SentenceTransformer(Config.SENTENCE_MODEL)
-            logger.info("Model loaded successfully")
+            logger.info(f"Loading embedding model: {Config.EMBEDDING_MODEL_TYPE}")
+            self.model = create_embedding_model(
+                prefer_ollama=(Config.EMBEDDING_MODEL_TYPE == 'embeddinggemma')
+            )
+            model_info = self.model.get_model_info()
+            logger.info(f"✓ Model loaded: {model_info['model_name']} (type={model_info['type']}, dim={model_info['dimension']})")
             return True
         except Exception as e:
-            logger.error(f"Failed to load sentence transformer: {e}")
+            logger.error(f"Failed to load embedding model: {e}")
             return False
     
     def compute_similarity(self, desc1: str, desc2: str) -> float:
@@ -396,8 +400,8 @@ class StateChangeDetector:
             return 1.0  # No change if model not available
         
         try:
-            embeddings = self.model.encode([desc1, desc2])
-            # Compute cosine similarity
+            # Use the unified embedding model's similarity method
+            return self.model.compute_similarity(desc1, desc2)
             similarity = np.dot(embeddings[0], embeddings[1]) / (
                 np.linalg.norm(embeddings[0]) * np.linalg.norm(embeddings[1])
             )
@@ -749,15 +753,15 @@ Your Cypher queries:
         """
         queries = []
         
-        # Create entity nodes
+        # Create entity nodes (skip descriptions in fallback mode to avoid syntax errors)
         for entity_id in window.active_entities:
             entity = entity_tracker.get_entity(entity_id)
-            if entity and entity.appearances:
-                first_desc = entity.appearances[0].get('rich_description', '')
+            if entity:
+                # Escape apostrophes and special characters in label
+                safe_label = entity.object_class.replace("'", "\\'").replace('"', '\\"')
                 queries.append(
                     f"MERGE (e:Entity {{id: '{entity_id}'}}) "
-                    f"SET e.label = '{entity.object_class}', "
-                    f"e.first_description = '{first_desc[:100]}...';"
+                    f"SET e.label = '{safe_label}';"
                 )
         
         # Create event nodes for state changes
@@ -1003,10 +1007,14 @@ class KnowledgeGraphBuilder:
                     else:
                         embedding = []
                     
-                    # Get first description
+                    # Get first description safely
                     first_desc = ""
-                    if entity.appearances:
-                        first_desc = entity.appearances[0].get('rich_description', '')
+                    if entity.appearances and len(entity.appearances) > 0:
+                        first_appearance = entity.appearances[0]
+                        if isinstance(first_appearance, dict):
+                            first_desc = first_appearance.get('rich_description', '')
+                        elif hasattr(first_appearance, 'rich_description'):
+                            first_desc = first_appearance.rich_description
                     
                     # Create/merge entity node
                     query = """
@@ -1024,9 +1032,9 @@ class KnowledgeGraphBuilder:
                         'label': entity.object_class,
                         'first_seen': entity.first_timestamp,
                         'last_seen': entity.last_timestamp,
-                        'appearance_count': len(entity.appearances),
+                        'appearance_count': len(entity.appearances) if entity.appearances else 0,
                         'embedding': embedding,
-                        'first_description': first_desc[:500]  # Truncate long descriptions
+                        'first_description': first_desc[:500] if first_desc else ""  # Truncate long descriptions
                     })
                     
                     successful += 1

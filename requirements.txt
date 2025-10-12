@@ -33,7 +33,7 @@ joblib==1.5.2
 kiwisolver==1.4.9
 latex2mathml==3.78.1
 # Editable install with no version control (llava==1.2.2.post1)
--e /Users/riddhiman.rana/Desktop/Coding/orion-research/ml-fastvlm
+# -e /Users/riddhiman.rana/Desktop/Coding/orion-research/ml-fastvlm
 markdown-it-py==4.0.0
 markdown2==2.5.4
 MarkupSafe==2.1.5
