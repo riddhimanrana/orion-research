@@ -355,6 +355,5 @@ See LICENSE file for details.
 
 ---
 
-**Made with ❤️ by the Orion team**
 
 For issues: Check logs in `data/testing/pipeline.log`
