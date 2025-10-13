@@ -25,33 +25,6 @@ cd orion-research
 conda create -n orion python=3.10 -y
 conda activate orion
 
-# Orion
-
-[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/release/python-3100/)
-[![License](https://img.shields.io/badge/license-MIT-green)](https://opensource.org/licenses/MIT)
-[![Ollama](https://img.shields.io/badge/ollama-local%20LLM-blue)](https://ollama.com)
-[![Neo4j](https://img.shields.io/badge/neo4j-optional-blue)](https://neo4j.com)
-
-Orion turns videos into a simple knowledge graph you can query in plain English. It detects objects, describes scenes, tracks changes over time, and stores events in Neo4j. A local LLM (via Ollama) answers questions grounded by this graph.
-
-## Requirements
-
-- macOS or Linux
-- Python 3.10+
-- Ollama (local LLM)
-- Neo4j (optional; for graph storage/visualization)
-
-## Install
-
-```bash
-# Clone
-git clone https://github.com/riddhimanrana/orion-research
-cd orion-research
-
-# Environment (example with conda)
-conda create -n orion python=3.10 -y
-conda activate orion
-
 # Install
 pip install -e .
 ```
