@@ -7,6 +7,7 @@ Transform videos into queryable knowledge graphs
 import sys
 import argparse
 from pathlib import Path
+import time
 
 # Add production directory to path
 sys.path.insert(0, str(Path(__file__).parent / 'production'))
@@ -26,12 +27,22 @@ console = Console()
 def print_banner():
     """Prints the final, proportionally balanced Orion banner."""
     
+    # Add some top spacing and animation (reduced)
+    console.print("\n")
+    
+    # Simple loading animation
+    with console.status("[bold purple]Initializing Orion...", spinner="dots"):
+        time.sleep(0.8)
+    
+    console.print()
+    
     # A precise color palette based on the logo
     outer_ring = "#8645F7"
     inner_fill = "#8645F7"
     lines_shade = "#9D66FF" # A lighter purple for the horizontal line texture
     sphere_fill = "#DFE8FF"
     sphere_highlight = "#FDFEFF"
+    text_white = "white"  # White for ORION text
 
     # A new, compact ASCII logo, designed to match the height of the text.
     logo_art = [
@@ -55,7 +66,7 @@ def print_banner():
 
     # Create renderable objects from the art
     logo = Group(*(Text.from_markup(line) for line in logo_art))
-    orion_text = Text("\n".join(text_lines), style=f"bold {inner_fill}")
+    orion_text = Text("\n".join(text_lines), style=f"bold {text_white}")
 
     # Use a grid to perfectly align the art and text
     grid = Table.grid(expand=False, padding=(0, 4))
@@ -63,23 +74,22 @@ def print_banner():
     grid.add_column()
     grid.add_row(logo, orion_text)
 
-    # Group the grid and tagline for centering
+    # Create a table to center both version and tagline text within the logo/text width
+    subtitle_table = Table.grid(expand=False, padding=(0, 4))
+    subtitle_table.add_column(justify="center", width=50)  # Approximate width of logo+text
+    subtitle_table.add_row(Text("CLI Version 0.1.0", style="dim"))
+    subtitle_table.add_row(Text("Local Visual Intelligence at Speed", style=f"italic {outer_ring}"))
+
+    # Group everything together
     render_group = Group(
-        Align.center(grid),
-        Align.center(Text("\nLocal visual intelligence at speed", style="dim"))
+        grid,
+        Text(""),  # Small spacing
+        subtitle_table
     )
 
-    # Use Panel.fit to create a perfectly sized border
-    console.print(
-        Panel.fit(
-            render_group,
-            box=box.HEAVY,
-            border_style=outer_ring,
-            title=f"[bold {inner_fill}]ORION[/]",
-            title_align="center",
-            padding=(1, 4)
-        )
-    )
+    # Print without panel/box
+    console.print(render_group)
+    console.print()  # Add spacing after banner
 
 
 def show_models():
@@ -155,6 +165,9 @@ For more help: orion <command> --help
     subparsers.add_parser('models', help='Show model information')
     subparsers.add_parser('modes', help='Show processing modes')
     
+    # Init command
+    subparsers.add_parser('init', help='Initialize Orion (download models, setup environment)')
+    
     args = parser.parse_args()
     
     # Show banner only if a command is given
@@ -216,6 +229,16 @@ For more help: orion <command> --help
     
     elif args.command == 'modes':
         show_modes()
+    
+    elif args.command == 'init':
+        import subprocess
+        init_script = Path(__file__).parent / 'scripts' / 'init.py'
+        if init_script.exists():
+            console.print("\n[bold cyan]Running initialization...[/bold cyan]\n")
+            subprocess.run([sys.executable, str(init_script)])
+        else:
+            console.print("[red]Init script not found![/red]")
+            console.print(f"Expected: {init_script}")
     
     else:
         # Show banner and help if no command is given

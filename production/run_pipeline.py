@@ -56,11 +56,11 @@ def setup_logging(verbose: bool = False):
     """Setup clean logging"""
     level = logging.DEBUG if verbose else logging.INFO
     
-    # Only log to file, not console (we use rich for console)
+    # Configure logging (console only, no file logging)
     logging.basicConfig(
         level=level,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[logging.FileHandler('pipeline.log', mode='w')]
+        handlers=[logging.StreamHandler()]
     )
     
     # Silence noisy libraries

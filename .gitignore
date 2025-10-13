@@ -3,6 +3,7 @@
 /models
 yolo11m.pt
 *.pt
+pipeline.log
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
