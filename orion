@@ -27,18 +27,18 @@ def print_banner():
     """Prints the final, proportionally balanced Orion banner."""
     
     # A precise color palette based on the logo
-    outer_ring = "#8e44ad"
-    inner_fill = "#9b59b6"
-    lines_shade = "#af7ac5" # A lighter purple for the horizontal line texture
-    sphere_fill = "#e5e7e9"
-    sphere_highlight = "#fdfefe"
+    outer_ring = "#8645F7"
+    inner_fill = "#8645F7"
+    lines_shade = "#9D66FF" # A lighter purple for the horizontal line texture
+    sphere_fill = "#DFE8FF"
+    sphere_highlight = "#FDFEFF"
 
     # A new, compact ASCII logo, designed to match the height of the text.
     logo_art = [
         f"   [bold {outer_ring}]██████[/]",
         f" [bold {outer_ring}]██[{inner_fill}]▓▓▓▓▓▓[{outer_ring}]██[/]",
-        f"[bold {outer_ring}]██[{inner_fill}]▓▓[{lines_shade}]▒▒[{sphere_fill}]██[{sphere_highlight}]▒[{lines_shade}]▒▒[{inner_fill}]▓▓[{outer_ring}]██[/]",
-        f"[bold {outer_ring}]██[{inner_fill}]▓▓[{lines_shade}]▒▒[{sphere_fill}]██[{sphere_highlight}]▒[{lines_shade}]▒▒[{inner_fill}]▓▓[{outer_ring}]██[/]",
+        f"[bold {outer_ring}]██[{inner_fill}]▓[{lines_shade}]▒[{sphere_highlight}]██[{sphere_fill}]▓▓[{lines_shade}]▒[{inner_fill}]▓[{outer_ring}]██[/]",
+        f"[bold {outer_ring}]██[{inner_fill}]▓[{lines_shade}]▒[{sphere_fill}]▓▓[{sphere_fill}]▓▓[{lines_shade}]▒[{inner_fill}]▓[{outer_ring}]██[/]",
         f" [bold {outer_ring}]██[{inner_fill}]▓▓▓▓▓▓[{outer_ring}]██[/]",
         f"   [bold {outer_ring}]██████[/]",
     ]
@@ -66,7 +66,7 @@ def print_banner():
     # Group the grid and tagline for centering
     render_group = Group(
         Align.center(grid),
-        Align.center(Text("\nVideo → Knowledge Graph → Q&A", style="dim"))
+        Align.center(Text("\nLocal visual intelligence at speed", style="dim"))
     )
 
     # Use Panel.fit to create a perfectly sized border
@@ -117,7 +117,7 @@ def show_modes():
 def main():
     parser = argparse.ArgumentParser(
         prog='orion',
-        description='Orion Video Analysis Pipeline - Transform videos into knowledge',
+        description='Orion Video Analysis Pipeline CLI',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
