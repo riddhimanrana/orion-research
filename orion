@@ -31,7 +31,7 @@ def print_banner():
     console.print("\n")
     
     # Simple loading animation
-    with console.status("[bold purple]Initializing Orion...", spinner="dots"):
+    with console.status("[#8645F7]Initializing Orion...", spinner="dots"):
         time.sleep(0.8)
     
     console.print()
