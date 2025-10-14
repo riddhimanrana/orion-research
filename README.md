@@ -14,6 +14,8 @@ Orion turns videos into a simple knowledge graph you can query in plain English.
 - Ollama (local LLM)
 - Neo4j (optional; for graph storage/visualization)
 
+Runtime note: Orion ships a single PyTorch backend that auto-picks CPU, Apple MPS, or CUDA; there is no separate MLX build to maintain across platforms.
+
 ## Quick Start (one command)
 
 ```bash

@@ -165,7 +165,6 @@ class ModelManager:
                 repo_id=asset.huggingface_repo,
                 revision=asset.huggingface_revision,
                 local_dir=str(target_dir),
-                local_dir_use_symlinks=False,
                 allow_patterns=list(asset.allow_patterns) if asset.allow_patterns else None,
             )
         elif asset.url:
