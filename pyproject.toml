@@ -2,6 +2,12 @@
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [project]
 name = "orion-research"
 version = "0.1.0"
@@ -47,3 +53,6 @@ Homepage = "https://orionlive.ai/research"
 Repository = "https://github.com/riddhimanrana/orion-research"
 Issues = "https://github.com/riddhimanrana/orion-research/issues"
 Documentation = "https://github.com/riddhimanrana/orion-research#readme"
+
+[project.scripts]
+orion = "orion.cli:main"

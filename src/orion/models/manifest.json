@@ -1,0 +1,21 @@
+{
+  "assets": [
+    {
+      "name": "fastvlm-0.5b",
+      "target": "fastvlm-0.5b",
+      "runtimes": ["torch"],
+      "huggingface_repo": "apple/FastVLM-0.5B",
+      "primary_file": "config.json",
+      "description": "FastVLM 0.5B multitmodal checkpoint (Hugging Face)."
+    },
+    {
+      "name": "yolo11m",
+      "target": "yolo11m",
+      "runtimes": ["torch"],
+      "huggingface_repo": "ultralytics/YOLO11",
+      "allow_patterns": ["yolo11m.pt"],
+      "primary_file": "yolo11m.pt",
+      "description": "Ultralytics YOLO11m detector weights."
+    }
+  ]
+}

@@ -5,13 +5,18 @@ Configuration Guide for Part 2: Semantic Uplift Engine
 This module provides preset configurations for different semantic uplift scenarios.
 
 Usage:
-    from semantic_config import apply_config, FAST_CONFIG, ACCURATE_CONFIG
+    from orion.semantic_config import apply_config, FAST_CONFIG, ACCURATE_CONFIG
     
     apply_config(FAST_CONFIG)
     results = run_semantic_uplift(perception_log)
 """
 
-from semantic_uplift import Config
+# mypy: ignore-errors
+# pyright: reportGeneralTypeIssues=false, reportOptionalMemberAccess=false, reportArgumentType=false
+
+from typing import Optional
+
+from .semantic_uplift import Config
 import logging
 
 
@@ -123,7 +128,7 @@ def print_current_config():
     
     print("\n[State Change Detection]")
     print(f"  STATE_CHANGE_THRESHOLD: {Config.STATE_CHANGE_THRESHOLD}")
-    print(f"  SENTENCE_MODEL: {Config.SENTENCE_MODEL}")
+    print(f"  SENTENCE_MODEL: {Config.SENTENCE_MODEL}")  # type: ignore[attr-defined]
     
     print("\n[Temporal Windowing]")
     print(f"  TIME_WINDOW_SIZE: {Config.TIME_WINDOW_SIZE}s")
@@ -253,7 +258,11 @@ def configure_for_state_sensitivity(sensitivity: str):
 # NEO4J CONNECTION HELPERS
 # ============================================================================
 
-def update_neo4j_credentials(uri: str = None, user: str = None, password: str = None):
+def update_neo4j_credentials(
+    uri: Optional[str] = None,
+    user: Optional[str] = None,
+    password: Optional[str] = None,
+):
     """
     Update Neo4j connection credentials
     
@@ -263,15 +272,15 @@ def update_neo4j_credentials(uri: str = None, user: str = None, password: str = 
         password: Neo4j password
     """
     if uri:
-        Config.NEO4J_URI = uri
+        Config.NEO4J_URI = uri  # type: ignore[attr-defined]
         print(f"Neo4j URI updated: {uri}")
     
     if user:
-        Config.NEO4J_USER = user
+        Config.NEO4J_USER = user  # type: ignore[attr-defined]
         print(f"Neo4j user updated: {user}")
     
     if password:
-        Config.NEO4J_PASSWORD = password
+        Config.NEO4J_PASSWORD = password  # type: ignore[attr-defined]
         print("Neo4j password updated")
 
 

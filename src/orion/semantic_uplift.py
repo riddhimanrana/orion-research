@@ -12,6 +12,9 @@ Author: Orion Research Team
 Date: October 3, 2025
 """
 
+# mypy: ignore-errors
+# pyright: reportGeneralTypeIssues=false, reportOptionalMemberAccess=false, reportArgumentType=false
+
 import os
 import sys
 import time
@@ -37,13 +40,15 @@ try:
     import hdbscan
     HDBSCAN_AVAILABLE = True
 except ImportError:
+    hdbscan = None  # type: ignore[assignment]
     HDBSCAN_AVAILABLE = False
     print("Warning: hdbscan not available. Install with: pip install hdbscan")
 
 try:
-    from embedding_model import create_embedding_model
+    from .embedding_model import create_embedding_model
     EMBEDDING_MODEL_AVAILABLE = True
 except ImportError:
+    create_embedding_model = None  # type: ignore[assignment]
     EMBEDDING_MODEL_AVAILABLE = False
     print("Warning: embedding_model not available. Ensure embedding_model.py is present.")
 
@@ -151,11 +156,12 @@ class Entity:
             return
         
         embeddings = [np.array(obj['visual_embedding']) for obj in self.appearances]
-        self.average_embedding = np.mean(embeddings, axis=0)
-        # Normalize
-        norm = np.linalg.norm(self.average_embedding)
+        avg_embedding = np.mean(embeddings, axis=0)
+        avg_embedding = np.asarray(avg_embedding)
+        norm = float(np.linalg.norm(avg_embedding))
         if norm > 0:
-            self.average_embedding = self.average_embedding / norm
+            avg_embedding = avg_embedding / norm
+        self.average_embedding = avg_embedding
     
     def get_timeline(self) -> List[Dict[str, Any]]:
         """Get chronological timeline of appearances"""
@@ -376,6 +382,8 @@ class StateChangeDetector:
         
         try:
             logger.info(f"Loading embedding model: {Config.EMBEDDING_MODEL_TYPE}")
+            if create_embedding_model is None:  # type: ignore[truthy-function]
+                raise RuntimeError("Embedding model factory unavailable")
             self.model = create_embedding_model(
                 prefer_ollama=(Config.EMBEDDING_MODEL_TYPE == 'embeddinggemma')
             )
@@ -1113,14 +1121,17 @@ class KnowledgeGraphBuilder:
         with self.driver.session() as session:
             # Count nodes
             result = session.run("MATCH (e:Entity) RETURN count(e) as count")
-            stats['entity_nodes'] = result.single()['count']
+            record = result.single()
+            stats['entity_nodes'] = record['count'] if record else 0
             
             result = session.run("MATCH (ev:Event) RETURN count(ev) as count")
-            stats['event_nodes'] = result.single()['count']
+            record = result.single()
+            stats['event_nodes'] = record['count'] if record else 0
             
             # Count relationships
             result = session.run("MATCH ()-[r]->() RETURN count(r) as count")
-            stats['relationships'] = result.single()['count']
+            record = result.single()
+            stats['relationships'] = record['count'] if record else 0
         
         return stats
 

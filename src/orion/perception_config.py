@@ -6,18 +6,18 @@ This module provides easy-to-use configuration presets for different use cases.
 Import and apply these configurations before running the perception engine.
 
 Usage:
-    from perception_config import apply_config, FAST_CONFIG, ACCURATE_CONFIG
-    from perception_engine import DescriptionMode
+    from orion.perception_config import apply_config, FAST_CONFIG, ACCURATE_CONFIG
+    from orion.perception_engine import DescriptionMode
     
     apply_config(FAST_CONFIG)
     perception_log = run_perception_engine(video_path)
     
     # Or switch description modes:
-    from perception_config import set_description_mode
+    from orion.perception_config import set_description_mode
     set_description_mode(DescriptionMode.OBJECT)  # SCENE, OBJECT, or HYBRID
 """
 
-from perception_engine import Config, DescriptionMode
+from .perception_engine import Config, DescriptionMode
 import logging
 
 
@@ -257,7 +257,7 @@ def set_description_mode(mode: DescriptionMode):
           * Cons: Most expensive (1 + N FastVLM calls per frame)
           * Best for: Complete knowledge graphs, rich queries
     """
-    Config.DESCRIPTION_MODE = mode
+    Config.DESCRIPTION_MODE = mode  # type: ignore[attr-defined]
     print(f"Description mode set to: {mode.value.upper()}")
     print(f"  - FastVLM calls per frame: ", end="")
     if mode == DescriptionMode.SCENE:

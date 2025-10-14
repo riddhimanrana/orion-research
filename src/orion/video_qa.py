@@ -13,7 +13,7 @@ from neo4j.exceptions import Neo4jError
 
 import ollama
 
-from embedding_model import create_embedding_model
+from .embedding_model import create_embedding_model
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +21,16 @@ logger = logging.getLogger(__name__)
 class VideoQASystem:
     """Interactive question answering system for analyzed videos"""
     
-    def __init__(self, 
-                 neo4j_uri: str = "neo4j://127.0.0.1:7687",
-                 neo4j_user: str = "neo4j",
-                 neo4j_password: str = "password",
-                 model: str = "gemma3:4b"):
+    def __init__(
+        self,
+        neo4j_uri: str = "neo4j://127.0.0.1:7687",
+        neo4j_user: str = "neo4j",
+        neo4j_password: str = "orion123",
+        model: str = "gemma3:4b",
+        embedding_backend: str = "auto",
+        embedding_model: str = "embeddinggemma",
+        embedding_fallback: str = "all-MiniLM-L6-v2",
+    ):
         """
         Initialize QA system
         
@@ -34,6 +39,9 @@ class VideoQASystem:
             neo4j_user: Neo4j username
             neo4j_password: Neo4j password
             model: Ollama model to use (gemma3:4b for better quality)
+            embedding_backend: Embedding backend ('auto', 'ollama', or 'sentence-transformer')
+            embedding_model: Preferred embedding model identifier
+            embedding_fallback: Sentence-transformer fallback when using auto embeddings
         """
         self.neo4j_uri = neo4j_uri
         self.neo4j_user = neo4j_user
@@ -41,6 +49,9 @@ class VideoQASystem:
         self.model = model
         self.driver: Optional[Driver] = None
         self.embedding_model: Optional[Any] = None
+        self.embedding_backend_choice = embedding_backend
+        self.embedding_model_name = embedding_model
+        self.embedding_fallback_name = embedding_fallback
         self.vector_index_name = "entity_embedding"
         self.vector_search_enabled = True
         self.vector_index_dimensions: Optional[int] = None
@@ -66,7 +77,19 @@ class VideoQASystem:
             return True
 
         try:
-            self.embedding_model = create_embedding_model(prefer_ollama=True)
+            prefer_ollama = self.embedding_backend_choice in {"auto", "ollama"}
+            self.embedding_model = create_embedding_model(
+                prefer_ollama=prefer_ollama,
+                backend=self.embedding_backend_choice,
+                model=self.embedding_model_name,
+                fallback=self.embedding_fallback_name,
+            )
+            model_obj = self.embedding_model
+            if model_obj is not None:
+                try:
+                    self.vector_index_dimensions = model_obj.get_embedding_dimension()
+                except Exception:  # pragma: no cover - dimension query failed
+                    self.vector_index_dimensions = None
             return True
         except Exception as exc:
             logger.warning(

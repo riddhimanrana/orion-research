@@ -10,18 +10,13 @@ Complete video understanding pipeline with:
 Author: Orion Research Team
 """
 
-import os
-import sys
 import json
 import time
 import logging
 import argparse
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any
-
-# Add production directory to path
-sys.path.insert(0, str(Path(__file__).parent))
+from typing import Any, Dict, Optional, Tuple
 
 from rich.console import Console
 from rich.panel import Panel
@@ -30,23 +25,37 @@ from rich.table import Table
 from rich import print as rprint
 
 # Import pipeline components
-from perception_engine import run_perception_engine
-from semantic_uplift import run_semantic_uplift
-from neo4j_manager import clear_neo4j_for_new_run
-
-# Import Q&A system (optional)
+from .perception_engine import run_perception_engine
+from .semantic_uplift import run_semantic_uplift
+from .neo4j_manager import clear_neo4j_for_new_run
+from .models import ModelManager
 try:
-    from video_qa import VideoQASystem
+    from .runtime import BackendName, get_active_backend, select_backend, set_active_backend
+except ImportError:  # pragma: no cover
+    BackendName = str  # type: ignore[assignment,misc]
+    from .runtime import get_active_backend, select_backend, set_active_backend
+
+VideoQASystem: Any
+
+try:
+    from .video_qa import VideoQASystem as _VideoQASystem
+    VideoQASystem = _VideoQASystem
     QA_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover
+    VideoQASystem = None
     QA_AVAILABLE = False
 
 # Configurations
+apply_part1_config: Any
+apply_part2_config: Any
+
 try:
-    from perception_config import apply_config as apply_part1_config
-    from semantic_config import apply_config as apply_part2_config
+    from .perception_config import apply_config as apply_part1_config
+    from .semantic_config import apply_config as apply_part2_config
     CONFIGS_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover
+    apply_part1_config = None
+    apply_part2_config = None
     CONFIGS_AVAILABLE = False
 
 console = Console()
@@ -81,17 +90,42 @@ def print_banner():
     console.print(banner)
 
 
+def _resolve_runtime(preferred: Optional[str]) -> Tuple[BackendName, ModelManager]:
+    normalized: Optional[str] = preferred.lower() if preferred else None
+    if normalized == "auto":
+        normalized = None
+    if normalized is not None and normalized not in {"mlx", "torch"}:
+        raise ValueError(f"Unsupported runtime preference '{preferred}'.")
+
+    active_backend = get_active_backend()
+    if normalized in {"mlx", "torch"}:
+        backend = select_backend(normalized)
+    elif active_backend is not None:
+        backend = active_backend
+    else:
+        backend = select_backend(None)
+
+    set_active_backend(backend)
+    manager = ModelManager()
+    if not manager.assets_ready(backend):
+        console.print(f"[yellow]Preparing model assets for runtime '{backend}'...[/yellow]")
+        manager.ensure_runtime_assets(backend)
+    return backend, manager
+
+
 def run_pipeline(
     video_path: str,
     output_dir: str = "data/testing",
     neo4j_uri: str = "neo4j://127.0.0.1:7687",
+    neo4j_user: str = "neo4j",
     neo4j_password: str = "orion123",
     clear_db: bool = True,
     part1_config: str = "balanced",
     part2_config: str = "balanced",
     skip_part1: bool = False,
     skip_part2: bool = False,
-    verbose: bool = False
+    verbose: bool = False,
+    runtime: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Run complete video analysis pipeline
@@ -100,6 +134,7 @@ def run_pipeline(
         video_path: Path to input video
         output_dir: Directory for output files
         neo4j_uri: Neo4j database URI
+    neo4j_user: Neo4j username
         neo4j_password: Neo4j password
         clear_db: Whether to clear Neo4j before running
         part1_config: Configuration for perception engine (fast/balanced/accurate)
@@ -123,10 +158,14 @@ def run_pipeline(
     }
     
     try:
+        backend, _ = _resolve_runtime(runtime)
+        results['runtime'] = backend
+        console.print(f"[dim]Runtime backend: {backend}[/dim]")
+
         # Clear Neo4j if requested
         if clear_db and not skip_part2:
             with console.status("[yellow]Clearing Neo4j database...[/yellow]"):
-                if clear_neo4j_for_new_run(neo4j_uri, "neo4j", neo4j_password):
+                if clear_neo4j_for_new_run(neo4j_uri, neo4j_user, neo4j_password):
                     console.print("✓ [green]Neo4j cleared[/green]")
                 else:
                     console.print("⚠ [yellow]Could not clear Neo4j (may not be running)[/yellow]")
@@ -140,13 +179,13 @@ def run_pipeline(
             # Apply configuration
             if CONFIGS_AVAILABLE:
                 if part1_config == 'fast':
-                    from perception_config import FAST_CONFIG
+                    from .perception_config import FAST_CONFIG
                     apply_part1_config(FAST_CONFIG)
                 elif part1_config == 'accurate':
-                    from perception_config import ACCURATE_CONFIG
+                    from .perception_config import ACCURATE_CONFIG
                     apply_part1_config(ACCURATE_CONFIG)
                 else:  # balanced
-                    from perception_config import BALANCED_CONFIG
+                    from .perception_config import BALANCED_CONFIG
                     apply_part1_config(BALANCED_CONFIG)
                 console.print(f"[dim]Using {part1_config} mode[/dim]\n")
             
@@ -186,13 +225,13 @@ def run_pipeline(
             # Apply configuration
             if CONFIGS_AVAILABLE:
                 if part2_config == 'fast':
-                    from semantic_config import FAST_CONFIG as SEM_FAST
+                    from .semantic_config import FAST_CONFIG as SEM_FAST
                     apply_part2_config(SEM_FAST)
                 elif part2_config == 'accurate':
-                    from semantic_config import ACCURATE_CONFIG as SEM_ACCURATE
+                    from .semantic_config import ACCURATE_CONFIG as SEM_ACCURATE
                     apply_part2_config(SEM_ACCURATE)
                 else:  # balanced
-                    from semantic_config import BALANCED_CONFIG as SEM_BALANCED
+                    from .semantic_config import BALANCED_CONFIG as SEM_BALANCED
                     apply_part2_config(SEM_BALANCED)
                 console.print(f"[dim]Using {part2_config} mode[/dim]\n")
             
@@ -208,7 +247,7 @@ def run_pipeline(
                     raise ValueError("No perception logs found. Run Part 1 first!")
                 perception_log_path = str(logs[-1])
             
-            uplift_results = run_semantic_uplift(
+            uplift_results = run_semantic_uplift(  # type: ignore[arg-type]
                 perception_log_path,
                 neo4j_uri=neo4j_uri,
                 neo4j_password=neo4j_password

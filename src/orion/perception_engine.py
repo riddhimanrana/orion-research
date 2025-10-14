@@ -11,12 +11,9 @@ Models Used:
 - Object Detection: YOLO11m (ultralytics) - 80 COCO classes, 20.1M params
 - Scene Detection: FastViT-T8 (timm) - Lightweight vision transformer
 - Visual Embeddings: ResNet50 (timm) - 512-dim feature vectors
-- Description Generation: FastVLM-0.5B (custom fine-tuned, MLX format)
-  * Location: models/fastvlm-0.5b-captions/
-  * Format: MLX (Apple Silicon optimized)
-  * Vision encoder: CoreML FastViTHD (.mlpackage)
-  * Language model: MLX 4-bit quantized
-  * Framework: mlx-vlm with FastVLM patch
+- Description Generation: FastVLM-0.5B (apple/FastVLM-0.5B via Hugging Face transformers)
+All model weights are cached under the repository's ``models/`` directory via the shared
+asset manager so runs remain self-contained.
 
 Author: Orion Research Team
 Date: January 2025
@@ -29,19 +26,29 @@ import logging
 import multiprocessing as mp
 from multiprocessing import Queue, Process, Manager
 from queue import Empty as QueueEmpty
-from typing import List, Dict, Optional, Tuple, Any
+from typing import List, Dict, Optional, Tuple, Any, TYPE_CHECKING, cast
 from dataclasses import dataclass, field, asdict
-from pathlib import Path
 from enum import Enum
 import warnings
+from collections.abc import MutableSequence
 
-# Set multiprocessing start method to 'spawn' for CoreML/MLX compatibility
-# CRITICAL: CoreML and MLX models DO NOT work properly with 'fork' on macOS
-# 'fork' copies the parent's memory, which breaks Metal/CoreML compute resources
+try:  # Local import works both as package and script
+    from .models import ModelManager as AssetManager
+except ImportError:  # pragma: no cover
+    from models import ModelManager as AssetManager  # type: ignore
+
+try:
+    from .runtime import get_active_backend, select_backend
+except ImportError:  # pragma: no cover
+    from runtime import get_active_backend, select_backend  # type: ignore
+
+# Set multiprocessing start method to 'spawn' for accelerator compatibility
+# CRITICAL: GPU/Metal-backed models often fail with 'fork' on macOS
+# 'fork' copies the parent's memory, which can break driver state and tensor cores
 # 'spawn' starts fresh processes, allowing models to initialize properly
 try:
     mp.set_start_method('spawn', force=True)
-    logging.info("Set multiprocessing start method to 'spawn' for CoreML/MLX compatibility")
+    logging.info("Set multiprocessing start method to 'spawn' for accelerator compatibility")
 except RuntimeError:
     # Already set
     pass
@@ -53,11 +60,25 @@ import torch.nn.functional as F
 from PIL import Image
 from tqdm import tqdm
 
+if TYPE_CHECKING:
+    from multiprocessing.synchronize import Event as SyncEvent
+else:  # pragma: no cover
+    SyncEvent = Any  # type: ignore[assignment]
+
 # Suppress warnings for cleaner output
 warnings.filterwarnings('ignore')
 
 # Fix tokenizers parallelism warning (must be set before importing tokenizers)
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+
+_ASSET_MANAGER: Optional[AssetManager] = None
+
+
+def _get_asset_manager() -> AssetManager:
+    global _ASSET_MANAGER
+    if _ASSET_MANAGER is None:
+        _ASSET_MANAGER = AssetManager()
+    return _ASSET_MANAGER
 
 # ============================================================================
 # CONFIGURATION CONSTANTS
@@ -174,7 +195,7 @@ class RichPerceptionObject:
 # MODEL LOADING UTILITIES
 # ============================================================================
 
-class ModelManager:
+class PerceptionModelManager:
     """
     Manages loading and caching of all required models
     """
@@ -184,14 +205,15 @@ class ModelManager:
     
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(ModelManager, cls).__new__(cls)
+            cls._instance = super(PerceptionModelManager, cls).__new__(cls)
         return cls._instance
     
     def __init__(self):
+        self.asset_manager: AssetManager = _get_asset_manager()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         logger.info(f"Using device: {self.device}")
     
-    def get_scene_detector(self):
+    def get_scene_detector(self) -> Optional[Dict[str, Any]]:
         """Load FastViT model for scene change detection"""
         if not Config.USE_SCENE_DETECTION:
             logger.info("Scene detection disabled (USE_SCENE_DETECTION=False)")
@@ -200,6 +222,8 @@ class ModelManager:
         if 'scene_detector' not in self._models:
             try:
                 import timm
+                from timm.data.config import resolve_model_data_config
+                from timm.data.transforms_factory import create_transform
                 logger.info("Loading FastViT model for scene detection...")
                 
                 # Load lightweight FastViT model
@@ -208,8 +232,8 @@ class ModelManager:
                 model.eval()
                 
                 # Get the model's data configuration for preprocessing
-                data_config = timm.data.resolve_model_data_config(model)
-                transforms = timm.data.create_transform(**data_config, is_training=False)
+                data_config = resolve_model_data_config(model)
+                transforms = create_transform(**data_config, is_training=False)
                 
                 self._models['scene_detector'] = {
                     'model': model,
@@ -223,21 +247,23 @@ class ModelManager:
         
         return self._models.get('scene_detector')
     
-    def get_object_detector(self):
+    def get_object_detector(self) -> Any:
         """Load YOLO11m model for object detection"""
         if 'object_detector' not in self._models:
             try:
                 from ultralytics import YOLO
                 logger.info("Loading YOLO11m model...")
-                
-                # Load YOLO11m from models/weights directory
-                model_path = 'models/weights/yolo11m.pt'
-                if not os.path.exists(model_path):
-                    # Fall back to auto-download if not in models/weights
-                    model_path = 'yolo11m.pt'
-                
-                model = YOLO(model_path)
-                
+
+                asset_dir = self.asset_manager.ensure_asset("yolo11m")
+                model_path = asset_dir / "yolo11m.pt"
+                if not model_path.exists():
+                    raise FileNotFoundError(
+                        "YOLO11m weights were not downloaded correctly. "
+                        f"Expected to find {model_path}."
+                    )
+
+                model = YOLO(str(model_path))
+
                 self._models['object_detector'] = model
                 logger.info("✓ YOLO11m model loaded successfully")
                 logger.info(f"  Model: {model_path} (20.1M params, 80 COCO classes)")
@@ -246,13 +272,18 @@ class ModelManager:
                 logger.error("Install with: pip install ultralytics")
                 raise RuntimeError("Object detector is required for perception engine")
         
-        return self._models.get('object_detector')
+        result = self._models.get('object_detector')
+        if result is None:
+            raise RuntimeError("Object detector is not available")
+        return result
     
-    def get_embedding_model(self):
+    def get_embedding_model(self) -> Dict[str, Any]:
         """Load OSNet model for visual embeddings"""
         if 'embedding_model' not in self._models:
             try:
                 import timm
+                from timm.data.config import resolve_model_data_config
+                from timm.data.transforms_factory import create_transform
                 logger.info("Loading OSNet model for visual embeddings...")
                 
                 # Use a ResNet-based feature extractor as OSNet alternative
@@ -262,8 +293,8 @@ class ModelManager:
                 model.eval()
                 
                 # Create preprocessing transforms
-                data_config = timm.data.resolve_model_data_config(model)
-                transforms = timm.data.create_transform(**data_config, is_training=False)
+                data_config = resolve_model_data_config(model)
+                transforms = create_transform(**data_config, is_training=False)
                 
                 self._models['embedding_model'] = {
                     'model': model,
@@ -274,7 +305,10 @@ class ModelManager:
                 logger.error(f"Failed to load embedding model: {e}")
                 raise RuntimeError("Embedding model is required for perception engine")
         
-        return self._models.get('embedding_model')
+        result = self._models.get('embedding_model')
+        if result is None:
+            raise RuntimeError("Embedding model is not available")
+        return result
 
 
 # ============================================================================
@@ -286,10 +320,10 @@ class VideoFrameSelector:
     Handles intelligent frame selection using scene change detection
     """
     
-    def __init__(self, model_manager: ModelManager):
+    def __init__(self, model_manager: PerceptionModelManager):
         self.model_manager = model_manager
-        self.scene_detector = model_manager.get_scene_detector()
-        self.last_scene_embedding = None
+        self.scene_detector: Optional[Dict[str, Any]] = model_manager.get_scene_detector()
+        self.last_scene_embedding: Optional[np.ndarray] = None
         
     def load_video(self, video_path: str) -> Tuple[cv2.VideoCapture, Dict[str, Any]]:
         """
@@ -462,10 +496,17 @@ class RealTimeObjectProcessor:
     Fast object detection and visual embedding generation (Tier 1)
     """
     
-    def __init__(self, model_manager: ModelManager):
+    def __init__(self, model_manager: PerceptionModelManager):
         self.model_manager = model_manager
-        self.object_detector = model_manager.get_object_detector()
-        self.embedding_model = model_manager.get_embedding_model()
+        detector = model_manager.get_object_detector()
+        if detector is None:  # pragma: no cover - defensive
+            raise RuntimeError("Object detector failed to initialize")
+        self.object_detector: Any = detector
+
+        embedding_model = model_manager.get_embedding_model()
+        if embedding_model is None:  # pragma: no cover - defensive
+            raise RuntimeError("Embedding model failed to initialize")
+        self.embedding_model: Dict[str, Any] = embedding_model
         self.detection_count = 0
     
     def detect_objects(self, frame: np.ndarray) -> List[Dict[str, Any]]:
@@ -584,8 +625,8 @@ class RealTimeObjectProcessor:
         frame: np.ndarray,
         frame_number: int,
         timestamp: float,
-        background_queue: Queue,
-        shared_perception_log: List
+    background_queue: Queue,
+    shared_perception_log: MutableSequence[Dict[str, Any]]
     ) -> int:
         """
         Process single frame: detect objects, generate embeddings, queue for description
@@ -707,56 +748,62 @@ class RealTimeObjectProcessor:
 # ============================================================================
 
 # Global FastVLM model instance (loaded once per worker)
-_FASTVLM_MODEL = None
+_FASTVLM_MODEL: Optional[Any] = None
 
-def load_fastvlm_model():
-    """
-    Load custom fine-tuned FastVLM-MLX model (singleton pattern for worker processes)
-    
-    Uses the locally fine-tuned FastVLM-0.5B model optimized for captions (MLX format):
-    - Location: models/fastvlm-0.5b-captions/
-    - Format: MLX (Apple Silicon optimized)
-    - Vision encoder: CoreML FastViTHD (.mlpackage)
-    - Language model: MLX 4-bit quantized
-    
-    Returns:
-        FastVLMMLXWrapper instance or None if loading fails
-    """
+
+def load_fastvlm_model() -> Optional[Any]:
+    """Load the FastVLM Hugging Face model (shared across runtimes)."""
     global _FASTVLM_MODEL
-    
+
     if _FASTVLM_MODEL is not None:
         return _FASTVLM_MODEL
-    
+
+    backend = get_active_backend()
+    if backend is None:
+        backend = select_backend()
+
+    model_source: Optional[str] = (
+        os.getenv("ORION_FASTVLM_MODEL")
+        or os.getenv("ORION_FASTVLM_TORCH_MODEL")
+        or os.getenv("ORION_FASTVLM_TORCH_PATH")
+    )
+
+    from .backends.torch_fastvlm import FastVLMTorchWrapper, DEFAULT_MODEL_ID
+
+    asset_manager = _get_asset_manager()
+    asset_dir = asset_manager.get_asset_dir("fastvlm-0.5b")
+
+    if model_source is None:
+        try:
+            asset_manager.ensure_asset("fastvlm-0.5b")
+            model_source = str(asset_dir)
+        except Exception as asset_exc:  # pragma: no cover - handled below
+            logger.warning(
+                "FastVLM asset preparation failed locally (%s); falling back to Hugging Face streaming.",
+                asset_exc,
+            )
+            model_source = DEFAULT_MODEL_ID
+
+    logger.info(
+        "Loading FastVLM model '%s' via Hugging Face transformers (requested backend: %s)",
+        model_source,
+        backend,
+    )
+
     try:
-        from fastvlm_mlx_wrapper import FastVLMMLXWrapper
-        logger.info("Loading custom fine-tuned FastVLM-0.5B model (MLX format)...")
-        logger.info("  Model: models/fastvlm-0.5b-captions/ (MLX + CoreML)")
-        
-        # Get model path
-        model_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "models", "fastvlm-0.5b-captions"
+        _FASTVLM_MODEL = FastVLMTorchWrapper(
+            model_source=model_source,
+            cache_dir=asset_dir,
         )
-        
-        # Load MLX model (device is auto-managed by MLX)
-        _FASTVLM_MODEL = FastVLMMLXWrapper(model_path=model_path)
-        
-        logger.info("✓ FastVLM-MLX model loaded successfully")
-        logger.info(f"  Vision encoder: CoreML FastViTHD (.mlpackage)")
-        logger.info(f"  Language model: MLX 4-bit quantized")
-        logger.info(f"  Optimized for Apple Silicon")
-        return _FASTVLM_MODEL
-        
-    except Exception as e:
-        logger.error(f"Failed to load FastVLM-MLX model: {e}")
-        logger.error("Make sure:")
-        logger.error("  1. Model exists at: models/fastvlm-0.5b-captions/")
-        logger.error("  2. mlx-vlm is installed with FastVLM patch")
-        logger.error("  3. See production/docs/INSTALL_MLX_VLM.md for setup")
+    except Exception as exc:  # pragma: no cover - handled by caller fallback
+        logger.error("Failed to load FastVLM model '%s': %s", model_source, exc)
         logger.warning("Falling back to placeholder descriptions")
         import traceback
+
         logger.debug(traceback.format_exc())
-        return None
+        _FASTVLM_MODEL = None
+
+    return _FASTVLM_MODEL
 
 
 def generate_rich_description(
@@ -764,11 +811,11 @@ def generate_rich_description(
     mode: DescriptionMode,
     object_class: str = "",
     object_position: str = "",
-    all_frame_detections: List[Dict[str, Any]] = None,
+    all_frame_detections: Optional[List[Dict[str, Any]]] = None,
     use_fastvlm: bool = True
 ) -> str:
     """
-    Generate rich description using custom fine-tuned FastVLM-0.5B (MLX format)
+    Generate rich description using the standard FastVLM Hugging Face model
     
     Supports three modes:
     - SCENE: Full frame description with all objects
@@ -776,10 +823,8 @@ def generate_rich_description(
     - HYBRID: Both scene + object (not implemented in this function, handled at worker level)
     
     Model details:
-    - Format: MLX (Apple Silicon optimized)
-    - Vision encoder: CoreML FastViTHD (.mlpackage)
-    - Language model: MLX 4-bit quantized
-    - Framework: mlx-vlm with FastVLM patch
+    - Source: apple/FastVLM-0.5B (Hugging Face)
+    - Runtime: PyTorch (CPU, CUDA, or MPS automatically)
     
     Args:
         image: Full frame (SCENE mode) or object crop (OBJECT mode) - BGR format from OpenCV
@@ -796,8 +841,8 @@ def generate_rich_description(
         Rich textual description
     """
     logger.debug(f"generate_rich_description called with mode={mode}, object_class={object_class}")
-    
-    # Try to load and use FastVLM-MLX model
+
+    # Try to load and use FastVLM model
     if use_fastvlm:
         try:
             logger.debug("Loading FastVLM model...")
@@ -823,7 +868,6 @@ def generate_rich_description(
                         prompt = "Describe this scene in detail, including all visible objects and their arrangement."
                     
                     logger.debug(f"Calling model.generate_description with prompt: {prompt[:50]}...")
-                    # Use MLX wrapper's generate_description method
                     description = model.generate_description(
                         image=pil_image,
                         prompt=prompt,
@@ -844,7 +888,6 @@ def generate_rich_description(
                         prompt = f"Describe this {object_class or 'object'} in detail, including its appearance, color, and characteristics."
                     
                     logger.debug(f"Calling model.generate_description with prompt: {prompt[:50]}...")
-                    # Use MLX wrapper's generate_description method
                     description = model.generate_description(
                         image=pil_image,
                         prompt=prompt,
@@ -865,7 +908,7 @@ def generate_rich_description(
                 return description
                 
         except Exception as e:
-            logger.warning(f"FastVLM-MLX generation failed: {e}, using fallback")
+            logger.warning(f"FastVLM generation failed: {e}, using fallback")
             import traceback
             logger.debug(traceback.format_exc())
     
@@ -892,8 +935,8 @@ def generate_rich_description(
 def description_worker(
     worker_id: int,
     background_queue: Queue,
-    shared_perception_log: List,
-    stop_event: mp.Event
+    shared_perception_log: MutableSequence[Dict[str, Any]],
+    stop_event: SyncEvent
 ):
     """
     Worker process for generating rich descriptions with YOLO context
@@ -1049,7 +1092,7 @@ def run_perception_engine(video_path: str) -> List[Dict[str, Any]]:
     start_time = time.time()
     
     # Initialize model manager
-    model_manager = ModelManager()
+    model_manager = PerceptionModelManager()
     
     # Initialize components
     frame_selector = VideoFrameSelector(model_manager)
@@ -1057,7 +1100,7 @@ def run_perception_engine(video_path: str) -> List[Dict[str, Any]]:
     
     # Create multiprocessing infrastructure
     manager = Manager()
-    shared_perception_log = manager.list()
+    shared_perception_log = cast(MutableSequence[Dict[str, Any]], manager.list())
     background_queue = Queue(maxsize=Config.QUEUE_MAX_SIZE)
     stop_event = mp.Event()
     

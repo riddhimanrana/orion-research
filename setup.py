@@ -19,7 +19,8 @@ setup(
     author="Riddhiman Rana",
     author_email="riddhimanrana@example.com",
     url="https://github.com/riddhimanrana/orion-research",
-    packages=find_packages(),
+    packages=find_packages(where="src"),
+    package_dir={"": "src"},
     python_requires=">=3.10",
     install_requires=[
         # Core dependencies
@@ -65,7 +66,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "orion=orion:main",
+            "orion=orion.cli:main",
         ],
     },
     classifiers=[
