@@ -27,8 +27,8 @@ from pathlib import Path
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from orion.perception_engine import AsynchronousPerceptionEngine
-from orion.semantic_uplift import SemanticUpliftEngine
+from orion.perception_engine import run_perception_engine
+from orion.semantic_uplift import run_semantic_uplift
 from orion.evaluation import HeuristicBaseline, GraphComparator
 from orion.evaluation.benchmarks import VSGRBenchmark
 
@@ -52,16 +52,13 @@ def run_perception_on_video(video_path: str, output_dir: Path) -> Path:
     """
     logger.info(f"Running perception engine on {video_path}")
     
-    # Initialize perception engine
-    engine = AsynchronousPerceptionEngine()
-    
-    # Process video
-    perception_log = engine.process_video(video_path)
+    # Process video using function-based API
+    perception_log = run_perception_engine(video_path)
     
     # Save perception log
     perception_log_path = output_dir / "perception_log.json"
     with open(perception_log_path, 'w') as f:
-        json.dump([obj.to_dict() for obj in perception_log], f, indent=2)
+        json.dump(perception_log, f, indent=2)
     
     logger.info(f"Saved perception log to {perception_log_path}")
     logger.info(f"Total objects detected: {len(perception_log)}")
@@ -78,7 +75,7 @@ def build_cis_llm_graph(perception_log_path: Path, output_dir: Path) -> Path:
         output_dir: Directory to save outputs
         
     Returns:
-        Path to saved graph JSON
+        Path to saved results JSON
     """
     logger.info("Building knowledge graph with CIS + LLM method")
     
@@ -86,19 +83,19 @@ def build_cis_llm_graph(perception_log_path: Path, output_dir: Path) -> Path:
     with open(perception_log_path, 'r') as f:
         perception_objects = json.load(f)
     
-    # Initialize semantic uplift engine
-    uplift_engine = SemanticUpliftEngine()
+    # Run semantic uplift (writes to Neo4j)
+    # Note: This requires Neo4j to be running
+    results = run_semantic_uplift(perception_objects)
     
-    # Process perception log
-    uplift_engine.process_perception_log(perception_objects)
+    # Save results statistics
+    results_path = output_dir / "graph_cis_llm_results.json"
+    with open(results_path, 'w') as f:
+        json.dump(results, f, indent=2)
     
-    # Export graph
-    graph_path = output_dir / "graph_cis_llm.json"
-    uplift_engine.export_knowledge_graph(str(graph_path))
+    logger.info(f"Saved CIS+LLM results to {results_path}")
+    logger.info(f"Entities: {results['num_entities']}, Scenes: {results['num_scenes']}")
     
-    logger.info(f"Saved CIS+LLM graph to {graph_path}")
-    
-    return graph_path
+    return results_path
 
 
 def build_heuristic_graph(perception_log_path: Path, output_dir: Path) -> Path:
