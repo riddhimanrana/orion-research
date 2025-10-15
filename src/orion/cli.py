@@ -34,7 +34,9 @@ def _import_video_qa() -> Any:
 
 
 def _prepare_runtime(requested: Optional[str]) -> Tuple[str, ModelManager]:
-    with console.status("[dim]Selecting runtime backend...[/dim]", spinner="dots") as status:
+    with console.status(
+        "[dim]Selecting runtime backend...[/dim]", spinner="dots"
+    ) as status:
         backend = select_backend(requested)
         set_active_backend(backend)
         manager = ModelManager()
@@ -60,7 +62,9 @@ def _prepare_runtime(requested: Optional[str]) -> Tuple[str, ModelManager]:
 def _handle_config_command(args: argparse.Namespace, settings: OrionSettings) -> int:
     subcommand = getattr(args, "config_command", None)
     if subcommand is None:
-        console.print("[red]No configuration subcommand provided. Use 'orion config --help'.[/red]")
+        console.print(
+            "[red]No configuration subcommand provided. Use 'orion config --help'.[/red]"
+        )
         return 1
 
     if subcommand == "show":
@@ -140,7 +144,9 @@ def print_banner() -> None:
     subtitle_table = Table.grid(expand=False, padding=(0, 4))
     subtitle_table.add_column(justify="center", width=50)
     subtitle_table.add_row(Text("CLI Version 0.1.0", style="dim"))
-    subtitle_table.add_row(Text("Local Visual Intelligence at Speed", style=f"italic {outer_ring}"))
+    subtitle_table.add_row(
+        Text("Local Visual Intelligence at Speed", style=f"italic {outer_ring}")
+    )
 
     render_group = Group(grid, Text(""), subtitle_table)
 
@@ -200,16 +206,36 @@ For more help: orion <command> --help
     analyze_parser = subparsers.add_parser("analyze", help="Analyze a video")
     analyze_parser.add_argument("video", help="Path to video file")
     analyze_parser.add_argument("--fast", action="store_true", help="Use fast mode")
-    analyze_parser.add_argument("--accurate", action="store_true", help="Use accurate mode")
-    analyze_parser.add_argument("-i", "--interactive", action="store_true", help="Start Q&A after processing")
-    analyze_parser.add_argument("--skip-perception", action="store_true", help="Skip visual perception (Part 1)")
-    analyze_parser.add_argument("--skip-graph", action="store_true", help="Skip knowledge graph (Part 2)")
-    analyze_parser.add_argument("--keep-db", action="store_true", help="Keep existing Neo4j data")
-    analyze_parser.add_argument("-o", "--output", default="data/testing", help="Output directory")
-    analyze_parser.add_argument("--neo4j-uri", help="Neo4j connection URI (defaults to config)")
-    analyze_parser.add_argument("--neo4j-user", help="Neo4j username (defaults to config)")
-    analyze_parser.add_argument("--neo4j-password", help="Neo4j password (defaults to config)")
-    analyze_parser.add_argument("--qa-model", help="Ollama model for interactive Q&A (defaults to config)")
+    analyze_parser.add_argument(
+        "--accurate", action="store_true", help="Use accurate mode"
+    )
+    analyze_parser.add_argument(
+        "-i", "--interactive", action="store_true", help="Start Q&A after processing"
+    )
+    analyze_parser.add_argument(
+        "--skip-perception", action="store_true", help="Skip visual perception (Part 1)"
+    )
+    analyze_parser.add_argument(
+        "--skip-graph", action="store_true", help="Skip knowledge graph (Part 2)"
+    )
+    analyze_parser.add_argument(
+        "--keep-db", action="store_true", help="Keep existing Neo4j data"
+    )
+    analyze_parser.add_argument(
+        "-o", "--output", default="data/testing", help="Output directory"
+    )
+    analyze_parser.add_argument(
+        "--neo4j-uri", help="Neo4j connection URI (defaults to config)"
+    )
+    analyze_parser.add_argument(
+        "--neo4j-user", help="Neo4j username (defaults to config)"
+    )
+    analyze_parser.add_argument(
+        "--neo4j-password", help="Neo4j password (defaults to config)"
+    )
+    analyze_parser.add_argument(
+        "--qa-model", help="Ollama model for interactive Q&A (defaults to config)"
+    )
     analyze_parser.add_argument(
         "--embedding-backend",
         choices=["auto", "ollama", "sentence-transformer"],
@@ -219,7 +245,9 @@ For more help: orion <command> --help
         "--embedding-model",
         help="Embedding model identifier (Ollama or sentence-transformer, defaults to config)",
     )
-    analyze_parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
+    analyze_parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Verbose output"
+    )
     analyze_parser.add_argument(
         "--runtime",
         help="Select runtime backend (auto or torch; defaults to config)",
@@ -227,9 +255,13 @@ For more help: orion <command> --help
 
     qa_parser = subparsers.add_parser("qa", help="Q&A mode only")
     qa_parser.add_argument("--model", help="Ollama model to use (defaults to config)")
-    qa_parser.add_argument("--neo4j-uri", help="Neo4j connection URI (defaults to config)")
+    qa_parser.add_argument(
+        "--neo4j-uri", help="Neo4j connection URI (defaults to config)"
+    )
     qa_parser.add_argument("--neo4j-user", help="Neo4j username (defaults to config)")
-    qa_parser.add_argument("--neo4j-password", help="Neo4j password (defaults to config)")
+    qa_parser.add_argument(
+        "--neo4j-password", help="Neo4j password (defaults to config)"
+    )
     qa_parser.add_argument(
         "--embedding-backend",
         choices=["auto", "ollama", "sentence-transformer"],
@@ -246,21 +278,31 @@ For more help: orion <command> --help
 
     subparsers.add_parser("models", help="Show model information")
     subparsers.add_parser("modes", help="Show processing modes")
-    init_parser = subparsers.add_parser("init", help="Initialize Orion (download models, setup environment)")
+    init_parser = subparsers.add_parser(
+        "init", help="Initialize Orion (download models, setup environment)"
+    )
     init_parser.add_argument(
         "--runtime",
         help="Select runtime backend to prepare (auto or torch; defaults to config)",
     )
 
-    config_parser = subparsers.add_parser("config", help="Inspect or update Orion configuration")
-    config_subparsers = config_parser.add_subparsers(dest="config_command", help="Configuration actions")
+    config_parser = subparsers.add_parser(
+        "config", help="Inspect or update Orion configuration"
+    )
+    config_subparsers = config_parser.add_subparsers(
+        dest="config_command", help="Configuration actions"
+    )
     config_subparsers.required = True
 
-    config_subparsers.add_parser("show", help="Display the current configuration values")
+    config_subparsers.add_parser(
+        "show", help="Display the current configuration values"
+    )
     config_subparsers.add_parser("path", help="Print the configuration file path")
     config_subparsers.add_parser("reset", help="Reset configuration to defaults")
 
-    config_set_parser = config_subparsers.add_parser("set", help="Update a configuration value")
+    config_set_parser = config_subparsers.add_parser(
+        "set", help="Update a configuration value"
+    )
     config_set_parser.add_argument("key", help="Configuration key (e.g., neo4j.uri)")
     config_set_parser.add_argument("value", help="New value")
 
@@ -272,7 +314,9 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     try:
-        with console.status("[dim]Loading Orion configuration...[/dim]", spinner="dots"):
+        with console.status(
+            "[dim]Loading Orion configuration...[/dim]", spinner="dots"
+        ):
             settings = OrionSettings.load()
     except SettingsError as exc:
         console.print(f"[red]{exc}[/red]")
@@ -331,7 +375,9 @@ def main(argv: list[str] | None = None) -> None:
         if args.interactive and results.get("success"):
             console.print("\n[bold cyan]Starting Q&A mode...[/bold cyan]\n")
             if VideoQASystem is None:
-                console.print("[red]Q&A not available. Install: pip install ollama[/red]")
+                console.print(
+                    "[red]Q&A not available. Install: pip install ollama[/red]"
+                )
             else:
                 qa = VideoQASystem(
                     neo4j_uri=neo4j_uri,
@@ -372,7 +418,9 @@ def main(argv: list[str] | None = None) -> None:
 
     elif args.command == "init":
         try:
-            backend, manager = _prepare_runtime(args.runtime or settings.runtime_backend)
+            backend, manager = _prepare_runtime(
+                args.runtime or settings.runtime_backend
+            )
         except Exception:
             return
 

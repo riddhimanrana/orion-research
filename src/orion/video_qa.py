@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 class VideoQASystem:
     """Interactive question answering system for analyzed videos"""
-    
+
     def __init__(
         self,
         neo4j_uri: str = "neo4j://127.0.0.1:7687",
@@ -32,7 +32,7 @@ class VideoQASystem:
     ):
         """
         Initialize QA system
-        
+
         Args:
             neo4j_uri: Neo4j connection URI
             neo4j_user: Neo4j username
@@ -52,13 +52,12 @@ class VideoQASystem:
         self.vector_index_name = "entity_embedding"
         self.vector_search_enabled = True
         self.vector_index_dimensions: Optional[int] = None
-        
+
     def connect(self) -> bool:
         """Connect to Neo4j"""
         try:
             self.driver = GraphDatabase.driver(
-                self.neo4j_uri,
-                auth=(self.neo4j_user, self.neo4j_password)
+                self.neo4j_uri, auth=(self.neo4j_user, self.neo4j_password)
             )
             with self.driver.session() as session:
                 session.run("RETURN 1")
@@ -94,7 +93,7 @@ class VideoQASystem:
             )
             self.embedding_model = None
             return False
-    
+
     def get_video_context(self, question: Optional[str] = None, top_k: int = 5) -> str:
         """Retrieve relevant context from the knowledge graph."""
         if not self.driver:
@@ -107,7 +106,9 @@ class VideoQASystem:
                 relevant_entities: List[Dict[str, Any]] = []
 
                 if question:
-                    relevant_entities = self._vector_search_entities(session, question, top_k)
+                    relevant_entities = self._vector_search_entities(
+                        session, question, top_k
+                    )
 
                 if not relevant_entities:
                     relevant_entities = self._fetch_top_entities(session, top_k)
@@ -122,12 +123,12 @@ class VideoQASystem:
                     if event.get("id")
                 }
                 all_event_ids.update(
-                    event.get("id")
-                    for event in recent_events
-                    if event.get("id")
+                    event.get("id") for event in recent_events if event.get("id")
                 )
 
-                event_context_lookup = self._fetch_event_context(session, list(all_event_ids))
+                event_context_lookup = self._fetch_event_context(
+                    session, list(all_event_ids)
+                )
 
                 for entity in entity_details:
                     for event in entity.get("events", []):
@@ -185,7 +186,9 @@ class VideoQASystem:
                                 )
                                 participants = event.get("participants")
                                 if participants:
-                                    line += f" | Participants: {', '.join(participants)}"
+                                    line += (
+                                        f" | Participants: {', '.join(participants)}"
+                                    )
                                 locations = event.get("locations")
                                 if locations:
                                     line += f" | Locations: {', '.join(locations)}"
@@ -210,21 +213,23 @@ class VideoQASystem:
             logger.error(f"Error retrieving context: {e}")
             return "Error retrieving video context"
 
-        return "\n".join(context_parts) if context_parts else "No video analysis available"
-    
+        return (
+            "\n".join(context_parts) if context_parts else "No video analysis available"
+        )
+
     def ask_question(self, question: str) -> str:
         """
         Answer a question about the video using the knowledge graph and LLM
-        
+
         Args:
             question: User's question
-            
+
         Returns:
             Answer from the LLM
         """
         # Get context from knowledge graph
         context = self.get_video_context(question)
-        
+
         # Build prompt
         prompt = f"""You are analyzing a video based on automated visual analysis. 
 You have access to the following information extracted from the video:
@@ -237,32 +242,28 @@ Question: {question}
 Provide a clear, concise answer based only on the available data. If the information isn't available, say so.
 
 Answer:"""
-        
+
         try:
             # Query Ollama
             response = ollama.chat(
-                model=self.model,
-                messages=[{
-                    'role': 'user',
-                    'content': prompt
-                }]
+                model=self.model, messages=[{"role": "user", "content": prompt}]
             )
-            
-            answer = response['message']['content']
+
+            answer = response["message"]["content"]
             return answer
-            
+
         except Exception as e:
             logger.error(f"Error generating answer: {e}")
             return f"Error: {str(e)}"
-    
+
     def start_interactive_session(self):
         """Start an interactive Q&A session"""
         from rich.console import Console
         from rich.panel import Panel
         from rich.markdown import Markdown
-        
+
         console = Console()
-        
+
         # Check Ollama is available
         try:
             ollama.list()
@@ -270,14 +271,14 @@ Answer:"""
             console.print(f"[red]✗ Ollama not available: {e}[/red]")
             console.print("[yellow]Install Ollama from: https://ollama.ai[/yellow]")
             return
-        
+
         # Check model is available
         try:
             models_response = ollama.list()
             models: List[str] = []
 
-            if isinstance(models_response, dict) and 'models' in models_response:
-                iterable = models_response['models']
+            if isinstance(models_response, dict) and "models" in models_response:
+                iterable = models_response["models"]
             elif isinstance(models_response, list):
                 iterable = models_response
             else:
@@ -285,59 +286,63 @@ Answer:"""
 
             for item in iterable:
                 if isinstance(item, dict):
-                    name = item.get('name') or item.get('model')
+                    name = item.get("name") or item.get("model")
                     if name:
                         models.append(name)
                 elif isinstance(item, (list, tuple)) and item:
                     models.append(str(item[0]))
                 elif isinstance(item, str):
                     models.append(item)
-            
+
             if self.model not in models:
                 console.print(f"[yellow]Downloading {self.model} model...[/yellow]")
                 ollama.pull(self.model)
         except Exception as e:
             console.print(f"[red]Error checking models: {e}[/red]")
             # Continue anyway - model might still work
-        
+
         # Connect to Neo4j
         if not self.connect():
-            console.print("[red]✗ Cannot connect to Neo4j. Run the pipeline first![/red]")
+            console.print(
+                "[red]✗ Cannot connect to Neo4j. Run the pipeline first![/red]"
+            )
             return
-        
-        console.print(Panel.fit(
-            "[bold cyan]Video Question Answering System[/bold cyan]\n"
-            f"Using model: {self.model}\n"
-            "Type 'quit' or 'exit' to end session",
-            border_style="cyan"
-        ))
-        
+
+        console.print(
+            Panel.fit(
+                "[bold cyan]Video Question Answering System[/bold cyan]\n"
+                f"Using model: {self.model}\n"
+                "Type 'quit' or 'exit' to end session",
+                border_style="cyan",
+            )
+        )
+
         while True:
             try:
                 question = console.input("\n[bold green]Ask a question:[/bold green] ")
-                
-                if question.lower() in ['quit', 'exit', 'q']:
+
+                if question.lower() in ["quit", "exit", "q"]:
                     console.print("[yellow]Goodbye![/yellow]")
                     break
-                
+
                 if not question.strip():
                     continue
-                
+
                 console.print("[dim]Thinking...[/dim]")
                 answer = self.ask_question(question)
-                
+
                 console.print("\n[bold blue]Answer:[/bold blue]")
                 console.print(Panel(answer, border_style="blue"))
-                
+
             except KeyboardInterrupt:
                 console.print("\n[yellow]Session ended[/yellow]")
                 break
             except Exception as e:
                 console.print(f"[red]Error: {e}[/red]")
-        
+
         if self.driver:
             self.driver.close()
-    
+
     def close(self):
         """Close connections"""
         if self.driver:
@@ -359,7 +364,9 @@ Answer:"""
 
         return str(value)
 
-    def _vector_search_entities(self, session, question: str, top_k: int) -> List[Dict[str, Any]]:
+    def _vector_search_entities(
+        self, session, question: str, top_k: int
+    ) -> List[Dict[str, Any]]:
         if not self.vector_search_enabled:
             return []
 
@@ -440,12 +447,16 @@ Answer:"""
         except Neo4jError as exc:
             logger.warning(f"Vector search failed (Neo4jError): {exc}")
             if "dimensions" in str(exc) or "embedding" in str(exc):
-                logger.warning("Disabling vector search due to incompatible embedding configuration")
+                logger.warning(
+                    "Disabling vector search due to incompatible embedding configuration"
+                )
                 self.vector_search_enabled = False
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.warning(f"Vector search encountered an error: {exc}")
             if "dimensions" in str(exc):
-                logger.warning("Disabling vector search due to incompatible embedding configuration")
+                logger.warning(
+                    "Disabling vector search due to incompatible embedding configuration"
+                )
                 self.vector_search_enabled = False
 
         return []
@@ -517,7 +528,9 @@ Answer:"""
             if record.get("id")
         ]
 
-    def _fetch_entity_details(self, session, entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _fetch_entity_details(
+        self, session, entities: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         if not entities:
             return []
 
@@ -586,7 +599,9 @@ Answer:"""
                 if node_ref is None:
                     continue
                 props = dict(node_ref)
-                scene_name = props.get("name") or props.get("label") or props.get("title")
+                scene_name = (
+                    props.get("name") or props.get("label") or props.get("title")
+                )
                 scenes_data.append(
                     {
                         "relation": scene.get("relation", "ASSOCIATED_WITH"),
@@ -601,7 +616,9 @@ Answer:"""
                     "label": label,
                     "description": description,
                     "appearances": appearances,
-                    "events": sorted(events_data, key=lambda ev: ev.get("timestamp", "")),
+                    "events": sorted(
+                        events_data, key=lambda ev: ev.get("timestamp", "")
+                    ),
                     "relations": relations_data,
                     "scenes": scenes_data,
                     "score": score_lookup.get(entity_id),
@@ -611,11 +628,15 @@ Answer:"""
         return sorted(
             details,
             key=lambda item: (
-                -item.get("score", 0.0) if item.get("score") is not None else -item.get("appearances", 0)
+                -item.get("score", 0.0)
+                if item.get("score") is not None
+                else -item.get("appearances", 0)
             ),
         )
 
-    def _fetch_event_context(self, session, event_ids: List[str]) -> Dict[str, Dict[str, List[str]]]:
+    def _fetch_event_context(
+        self, session, event_ids: List[str]
+    ) -> Dict[str, Dict[str, List[str]]]:
         if not event_ids:
             return {}
 
@@ -684,18 +705,17 @@ Answer:"""
 def main():
     """Run interactive Q&A session"""
     import argparse
-    
-    parser = argparse.ArgumentParser(description="Ask questions about an analyzed video")
+
+    parser = argparse.ArgumentParser(
+        description="Ask questions about an analyzed video"
+    )
     parser.add_argument("--model", default="gemma3:4b", help="Ollama model to use")
     parser.add_argument("--neo4j-password", default="orion123", help="Neo4j password")
-    
+
     args = parser.parse_args()
-    
-    qa = VideoQASystem(
-        model=args.model,
-        neo4j_password=args.neo4j_password
-    )
-    
+
+    qa = VideoQASystem(model=args.model, neo4j_password=args.neo4j_password)
+
     qa.start_interactive_session()
 
 

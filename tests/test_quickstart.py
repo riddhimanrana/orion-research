@@ -21,7 +21,8 @@ def test_cli_help_executes() -> None:
         text=True,
         env={
             **os.environ,
-            "PYTHONPATH": f"{REPO_ROOT / 'src'}{os.pathsep}" + os.environ.get("PYTHONPATH", ""),
+            "PYTHONPATH": f"{REPO_ROOT / 'src'}{os.pathsep}"
+            + os.environ.get("PYTHONPATH", ""),
         },
     )
     assert "usage:" in result.stdout.lower()

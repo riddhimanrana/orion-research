@@ -35,11 +35,12 @@ from neo4j.exceptions import ServiceUnavailable, SessionExpired
 import requests
 
 # Suppress warnings
-warnings.filterwarnings('ignore')
+warnings.filterwarnings("ignore")
 
 # Optional imports with graceful fallback
 try:
     import hdbscan
+
     HDBSCAN_AVAILABLE = True
 except ImportError:
     hdbscan = None  # type: ignore[assignment]
@@ -48,38 +49,44 @@ except ImportError:
 
 try:
     from .embedding_model import create_embedding_model
+
     EMBEDDING_MODEL_AVAILABLE = True
 except ImportError:
     create_embedding_model = None  # type: ignore[assignment]
     EMBEDDING_MODEL_AVAILABLE = False
-    print("Warning: embedding_model not available. Ensure embedding_model.py is present.")
+    print(
+        "Warning: embedding_model not available. Ensure embedding_model.py is present."
+    )
 
 
 # ============================================================================
 # CONFIGURATION CONSTANTS
 # ============================================================================
 
+
 class Config:
     """Configuration parameters for semantic uplift engine"""
-    
+
     # Entity Tracking (HDBSCAN)
     MIN_CLUSTER_SIZE = 3  # Minimum appearances to be tracked entity
     MIN_SAMPLES = 2
-    CLUSTER_METRIC = 'euclidean'  # or 'cosine'
-    CLUSTER_SELECTION_METHOD = 'eom'  # Excess of Mass
+    CLUSTER_METRIC = "euclidean"  # or 'cosine'
+    CLUSTER_SELECTION_METHOD = "eom"  # Excess of Mass
     CLUSTER_SELECTION_EPSILON = 0.15
-    
+
     # State Change Detection
     STATE_CHANGE_THRESHOLD = 0.85  # Cosine similarity threshold
-    EMBEDDING_MODEL_TYPE = 'embeddinggemma'  # 'embeddinggemma' (Ollama) or 'sentence-transformer'
+    EMBEDDING_MODEL_TYPE = (
+        "embeddinggemma"  # 'embeddinggemma' (Ollama) or 'sentence-transformer'
+    )
     SCENE_SIMILARITY_THRESHOLD = 0.82  # Cosine threshold for scene similarity links
     SCENE_SIMILARITY_TOP_K = 3  # Max similar scenes per scene
     SCENE_LOCATION_TOP_OBJECTS = 3  # Number of dominant objects to describe a location
-    
+
     # Temporal Windowing
     TIME_WINDOW_SIZE = 30.0  # seconds
     MIN_EVENTS_PER_WINDOW = 2  # Minimum state changes to trigger event composition
-    
+
     # Causal Influence Scoring
     CAUSAL_MAX_PIXEL_DISTANCE = 600.0
     CAUSAL_TEMPORAL_DECAY = 4.0  # seconds before influence decays
@@ -93,11 +100,13 @@ class Config:
     # LLM Event Composition (Ollama)
     USE_LLM_COMPOSITION = True  # Enable LLM composition with gemma3:4b
     OLLAMA_API_URL = "http://localhost:11434/api/generate"
-    OLLAMA_MODEL = "gemma3:4b"  # Use gemma3:4b for better Cypher generation (was gemma3:1b)
+    OLLAMA_MODEL = (
+        "gemma3:4b"  # Use gemma3:4b for better Cypher generation (was gemma3:1b)
+    )
     OLLAMA_TEMPERATURE = 0.3  # More deterministic for structured output
     OLLAMA_MAX_TOKENS = 2000
     OLLAMA_TIMEOUT = 60  # seconds
-    
+
     # Neo4j Configuration
     NEO4J_URI = "neo4j://127.0.0.1:7687"
     NEO4J_USER = "neo4j"
@@ -106,11 +115,11 @@ class Config:
     MAX_CONNECTION_LIFETIME = 3600
     MAX_CONNECTION_POOL_SIZE = 50
     CONNECTION_TIMEOUT = 30
-    
+
     # Graph Schema
     VECTOR_DIMENSIONS = 512  # For visual embeddings
-    VECTOR_SIMILARITY_FUNCTION = 'cosine'
-    
+    VECTOR_SIMILARITY_FUNCTION = "cosine"
+
     # Performance
     BATCH_SIZE = 100  # For bulk operations
     LOG_LEVEL = logging.INFO
@@ -121,32 +130,36 @@ class Config:
 # LOGGING SETUP
 # ============================================================================
 
+
 def setup_logger(name: str, level: int = Config.LOG_LEVEL) -> logging.Logger:
     """Set up a logger with consistent formatting"""
     logger = logging.getLogger(name)
     logger.setLevel(level)
-    
+
     if not logger.handlers:
         handler = logging.StreamHandler(sys.stdout)
         formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
         )
         handler.setFormatter(formatter)
         logger.addHandler(handler)
-    
+
     return logger
 
-logger = setup_logger('SemanticUplift')
+
+logger = setup_logger("SemanticUplift")
 
 
 # ============================================================================
 # DATA STRUCTURES
 # ============================================================================
 
+
 @dataclass
 class Entity:
     """Represents a tracked entity across time"""
+
     entity_id: str
     object_class: str
     appearances: List[Dict[str, Any]] = field(default_factory=list)
@@ -154,12 +167,12 @@ class Entity:
     last_timestamp: float = 0.0
     average_embedding: Optional[np.ndarray] = None
     scene_ids: Set[str] = field(default_factory=set)
-    
+
     def add_appearance(self, perception_obj: Dict[str, Any]):
         """Add an appearance of this entity"""
         self.appearances.append(perception_obj)
-        
-        timestamp = perception_obj['timestamp']
+
+        timestamp = perception_obj["timestamp"]
         if not self.first_timestamp or timestamp < self.first_timestamp:
             self.first_timestamp = timestamp
         if not self.last_timestamp or timestamp > self.last_timestamp:
@@ -169,28 +182,29 @@ class Entity:
         """Associate the entity with a scene."""
         if scene_id:
             self.scene_ids.add(scene_id)
-    
+
     def compute_average_embedding(self):
         """Compute average embedding from all appearances"""
         if not self.appearances:
             return
-        
-        embeddings = [np.array(obj['visual_embedding']) for obj in self.appearances]
+
+        embeddings = [np.array(obj["visual_embedding"]) for obj in self.appearances]
         avg_embedding = np.mean(embeddings, axis=0)
         avg_embedding = np.asarray(avg_embedding)
         norm = float(np.linalg.norm(avg_embedding))
         if norm > 0:
             avg_embedding = avg_embedding / norm
         self.average_embedding = avg_embedding
-    
+
     def get_timeline(self) -> List[Dict[str, Any]]:
         """Get chronological timeline of appearances"""
-        return sorted(self.appearances, key=lambda x: x['timestamp'])
+        return sorted(self.appearances, key=lambda x: x["timestamp"])
 
 
 @dataclass
 class StateChange:
     """Represents a detected state change for an entity"""
+
     entity_id: str
     timestamp_before: float
     timestamp_after: float
@@ -202,37 +216,38 @@ class StateChange:
     centroid_after: Optional[Tuple[float, float]] = None
     displacement: float = 0.0
     velocity: float = 0.0
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
-            'entity_id': self.entity_id,
-            'timestamp_before': self.timestamp_before,
-            'timestamp_after': self.timestamp_after,
-            'description_before': self.description_before,
-            'description_after': self.description_after,
-            'similarity_score': self.similarity_score,
-            'change_magnitude': self.change_magnitude,
-            'centroid_before': self.centroid_before,
-            'centroid_after': self.centroid_after,
-            'displacement': self.displacement,
-            'velocity': self.velocity,
+            "entity_id": self.entity_id,
+            "timestamp_before": self.timestamp_before,
+            "timestamp_after": self.timestamp_after,
+            "description_before": self.description_before,
+            "description_after": self.description_after,
+            "similarity_score": self.similarity_score,
+            "change_magnitude": self.change_magnitude,
+            "centroid_before": self.centroid_before,
+            "centroid_after": self.centroid_after,
+            "displacement": self.displacement,
+            "velocity": self.velocity,
         }
 
 
 @dataclass
 class TemporalWindow:
     """Represents a time window with active entities and state changes"""
+
     start_time: float
     end_time: float
     active_entities: Set[str] = field(default_factory=set)
     state_changes: List[StateChange] = field(default_factory=list)
     causal_links: List["CausalLink"] = field(default_factory=list)
-    
+
     def add_state_change(self, change: StateChange):
         """Add a state change to this window"""
         self.state_changes.append(change)
         self.active_entities.add(change.entity_id)
-    
+
     def is_significant(self) -> bool:
         """Check if window has enough activity to warrant event composition"""
         return len(self.state_changes) >= Config.MIN_EVENTS_PER_WINDOW
@@ -245,7 +260,9 @@ class TemporalWindow:
         """Return top scoring causal links for the window."""
         if not self.causal_links:
             return []
-        return sorted(self.causal_links, key=lambda link: link.influence_score, reverse=True)[:limit]
+        return sorted(
+            self.causal_links, key=lambda link: link.influence_score, reverse=True
+        )[:limit]
 
 
 @dataclass
@@ -300,7 +317,9 @@ class SceneSimilarity:
     score: float
 
 
-def _compute_centroid_from_bbox(bbox: Optional[Iterable[float]]) -> Optional[Tuple[float, float]]:
+def _compute_centroid_from_bbox(
+    bbox: Optional[Iterable[float]],
+) -> Optional[Tuple[float, float]]:
     """Compute centroid from bounding box if available."""
     if not bbox or len(bbox) != 4:
         return None
@@ -308,7 +327,9 @@ def _compute_centroid_from_bbox(bbox: Optional[Iterable[float]]) -> Optional[Tup
     return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
 
 
-def _euclidean_distance(p1: Optional[Tuple[float, float]], p2: Optional[Tuple[float, float]]) -> Optional[float]:
+def _euclidean_distance(
+    p1: Optional[Tuple[float, float]], p2: Optional[Tuple[float, float]]
+) -> Optional[float]:
     """Return Euclidean distance between two points if both exist."""
     if p1 is None or p2 is None:
         return None
@@ -326,7 +347,9 @@ class SceneAssembler:
 
     def _init_embedding_model(self) -> None:
         if not EMBEDDING_MODEL_AVAILABLE or create_embedding_model is None:
-            logger.warning("Scene embeddings unavailable; install embedding backends for richer links.")
+            logger.warning(
+                "Scene embeddings unavailable; install embedding backends for richer links."
+            )
             return
         try:
             self.embedding_model = create_embedding_model(prefer_ollama=True)
@@ -394,9 +417,14 @@ class SceneAssembler:
                 if desc:
                     description_parts.append(desc)
                 else:
-                    description_parts.append(f"Observed {obj_class} in frame {frame_number}.")
+                    description_parts.append(
+                        f"Observed {obj_class} in frame {frame_number}."
+                    )
 
-            description = " ".join(description_parts).strip() or f"Scene captured at frame {frame_number}."
+            description = (
+                " ".join(description_parts).strip()
+                or f"Scene captured at frame {frame_number}."
+            )
             embedding = self._encode(description)
             scene_id = f"scene_{frame_number:06d}"
 
@@ -405,9 +433,20 @@ class SceneAssembler:
 
             unique_entities = sorted(set(entity_ids))
             class_counts = Counter(raw_classes)
-            dominant_classes = [cls for cls, _ in class_counts.most_common(Config.SCENE_LOCATION_TOP_OBJECTS)]
-            signature = "|".join(dominant_classes) if dominant_classes else "unspecified"
-            label = ", ".join(dominant_classes) if dominant_classes else "Uncategorized Space"
+            dominant_classes = [
+                cls
+                for cls, _ in class_counts.most_common(
+                    Config.SCENE_LOCATION_TOP_OBJECTS
+                )
+            ]
+            signature = (
+                "|".join(dominant_classes) if dominant_classes else "unspecified"
+            )
+            label = (
+                ", ".join(dominant_classes)
+                if dominant_classes
+                else "Uncategorized Space"
+            )
             signature_hash = hashlib.sha1(signature.encode("utf-8")).hexdigest()[:12]
             location_id = f"location_{signature_hash}"
 
@@ -449,11 +488,15 @@ class SceneAssembler:
     ) -> List[SceneSimilarity]:
         """Compute similarity edges between scenes."""
 
-        valid_indices = [idx for idx, scene in enumerate(scenes) if scene.embedding is not None]
+        valid_indices = [
+            idx for idx, scene in enumerate(scenes) if scene.embedding is not None
+        ]
         if not valid_indices:
             return []
 
-        embeddings = np.stack([np.asarray(scenes[idx].embedding) for idx in valid_indices])
+        embeddings = np.stack(
+            [np.asarray(scenes[idx].embedding) for idx in valid_indices]
+        )
         similarity_matrix = embeddings @ embeddings.T
 
         pairs_seen: Set[Tuple[str, str]] = set()
@@ -465,8 +508,12 @@ class SceneAssembler:
             candidate_count = min(top_k, len(valid_indices) - 1)
             if candidate_count <= 0:
                 continue
-            candidate_index_buffer = np.argpartition(-row, list(range(candidate_count)))[:candidate_count]
-            top_candidate_indices = sorted(candidate_index_buffer, key=lambda idx: row[idx], reverse=True)
+            candidate_index_buffer = np.argpartition(
+                -row, list(range(candidate_count))
+            )[:candidate_count]
+            top_candidate_indices = sorted(
+                candidate_index_buffer, key=lambda idx: row[idx], reverse=True
+            )
 
             for candidate_idx in top_candidate_indices:
                 score = float(row[candidate_idx])
@@ -481,7 +528,11 @@ class SceneAssembler:
                 if ordered in pairs_seen:
                     continue
                 pairs_seen.add(ordered)
-                edges.append(SceneSimilarity(source_id=source_id, target_id=target_id, score=score))
+                edges.append(
+                    SceneSimilarity(
+                        source_id=source_id, target_id=target_id, score=score
+                    )
+                )
 
         return edges
 
@@ -490,20 +541,21 @@ class SceneAssembler:
 # MODULE 1: ENTITY TRACKING (OBJECT PERMANENCE)
 # ============================================================================
 
+
 class EntityTracker:
     """Tracks entities across time using visual embedding clustering"""
-    
+
     def __init__(self):
         self.entities: Dict[str, Entity] = {}
         self.detection_to_entity: Dict[str, str] = {}  # temp_id -> entity_id
-        
+
     def cluster_embeddings(self, perception_log: List[Dict[str, Any]]) -> np.ndarray:
         """
         Cluster visual embeddings using HDBSCAN
-        
+
         Args:
             perception_log: List of perception objects
-            
+
         Returns:
             Array of cluster labels (same length as perception_log)
         """
@@ -511,73 +563,71 @@ class EntityTracker:
             logger.error("HDBSCAN not available. Cannot perform clustering.")
             # Return all -1 (noise) labels
             return np.full(len(perception_log), -1)
-        
+
         logger.info("Extracting visual embeddings for clustering...")
         embeddings = []
         valid_indices = []
-        
+
         for i, obj in enumerate(perception_log):
-            emb = obj.get('visual_embedding')
+            emb = obj.get("visual_embedding")
             if emb is not None and len(emb) > 0:
                 embeddings.append(np.array(emb))
                 valid_indices.append(i)
-        
+
         if not embeddings:
             logger.error("No valid embeddings found in perception log")
             return np.full(len(perception_log), -1)
-        
+
         embeddings = np.array(embeddings)
         logger.info(f"Clustering {len(embeddings)} embeddings...")
-        
+
         # Create HDBSCAN clusterer
         clusterer = hdbscan.HDBSCAN(
             min_cluster_size=Config.MIN_CLUSTER_SIZE,
             min_samples=Config.MIN_SAMPLES,
             metric=Config.CLUSTER_METRIC,
             cluster_selection_method=Config.CLUSTER_SELECTION_METHOD,
-            cluster_selection_epsilon=Config.CLUSTER_SELECTION_EPSILON
+            cluster_selection_epsilon=Config.CLUSTER_SELECTION_EPSILON,
         )
-        
+
         # Perform clustering
         cluster_labels = clusterer.fit_predict(embeddings)
-        
+
         # Map back to full perception log
         full_labels = np.full(len(perception_log), -1)
         for i, idx in enumerate(valid_indices):
             full_labels[idx] = cluster_labels[i]
-        
+
         # Log clustering statistics
         n_clusters = len(set(cluster_labels)) - (1 if -1 in cluster_labels else 0)
         n_noise = list(cluster_labels).count(-1)
-        
+
         logger.info(f"Clustering complete:")
         logger.info(f"  Number of clusters (tracked entities): {n_clusters}")
         logger.info(f"  Noise points (unique objects): {n_noise}")
         logger.info(f"  Total objects: {len(embeddings)}")
-        
+
         return full_labels
-    
+
     def assign_entity_ids(
-        self,
-        perception_log: List[Dict[str, Any]],
-        cluster_labels: np.ndarray
+        self, perception_log: List[Dict[str, Any]], cluster_labels: np.ndarray
     ):
         """
         Assign entity IDs based on cluster labels
-        
+
         Args:
             perception_log: List of perception objects
             cluster_labels: Cluster assignments from HDBSCAN
         """
         logger.info("Assigning entity IDs...")
-        
+
         # Create entities for each cluster
         cluster_to_entity_id = {}
         noise_counter = 0
-        
+
         for i, (obj, label) in enumerate(zip(perception_log, cluster_labels)):
-            temp_id = obj.get('temp_id', f'det_{i:06d}')
-            
+            temp_id = obj.get("temp_id", f"det_{i:06d}")
+
             if label == -1:
                 # Noise point - create unique entity
                 entity_id = f"entity_unique_{noise_counter:06d}"
@@ -587,54 +637,53 @@ class EntityTracker:
                 if label not in cluster_to_entity_id:
                     cluster_to_entity_id[label] = f"entity_cluster_{label:04d}"
                 entity_id = cluster_to_entity_id[label]
-            
+
             # Update perception object
-            obj['entity_id'] = entity_id
-            
+            obj["entity_id"] = entity_id
+
             # Track mapping
             self.detection_to_entity[temp_id] = entity_id
-            
+
             # Create or update entity
             if entity_id not in self.entities:
                 self.entities[entity_id] = Entity(
-                    entity_id=entity_id,
-                    object_class=obj.get('object_class', 'unknown')
+                    entity_id=entity_id, object_class=obj.get("object_class", "unknown")
                 )
-            
+
             self.entities[entity_id].add_appearance(obj)
-        
+
         # Compute average embeddings
         logger.info("Computing average embeddings for entities...")
         for entity in self.entities.values():
             entity.compute_average_embedding()
-        
+
         logger.info(f"Created {len(self.entities)} entities")
         logger.info(f"  Tracked entities (clusters): {len(cluster_to_entity_id)}")
         logger.info(f"  Unique entities (noise): {noise_counter}")
-    
+
     def track_entities(self, perception_log: List[Dict[str, Any]]):
         """
         Main entity tracking pipeline
-        
+
         Args:
             perception_log: List of perception objects (modified in-place)
         """
-        logger.info("\n" + "="*80)
+        logger.info("\n" + "=" * 80)
         logger.info("ENTITY TRACKING - OBJECT PERMANENCE")
-        logger.info("="*80)
-        
+        logger.info("=" * 80)
+
         # Cluster embeddings
         cluster_labels = self.cluster_embeddings(perception_log)
-        
+
         # Assign entity IDs
         self.assign_entity_ids(perception_log, cluster_labels)
-        
-        logger.info("="*80 + "\n")
-    
+
+        logger.info("=" * 80 + "\n")
+
     def get_entity(self, entity_id: str) -> Optional[Entity]:
         """Get entity by ID"""
         return self.entities.get(entity_id)
-    
+
     def get_all_entities(self) -> List[Entity]:
         """Get all tracked entities"""
         return list(self.entities.values())
@@ -644,47 +693,50 @@ class EntityTracker:
 # MODULE 2: STATE CHANGE DETECTION
 # ============================================================================
 
+
 class StateChangeDetector:
     """Detects state changes in entity descriptions over time"""
-    
+
     def __init__(self):
         self.model = None
         self.state_changes: List[StateChange] = []
-        
+
     def load_model(self):
         """Load embedding model (EmbeddingGemma or SentenceTransformer)"""
         if not EMBEDDING_MODEL_AVAILABLE:
             logger.error("Embedding model not available")
             return False
-        
+
         try:
             logger.info(f"Loading embedding model: {Config.EMBEDDING_MODEL_TYPE}")
             if create_embedding_model is None:  # type: ignore[truthy-function]
                 raise RuntimeError("Embedding model factory unavailable")
             self.model = create_embedding_model(
-                prefer_ollama=(Config.EMBEDDING_MODEL_TYPE == 'embeddinggemma')
+                prefer_ollama=(Config.EMBEDDING_MODEL_TYPE == "embeddinggemma")
             )
             model_info = self.model.get_model_info()
-            logger.info(f"✓ Model loaded: {model_info['model_name']} (type={model_info['type']}, dim={model_info['dimension']})")
+            logger.info(
+                f"✓ Model loaded: {model_info['model_name']} (type={model_info['type']}, dim={model_info['dimension']})"
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to load embedding model: {e}")
             return False
-    
+
     def compute_similarity(self, desc1: str, desc2: str) -> float:
         """
         Compute semantic similarity between two descriptions
-        
+
         Args:
             desc1: First description
             desc2: Second description
-            
+
         Returns:
             Cosine similarity score (0-1)
         """
         if self.model is None:
             return 1.0  # No change if model not available
-        
+
         try:
             # Use the unified embedding model's similarity method
             return self.model.compute_similarity(desc1, desc2)
@@ -695,49 +747,55 @@ class StateChangeDetector:
         except Exception as e:
             logger.warning(f"Failed to compute similarity: {e}")
             return 1.0
-    
+
     def detect_state_changes_for_entity(self, entity: Entity) -> List[StateChange]:
         """
         Detect state changes for a single entity
-        
+
         Args:
             entity: Entity to analyze
-            
+
         Returns:
             List of detected state changes
         """
         timeline = entity.get_timeline()
         changes = []
-        
+
         if len(timeline) < 2:
             return changes
-        
+
         # Compare consecutive appearances
         for i in range(len(timeline) - 1):
             curr = timeline[i]
             next_app = timeline[i + 1]
-            
-            curr_desc = curr.get('rich_description', '')
-            next_desc = next_app.get('rich_description', '')
-            
+
+            curr_desc = curr.get("rich_description", "")
+            next_desc = next_app.get("rich_description", "")
+
             if not curr_desc or not next_desc:
                 continue
-            
+
             # Compute similarity
             similarity = self.compute_similarity(curr_desc, next_desc)
-            
+
             # Detect state change
             if similarity < Config.STATE_CHANGE_THRESHOLD:
-                centroid_before = _compute_centroid_from_bbox(curr.get('bounding_box'))
-                centroid_after = _compute_centroid_from_bbox(next_app.get('bounding_box'))
-                displacement = _euclidean_distance(centroid_before, centroid_after) or 0.0
-                time_delta = float(next_app.get('timestamp', 0.0) - curr.get('timestamp', 0.0))
+                centroid_before = _compute_centroid_from_bbox(curr.get("bounding_box"))
+                centroid_after = _compute_centroid_from_bbox(
+                    next_app.get("bounding_box")
+                )
+                displacement = (
+                    _euclidean_distance(centroid_before, centroid_after) or 0.0
+                )
+                time_delta = float(
+                    next_app.get("timestamp", 0.0) - curr.get("timestamp", 0.0)
+                )
                 velocity = displacement / time_delta if time_delta > 0 else 0.0
 
                 change = StateChange(
                     entity_id=entity.entity_id,
-                    timestamp_before=curr['timestamp'],
-                    timestamp_after=next_app['timestamp'],
+                    timestamp_before=curr["timestamp"],
+                    timestamp_after=next_app["timestamp"],
                     description_before=curr_desc,
                     description_after=next_desc,
                     similarity_score=similarity,
@@ -748,47 +806,47 @@ class StateChangeDetector:
                     velocity=velocity,
                 )
                 changes.append(change)
-        
+
         return changes
-    
+
     def detect_all_state_changes(self, entities: List[Entity]) -> List[StateChange]:
         """
         Detect state changes for all entities
-        
+
         Args:
             entities: List of entities to analyze
-            
+
         Returns:
             List of all detected state changes
         """
-        logger.info("\n" + "="*80)
+        logger.info("\n" + "=" * 80)
         logger.info("STATE CHANGE DETECTION")
-        logger.info("="*80)
-        
+        logger.info("=" * 80)
+
         if not self.load_model():
             logger.warning("Continuing without state change detection")
             return []
-        
+
         logger.info(f"Analyzing {len(entities)} entities for state changes...")
-        
+
         all_changes = []
         for entity in entities:
             changes = self.detect_state_changes_for_entity(entity)
             all_changes.extend(changes)
-        
+
         self.state_changes = all_changes
-        
+
         logger.info(f"Detected {len(all_changes)} state changes")
-        
+
         # Log some statistics
         if all_changes:
             magnitudes = [c.change_magnitude for c in all_changes]
             logger.info(f"  Average change magnitude: {np.mean(magnitudes):.3f}")
             logger.info(f"  Max change magnitude: {np.max(magnitudes):.3f}")
             logger.info(f"  Min change magnitude: {np.min(magnitudes):.3f}")
-        
-        logger.info("="*80 + "\n")
-        
+
+        logger.info("=" * 80 + "\n")
+
         return all_changes
 
 
@@ -796,66 +854,70 @@ class StateChangeDetector:
 # MODULE 3: TEMPORAL WINDOWING
 # ============================================================================
 
+
 def create_temporal_windows(
-    state_changes: List[StateChange],
-    window_size: float = Config.TIME_WINDOW_SIZE
+    state_changes: List[StateChange], window_size: float = Config.TIME_WINDOW_SIZE
 ) -> List[TemporalWindow]:
     """
     Divide state changes into temporal windows
-    
+
     Args:
         state_changes: List of state changes
         window_size: Window size in seconds
-        
+
     Returns:
         List of temporal windows
     """
     if not state_changes:
         return []
-    
+
     logger.info(f"Creating temporal windows (size: {window_size}s)...")
-    
+
     # Find time range
     all_timestamps = []
     for change in state_changes:
         all_timestamps.append(change.timestamp_before)
         all_timestamps.append(change.timestamp_after)
-    
+
     min_time = min(all_timestamps)
     max_time = max(all_timestamps)
-    
+
     # Create windows
     windows = []
     current_time = min_time
-    
+
     while current_time < max_time:
         window = TemporalWindow(
-            start_time=current_time,
-            end_time=current_time + window_size
+            start_time=current_time, end_time=current_time + window_size
         )
-        
+
         # Add state changes that fall in this window
         for change in state_changes:
-            if (change.timestamp_before >= window.start_time and 
-                change.timestamp_before < window.end_time):
+            if (
+                change.timestamp_before >= window.start_time
+                and change.timestamp_before < window.end_time
+            ):
                 window.add_state_change(change)
-        
+
         if window.state_changes:
             windows.append(window)
-        
+
         current_time += window_size
-    
+
     # Filter to significant windows
     significant_windows = [w for w in windows if w.is_significant()]
-    
-    logger.info(f"Created {len(windows)} windows, {len(significant_windows)} significant")
-    
+
+    logger.info(
+        f"Created {len(windows)} windows, {len(significant_windows)} significant"
+    )
+
     return significant_windows
 
 
 # ============================================================================
 # MODULE 3B: CAUSAL INFLUENCE SCORING
 # ============================================================================
+
 
 class CausalInfluenceScorer:
     """Scores likely causal influences between entities inside temporal windows."""
@@ -988,9 +1050,8 @@ class CausalInfluenceScorer:
         ]
 
         distances = [
-            dist for dist in (
-                _euclidean_distance(a, b) for a, b in centroid_pairs
-            )
+            dist
+            for dist in (_euclidean_distance(a, b) for a, b in centroid_pairs)
             if dist is not None
         ]
 
@@ -1002,9 +1063,17 @@ class CausalInfluenceScorer:
         return max(0.0, 1.0 - clamped / Config.CAUSAL_MAX_PIXEL_DISTANCE)
 
     @staticmethod
-    def _compute_motion(agent_change: StateChange, patient_change: StateChange) -> float:
-        agent_motion = float(agent_change.displacement) + float(agent_change.velocity) * Config.CAUSAL_TEMPORAL_DECAY
-        patient_motion = float(patient_change.displacement) + float(patient_change.velocity) * Config.CAUSAL_TEMPORAL_DECAY
+    def _compute_motion(
+        agent_change: StateChange, patient_change: StateChange
+    ) -> float:
+        agent_motion = (
+            float(agent_change.displacement)
+            + float(agent_change.velocity) * Config.CAUSAL_TEMPORAL_DECAY
+        )
+        patient_motion = (
+            float(patient_change.displacement)
+            + float(patient_change.velocity) * Config.CAUSAL_TEMPORAL_DECAY
+        )
 
         total_motion = agent_motion + patient_motion
         if total_motion <= 0:
@@ -1014,13 +1083,17 @@ class CausalInfluenceScorer:
         return max(0.0, min(1.0, ratio))
 
     @staticmethod
-    def _compute_temporal(agent_change: StateChange, patient_change: StateChange) -> float:
+    def _compute_temporal(
+        agent_change: StateChange, patient_change: StateChange
+    ) -> float:
         delta = abs(agent_change.timestamp_after - patient_change.timestamp_after)
         clamped = min(delta, Config.CAUSAL_TEMPORAL_DECAY)
         return max(0.0, 1.0 - clamped / Config.CAUSAL_TEMPORAL_DECAY)
 
     @staticmethod
-    def _compute_embedding_similarity(agent_entity: Entity, patient_entity: Entity) -> float:
+    def _compute_embedding_similarity(
+        agent_entity: Entity, patient_entity: Entity
+    ) -> float:
         emb_a = agent_entity.average_embedding
         emb_b = patient_entity.average_embedding
 
@@ -1031,23 +1104,25 @@ class CausalInfluenceScorer:
         similarity = max(-1.0, min(1.0, similarity))
         return 0.5 * (similarity + 1.0)
 
+
 # ============================================================================
 # MODULE 4: EVENT COMPOSITION (LLM REASONING)
 # ============================================================================
 
+
 class EventComposer:
     """Composes events from state changes using LLM reasoning"""
-    
+
     def __init__(self):
         self.generated_queries: List[str] = []
-    
+
     def query_ollama(self, prompt: str) -> str:
         """
         Query local Ollama instance
-        
+
         Args:
             prompt: Prompt for the LLM
-            
+
         Returns:
             Generated text
         """
@@ -1058,41 +1133,39 @@ class EventComposer:
                 "stream": False,
                 "options": {
                     "temperature": Config.OLLAMA_TEMPERATURE,
-                    "num_predict": Config.OLLAMA_MAX_TOKENS
-                }
+                    "num_predict": Config.OLLAMA_MAX_TOKENS,
+                },
             }
-            
+
             response = requests.post(
-                Config.OLLAMA_API_URL,
-                json=payload,
-                timeout=Config.OLLAMA_TIMEOUT
+                Config.OLLAMA_API_URL, json=payload, timeout=Config.OLLAMA_TIMEOUT
             )
-            
+
             if response.status_code == 200:
-                return response.json().get('response', '')
+                return response.json().get("response", "")
             else:
                 logger.error(f"Ollama API error: {response.status_code}")
                 return ""
-        
+
         except requests.exceptions.ConnectionError:
-            logger.error("Could not connect to Ollama. Is it running at localhost:11434?")
+            logger.error(
+                "Could not connect to Ollama. Is it running at localhost:11434?"
+            )
             return ""
         except Exception as e:
             logger.error(f"Error querying Ollama: {e}")
             return ""
-    
+
     def create_prompt_for_window(
-        self,
-        window: TemporalWindow,
-        entity_tracker: EntityTracker
+        self, window: TemporalWindow, entity_tracker: EntityTracker
     ) -> str:
         """
         Create structured prompt for event composition
-        
+
         Args:
             window: Temporal window with state changes
             entity_tracker: Entity tracker for getting entity info
-            
+
         Returns:
             Formatted prompt
         """
@@ -1109,14 +1182,14 @@ TIME WINDOW: {window.start_time:.2f}s - {window.end_time:.2f}s
 
 ACTIVE ENTITIES:
 """
-        
+
         for entity_id in window.active_entities:
             entity = entity_tracker.get_entity(entity_id)
             if entity:
                 prompt += f"- {entity_id} ({entity.object_class}): {len(entity.appearances)} appearances\n"
-        
+
         prompt += "\nSTATE CHANGES:\n"
-        
+
         for i, change in enumerate(window.state_changes, 1):
             prompt += f"{i}. Entity {change.entity_id} at {change.timestamp_before:.2f}s → {change.timestamp_after:.2f}s\n"
             prompt += f"   Before: {change.description_before}\n"
@@ -1137,7 +1210,7 @@ ACTIVE ENTITIES:
                 )
         else:
             prompt += "CAUSAL INFLUENCE CANDIDATES: None detected in this window.\n"
-        
+
         prompt += """
 Generate Cypher queries to:
 1. Create or merge entity nodes with their labels
@@ -1168,138 +1241,141 @@ MERGE (e:Entity {id: '1'})  // WRONG: Missing semicolon
 
 Now generate Cypher queries for the state changes above:
 """
-        
+
         return prompt
-    
+
     def parse_cypher_queries(self, llm_output: str) -> List[str]:
         """
         Parse Cypher queries from LLM output
-        
+
         Args:
             llm_output: Raw output from LLM
-            
+
         Returns:
             List of valid Cypher queries
         """
         queries = []
-        
-        lines = llm_output.strip().split('\n')
+
+        lines = llm_output.strip().split("\n")
         for line in lines:
             line = line.strip()
-            
+
             # Skip empty lines and comments
-            if not line or line.startswith('//') or line.startswith('#'):
+            if not line or line.startswith("//") or line.startswith("#"):
                 continue
-            
+
             # Look for Cypher keywords
-            if any(keyword in line.upper() for keyword in ['MERGE', 'CREATE', 'MATCH', 'SET']):
+            if any(
+                keyword in line.upper()
+                for keyword in ["MERGE", "CREATE", "MATCH", "SET"]
+            ):
                 # Ensure semicolon
-                if not line.endswith(';'):
-                    line += ';'
+                if not line.endswith(";"):
+                    line += ";"
                 queries.append(line)
-        
+
         return queries
-    
+
     def validate_cypher_queries(self, queries: List[str]) -> List[str]:
         """
         Validate Cypher queries for common syntax errors
-        
+
         Args:
             queries: List of Cypher queries to validate
-            
+
         Returns:
             List of valid queries (invalid ones filtered out)
         """
         valid_queries = []
-        
+
         for query in queries:
             query_upper = query.upper()
-            
+
             # Check for invalid patterns
             invalid = False
-            
+
             # Pattern 1: WHERE after SET (invalid in Cypher)
-            if 'SET' in query_upper and 'WHERE' in query_upper:
-                set_pos = query_upper.index('SET')
-                where_pos = query_upper.index('WHERE')
+            if "SET" in query_upper and "WHERE" in query_upper:
+                set_pos = query_upper.index("SET")
+                where_pos = query_upper.index("WHERE")
                 if where_pos > set_pos:
                     logger.warning(f"Invalid query (WHERE after SET): {query[:50]}...")
                     invalid = True
-            
+
             # Pattern 2: Missing required keywords
-            if not any(kw in query_upper for kw in ['MERGE', 'CREATE', 'MATCH', 'SET', 'RETURN']):
+            if not any(
+                kw in query_upper
+                for kw in ["MERGE", "CREATE", "MATCH", "SET", "RETURN"]
+            ):
                 logger.warning(f"Invalid query (no valid keywords): {query[:50]}...")
                 invalid = True
-            
+
             if not invalid:
                 valid_queries.append(query)
-        
+
         return valid_queries
 
-    
     def compose_events_for_window(
-        self,
-        window: TemporalWindow,
-        entity_tracker: EntityTracker
+        self, window: TemporalWindow, entity_tracker: EntityTracker
     ) -> List[str]:
         """
         Compose events for a single window
-        
+
         Args:
             window: Temporal window
             entity_tracker: Entity tracker
-            
+
         Returns:
             List of Cypher queries
         """
-        logger.info(f"Composing events for window {window.start_time:.1f}s - {window.end_time:.1f}s")
-        
+        logger.info(
+            f"Composing events for window {window.start_time:.1f}s - {window.end_time:.1f}s"
+        )
+
         # Use fallback if LLM is disabled
         if not Config.USE_LLM_COMPOSITION:
             logger.info("Using fallback query generation (LLM disabled)")
             return self.generate_fallback_queries(window, entity_tracker)
-        
+
         # Create prompt
         prompt = self.create_prompt_for_window(window, entity_tracker)
-        
+
         # Query LLM
         llm_output = self.query_ollama(prompt)
-        
+
         if not llm_output:
             logger.warning("No output from LLM, generating basic queries")
             return self.generate_fallback_queries(window, entity_tracker)
-        
+
         # Parse queries
         queries = self.parse_cypher_queries(llm_output)
-        
+
         # Validate queries before returning
         validated_queries = self.validate_cypher_queries(queries)
-        
+
         if not validated_queries:
             logger.warning("LLM generated invalid queries, using fallback")
             return self.generate_fallback_queries(window, entity_tracker)
-        
+
         logger.info(f"Generated {len(validated_queries)} valid Cypher queries")
-        
+
         return validated_queries
-    
+
     def generate_fallback_queries(
-        self,
-        window: TemporalWindow,
-        entity_tracker: EntityTracker
+        self, window: TemporalWindow, entity_tracker: EntityTracker
     ) -> List[str]:
         """
         Generate basic Cypher queries without LLM
-        
+
         Args:
             window: Temporal window
             entity_tracker: Entity tracker
-            
+
         Returns:
             List of basic Cypher queries
         """
         queries = []
-        
+
         # Create entity nodes (skip descriptions in fallback mode to avoid syntax errors)
         for entity_id in window.active_entities:
             entity = entity_tracker.get_entity(entity_id)
@@ -1310,7 +1386,7 @@ Now generate Cypher queries for the state changes above:
                     f"MERGE (e:Entity {{id: '{entity_id}'}}) "
                     f"SET e.label = '{safe_label}';"
                 )
-        
+
         # Create event nodes for state changes (use counter to ensure unique IDs)
         for idx, change in enumerate(window.state_changes):
             event_id = f"event_{change.entity_id}_{int(change.timestamp_after)}_{idx}"
@@ -1320,7 +1396,7 @@ Now generate Cypher queries for the state changes above:
                 f"ev.timestamp = datetime({{epochSeconds: {int(change.timestamp_after)}}}), "
                 f"ev.description = 'Entity changed state';"
             )
-            
+
             # Link entity to event
             queries.append(
                 f"MATCH (e:Entity {{id: '{change.entity_id}'}}), "
@@ -1330,9 +1406,7 @@ Now generate Cypher queries for the state changes above:
 
         # Create events for causal influence links
         for idx, link in enumerate(window.causal_links):
-            event_id = (
-                f"causal_{link.agent_id}_{link.patient_id}_{int(window.start_time)}_{idx}"
-            )
+            event_id = f"causal_{link.agent_id}_{link.patient_id}_{int(window.start_time)}_{idx}"
             score = f"{link.influence_score:.3f}"
             prox = f"{link.features.get('proximity', 0.0):.3f}"
             motion = f"{link.features.get('motion', 0.0):.3f}"
@@ -1369,40 +1443,38 @@ Now generate Cypher queries for the state changes above:
                 f"(patient:Entity {{id: '{link.patient_id}'}}) "
                 f"MERGE (ev)-[:INFLUENCED {{score: {score}}}]->(patient);"
             )
-        
+
         return queries
-    
+
     def compose_all_events(
-        self,
-        windows: List[TemporalWindow],
-        entity_tracker: EntityTracker
+        self, windows: List[TemporalWindow], entity_tracker: EntityTracker
     ) -> List[str]:
         """
         Compose events for all windows
-        
+
         Args:
             windows: List of temporal windows
             entity_tracker: Entity tracker
-            
+
         Returns:
             List of all Cypher queries
         """
-        logger.info("\n" + "="*80)
+        logger.info("\n" + "=" * 80)
         logger.info("EVENT COMPOSITION - LLM REASONING")
-        logger.info("="*80)
-        
+        logger.info("=" * 80)
+
         all_queries = []
-        
+
         for i, window in enumerate(windows, 1):
             logger.info(f"Processing window {i}/{len(windows)}...")
             queries = self.compose_events_for_window(window, entity_tracker)
             all_queries.extend(queries)
-        
+
         self.generated_queries = all_queries
-        
+
         logger.info(f"Generated {len(all_queries)} total Cypher queries")
-        logger.info("="*80 + "\n")
-        
+        logger.info("=" * 80 + "\n")
+
         return all_queries
 
 
@@ -1410,39 +1482,40 @@ Now generate Cypher queries for the state changes above:
 # MODULE 5: NEO4J KNOWLEDGE GRAPH INGESTION
 # ============================================================================
 
+
 class KnowledgeGraphBuilder:
     """Builds and manages Neo4j knowledge graph"""
-    
+
     def __init__(self, uri: str = None, user: str = None, password: str = None):
         self.uri = uri or Config.NEO4J_URI
         self.user = user or Config.NEO4J_USER
         self.password = password or Config.NEO4J_PASSWORD
         self.driver = None
-        
+
     def connect(self) -> bool:
         """
         Connect to Neo4j database
-        
+
         Returns:
             True if connection successful
         """
         try:
             logger.info(f"Connecting to Neo4j at {self.uri}...")
-            
+
             self.driver = GraphDatabase.driver(
                 self.uri,
                 auth=(self.user, self.password),
                 max_connection_lifetime=Config.MAX_CONNECTION_LIFETIME,
                 max_connection_pool_size=Config.MAX_CONNECTION_POOL_SIZE,
-                connection_timeout=Config.CONNECTION_TIMEOUT
+                connection_timeout=Config.CONNECTION_TIMEOUT,
             )
-            
+
             # Verify connection
             self.driver.verify_connectivity()
-            
+
             logger.info("Connected to Neo4j successfully")
             return True
-        
+
         except ServiceUnavailable:
             logger.error(f"Could not connect to Neo4j at {self.uri}")
             logger.error("Make sure Neo4j is running and credentials are correct")
@@ -1450,17 +1523,17 @@ class KnowledgeGraphBuilder:
         except Exception as e:
             logger.error(f"Failed to connect to Neo4j: {e}")
             return False
-    
+
     def close(self):
         """Close Neo4j connection"""
         if self.driver:
             self.driver.close()
             logger.info("Neo4j connection closed")
-    
+
     def initialize_schema(self, *, scene_embedding_dim: Optional[int] = None):
         """Initialize Neo4j schema with constraints and indexes"""
         logger.info("Initializing Neo4j schema...")
-        
+
         with self.driver.session() as session:
             # Create constraints
             constraints = [
@@ -1469,14 +1542,16 @@ class KnowledgeGraphBuilder:
                 "CREATE CONSTRAINT scene_id IF NOT EXISTS FOR (s:Scene) REQUIRE s.id IS UNIQUE",
                 "CREATE CONSTRAINT location_id IF NOT EXISTS FOR (loc:Location) REQUIRE loc.id IS UNIQUE",
             ]
-            
+
             for constraint in constraints:
                 try:
                     session.run(constraint)
-                    logger.info(f"  Created constraint: {constraint.split('FOR')[1].split('REQUIRE')[0].strip()}")
+                    logger.info(
+                        f"  Created constraint: {constraint.split('FOR')[1].split('REQUIRE')[0].strip()}"
+                    )
                 except Exception as e:
                     logger.warning(f"  Constraint may already exist: {e}")
-            
+
             # Create indexes
             indexes = [
                 "CREATE INDEX entity_label IF NOT EXISTS FOR (e:Entity) ON (e.label)",
@@ -1485,14 +1560,14 @@ class KnowledgeGraphBuilder:
                 "CREATE INDEX scene_frame IF NOT EXISTS FOR (s:Scene) ON (s.frame_number)",
                 "CREATE INDEX location_label IF NOT EXISTS FOR (loc:Location) ON (loc.label)",
             ]
-            
+
             for index in indexes:
                 try:
                     session.run(index)
                     logger.info(f"  Created index: {index.split('ON')[1].strip()}")
                 except Exception as e:
                     logger.warning(f"  Index may already exist: {e}")
-            
+
             # Create vector index (if supported)
             try:
                 vector_index = f"""
@@ -1526,17 +1601,17 @@ class KnowledgeGraphBuilder:
                     logger.info("  Created vector index for scene embeddings")
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(f"  Scene vector index not created: {exc}")
-        
+
         logger.info("Schema initialization complete")
-    
+
     def execute_query(self, query: str, parameters: Dict = None) -> bool:
         """
         Execute a single Cypher query
-        
+
         Args:
             query: Cypher query
             parameters: Query parameters
-            
+
         Returns:
             True if successful
         """
@@ -1548,26 +1623,28 @@ class KnowledgeGraphBuilder:
             logger.error(f"Query execution failed: {e}")
             logger.debug(f"Query: {query}")
             return False
-    
-    def execute_queries_batch(self, queries: List[str], batch_size: int = Config.BATCH_SIZE) -> int:
+
+    def execute_queries_batch(
+        self, queries: List[str], batch_size: int = Config.BATCH_SIZE
+    ) -> int:
         """
         Execute queries in batches
-        
+
         Args:
             queries: List of Cypher queries
             batch_size: Number of queries per batch
-            
+
         Returns:
             Number of successfully executed queries
         """
         logger.info(f"Executing {len(queries)} queries in batches of {batch_size}...")
-        
+
         successful = 0
         failed = 0
-        
+
         for i in range(0, len(queries), batch_size):
-            batch = queries[i:i + batch_size]
-            
+            batch = queries[i : i + batch_size]
+
             try:
                 with self.driver.session() as session:
                     with session.begin_transaction() as tx:
@@ -1579,34 +1656,36 @@ class KnowledgeGraphBuilder:
                                 failed += 1
                                 logger.warning(f"Query failed: {e}")
                                 logger.debug(f"Failed query: {query[:100]}...")
-                        
+
                         tx.commit()
-            
+
             except Exception as e:
                 logger.error(f"Batch transaction failed: {e}")
                 failed += len(batch)
-            
+
             if Config.PROGRESS_LOGGING and (i + batch_size) % (batch_size * 5) == 0:
                 logger.info(f"  Processed {i + batch_size}/{len(queries)} queries...")
-        
-        logger.info(f"Query execution complete: {successful} successful, {failed} failed")
-        
+
+        logger.info(
+            f"Query execution complete: {successful} successful, {failed} failed"
+        )
+
         return successful
-    
+
     def ingest_entities(self, entities: List[Entity]) -> int:
         """
         Ingest entity nodes into Neo4j
-        
+
         Args:
             entities: List of entities
-            
+
         Returns:
             Number of entities ingested
         """
         logger.info(f"Ingesting {len(entities)} entities...")
-        
+
         successful = 0
-        
+
         with self.driver.session() as session:
             for entity in entities:
                 try:
@@ -1616,18 +1695,18 @@ class KnowledgeGraphBuilder:
                         embedding = embedding.tolist()
                     else:
                         embedding = []
-                    
+
                     # Get first description safely
                     first_desc = ""
                     if entity.appearances and len(entity.appearances) > 0:
                         first_appearance = entity.appearances[0]
                         if isinstance(first_appearance, dict):
-                            first_desc = first_appearance.get('rich_description', '')
-                        elif hasattr(first_appearance, 'rich_description'):
+                            first_desc = first_appearance.get("rich_description", "")
+                        elif hasattr(first_appearance, "rich_description"):
                             first_desc = first_appearance.rich_description
 
                     scene_memberships = sorted(entity.scene_ids)
-                    
+
                     # Create/merge entity node
                     query = """
                     MERGE (e:Entity {id: $id})
@@ -1639,27 +1718,34 @@ class KnowledgeGraphBuilder:
                         e.first_description = $first_description,
                         e.scenes = $scenes
                     """
-                    
-                    session.run(query, {
-                        'id': entity.entity_id,
-                        'label': entity.object_class,
-                        'first_seen': entity.first_timestamp,
-                        'last_seen': entity.last_timestamp,
-                        'appearance_count': len(entity.appearances) if entity.appearances else 0,
-                        'embedding': embedding,
-                        'first_description': first_desc[:500] if first_desc else "",  # Truncate long descriptions
-                        'scenes': scene_memberships,
-                    })
-                    
+
+                    session.run(
+                        query,
+                        {
+                            "id": entity.entity_id,
+                            "label": entity.object_class,
+                            "first_seen": entity.first_timestamp,
+                            "last_seen": entity.last_timestamp,
+                            "appearance_count": (
+                                len(entity.appearances) if entity.appearances else 0
+                            ),
+                            "embedding": embedding,
+                            "first_description": (
+                                first_desc[:500] if first_desc else ""
+                            ),  # Truncate long descriptions
+                            "scenes": scene_memberships,
+                        },
+                    )
+
                     successful += 1
-                
+
                 except Exception as e:
                     logger.error(f"Failed to ingest entity {entity.entity_id}: {e}")
-        
+
         logger.info(f"Ingested {successful}/{len(entities)} entities")
-        
+
         return successful
-    
+
     def ingest_locations(self, locations: Iterable[LocationProfile]) -> int:
         """Create or update location nodes."""
 
@@ -1691,7 +1777,9 @@ class KnowledgeGraphBuilder:
                     )
                     created += 1
                 except Exception as exc:  # noqa: BLE001
-                    logger.error(f"Failed to ingest location {location.location_id}: {exc}")
+                    logger.error(
+                        f"Failed to ingest location {location.location_id}: {exc}"
+                    )
 
         return created
 
@@ -1708,7 +1796,9 @@ class KnowledgeGraphBuilder:
         with self.driver.session() as session:
             for scene in scene_list:
                 try:
-                    embedding = scene.embedding.tolist() if scene.embedding is not None else []
+                    embedding = (
+                        scene.embedding.tolist() if scene.embedding is not None else []
+                    )
                     session.run(
                         """
                         MERGE (s:Scene {id: $id})
@@ -1930,51 +2020,59 @@ class KnowledgeGraphBuilder:
     def get_graph_statistics(self) -> Dict[str, int]:
         """
         Get graph statistics
-        
+
         Returns:
             Dictionary of statistics
         """
         stats = {}
-        
+
         with self.driver.session() as session:
             # Count nodes
             result = session.run("MATCH (e:Entity) RETURN count(e) as count")
             record = result.single()
-            stats['entity_nodes'] = record['count'] if record else 0
-            
+            stats["entity_nodes"] = record["count"] if record else 0
+
             result = session.run("MATCH (ev:Event) RETURN count(ev) as count")
             record = result.single()
-            stats['event_nodes'] = record['count'] if record else 0
+            stats["event_nodes"] = record["count"] if record else 0
 
             result = session.run("MATCH (s:Scene) RETURN count(s) as count")
             record = result.single()
-            stats['scene_nodes'] = record['count'] if record else 0
+            stats["scene_nodes"] = record["count"] if record else 0
 
             result = session.run("MATCH (loc:Location) RETURN count(loc) as count")
             record = result.single()
-            stats['location_nodes'] = record['count'] if record else 0
-            
+            stats["location_nodes"] = record["count"] if record else 0
+
             # Count relationships
             result = session.run("MATCH ()-[r]->() RETURN count(r) as count")
             record = result.single()
-            stats['relationships'] = record['count'] if record else 0
+            stats["relationships"] = record["count"] if record else 0
 
-            result = session.run("MATCH (:Entity)-[r:APPEARS_IN]->(:Scene) RETURN count(r) as count")
+            result = session.run(
+                "MATCH (:Entity)-[r:APPEARS_IN]->(:Scene) RETURN count(r) as count"
+            )
             record = result.single()
-            stats['entity_scene_relationships'] = record['count'] if record else 0
+            stats["entity_scene_relationships"] = record["count"] if record else 0
 
-            result = session.run("MATCH (:Scene)-[r:IN_LOCATION]->(:Location) RETURN count(r) as count")
+            result = session.run(
+                "MATCH (:Scene)-[r:IN_LOCATION]->(:Location) RETURN count(r) as count"
+            )
             record = result.single()
-            stats['scene_location_relationships'] = record['count'] if record else 0
+            stats["scene_location_relationships"] = record["count"] if record else 0
 
-            result = session.run("MATCH (:Scene)-[r:TRANSITIONS_TO]->(:Scene) RETURN count(r) as count")
+            result = session.run(
+                "MATCH (:Scene)-[r:TRANSITIONS_TO]->(:Scene) RETURN count(r) as count"
+            )
             record = result.single()
-            stats['scene_transition_relationships'] = record['count'] if record else 0
+            stats["scene_transition_relationships"] = record["count"] if record else 0
 
-            result = session.run("MATCH (:Scene)-[r:SIMILAR_TO]->(:Scene) RETURN count(r) as count")
+            result = session.run(
+                "MATCH (:Scene)-[r:SIMILAR_TO]->(:Scene) RETURN count(r) as count"
+            )
             record = result.single()
-            stats['scene_similarity_relationships'] = record['count'] if record else 0
-        
+            stats["scene_similarity_relationships"] = record["count"] if record else 0
+
         return stats
 
 
@@ -1982,51 +2080,52 @@ class KnowledgeGraphBuilder:
 # MAIN SEMANTIC UPLIFT PIPELINE
 # ============================================================================
 
+
 def run_semantic_uplift(
     perception_log: List[Dict[str, Any]],
-    neo4j_driver = None,
+    neo4j_driver=None,
     neo4j_uri: str = None,
     neo4j_user: str = None,
-    neo4j_password: str = None
+    neo4j_password: str = None,
 ) -> Dict[str, Any]:
     """
     Main semantic uplift pipeline
-    
+
     Args:
         perception_log: List of RichPerceptionObject dictionaries from Part 1
         neo4j_driver: Optional pre-configured Neo4j driver
         neo4j_uri: Neo4j URI (if driver not provided)
         neo4j_user: Neo4j username (if driver not provided)
         neo4j_password: Neo4j password (if driver not provided)
-        
+
     Returns:
         Dictionary with uplift results and statistics
     """
-    logger.info("\n" + "="*80)
+    logger.info("\n" + "=" * 80)
     logger.info("SEMANTIC UPLIFT ENGINE - PART 2")
-    logger.info("="*80)
+    logger.info("=" * 80)
     logger.info(f"Processing {len(perception_log)} perception objects")
-    
+
     start_time = time.time()
     results = {
-        'success': False,
-        'num_entities': 0,
-        'num_scenes': 0,
-        'num_locations': 0,
-        'num_scene_similarity_links': 0,
-        'num_state_changes': 0,
-        'num_windows': 0,
-        'num_causal_links': 0,
-        'windows_with_causal': 0,
-        'num_queries': 0,
-        'graph_stats': {}
+        "success": False,
+        "num_entities": 0,
+        "num_scenes": 0,
+        "num_locations": 0,
+        "num_scene_similarity_links": 0,
+        "num_state_changes": 0,
+        "num_windows": 0,
+        "num_causal_links": 0,
+        "windows_with_causal": 0,
+        "num_queries": 0,
+        "graph_stats": {},
     }
-    
+
     # Step 1: Entity Tracking
     tracker = EntityTracker()
     tracker.track_entities(perception_log)
     entities = tracker.get_all_entities()
-    results['num_entities'] = len(entities)
+    results["num_entities"] = len(entities)
 
     scene_assembler = SceneAssembler(tracker)
     scenes, locations = scene_assembler.build_scenes(perception_log)
@@ -2035,36 +2134,36 @@ def run_semantic_uplift(
         threshold=Config.SCENE_SIMILARITY_THRESHOLD,
         top_k=Config.SCENE_SIMILARITY_TOP_K,
     )
-    results['num_scenes'] = len(scenes)
-    results['num_locations'] = len(locations)
-    results['num_scene_similarity_links'] = len(scene_similarities)
+    results["num_scenes"] = len(scenes)
+    results["num_locations"] = len(locations)
+    results["num_scene_similarity_links"] = len(scene_similarities)
     scene_embedding_dim = scene_assembler.embedding_dim
-    
+
     # Step 2: State Change Detection
     detector = StateChangeDetector()
     state_changes = detector.detect_all_state_changes(entities)
-    results['num_state_changes'] = len(state_changes)
-    
+    results["num_state_changes"] = len(state_changes)
+
     # Step 3: Temporal Windowing
     windows = create_temporal_windows(state_changes)
-    results['num_windows'] = len(windows)
+    results["num_windows"] = len(windows)
 
     # Step 3B: Causal Influence Scoring
     causal_scorer = CausalInfluenceScorer(tracker)
     causal_stats = causal_scorer.score_windows(windows)
-    results['num_causal_links'] = causal_stats.get('total_links', 0)
-    results['windows_with_causal'] = causal_stats.get('windows_with_links', 0)
-    
+    results["num_causal_links"] = causal_stats.get("total_links", 0)
+    results["windows_with_causal"] = causal_stats.get("windows_with_links", 0)
+
     # Step 4: Event Composition
     composer = EventComposer()
     cypher_queries = composer.compose_all_events(windows, tracker)
-    results['num_queries'] = len(cypher_queries)
-    
+    results["num_queries"] = len(cypher_queries)
+
     # Step 5: Neo4j Ingestion
-    logger.info("\n" + "="*80)
+    logger.info("\n" + "=" * 80)
     logger.info("KNOWLEDGE GRAPH INGESTION")
-    logger.info("="*80)
-    
+    logger.info("=" * 80)
+
     # Use provided driver or create new one
     if neo4j_driver:
         graph_builder = KnowledgeGraphBuilder()
@@ -2074,11 +2173,11 @@ def run_semantic_uplift(
         if not graph_builder.connect():
             logger.error("Failed to connect to Neo4j")
             return results
-    
+
     try:
         # Initialize schema
         graph_builder.initialize_schema(scene_embedding_dim=scene_embedding_dim)
-        
+
         # Ingest entities
         graph_builder.ingest_entities(entities)
 
@@ -2089,28 +2188,28 @@ def run_semantic_uplift(
         graph_builder.link_entities_to_scenes(perception_log)
         graph_builder.link_scene_transitions(scenes)
         graph_builder.link_scene_similarities(scene_similarities)
-        
+
         # Execute generated queries
         if cypher_queries:
             graph_builder.execute_queries_batch(cypher_queries)
-        
+
         # Get final statistics
-        results['graph_stats'] = graph_builder.get_graph_statistics()
-        results['success'] = True
-        
+        results["graph_stats"] = graph_builder.get_graph_statistics()
+        results["success"] = True
+
         logger.info("\nGraph Statistics:")
-        for key, value in results['graph_stats'].items():
+        for key, value in results["graph_stats"].items():
             logger.info(f"  {key}: {value}")
-    
+
     finally:
         if not neo4j_driver:  # Only close if we created the connection
             graph_builder.close()
-    
+
     elapsed_time = time.time() - start_time
-    
-    logger.info("\n" + "="*80)
+
+    logger.info("\n" + "=" * 80)
     logger.info("SEMANTIC UPLIFT COMPLETE")
-    logger.info("="*80)
+    logger.info("=" * 80)
     logger.info(f"Entities tracked: {results['num_entities']}")
     logger.info(f"Scenes segmented: {results['num_scenes']}")
     logger.info(f"Locations inferred: {results['num_locations']}")
@@ -2123,8 +2222,8 @@ def run_semantic_uplift(
     )
     logger.info(f"Cypher queries generated: {results['num_queries']}")
     logger.info(f"Total time: {elapsed_time:.2f}s")
-    logger.info("="*80 + "\n")
-    
+    logger.info("=" * 80 + "\n")
+
     return results
 
 
@@ -2134,41 +2233,43 @@ def run_semantic_uplift(
 
 if __name__ == "__main__":
     import json
-    
+
     # Load perception log from Part 1
     PERCEPTION_LOG_PATH = "/Users/riddhiman.rana/Desktop/Coding/Orion/orion-research/data/testing/perception_log.json"
-    
+
     if not os.path.exists(PERCEPTION_LOG_PATH):
         logger.error(f"Perception log not found: {PERCEPTION_LOG_PATH}")
         logger.info("Please run Part 1 first to generate a perception log")
         sys.exit(1)
-    
+
     try:
-        with open(PERCEPTION_LOG_PATH, 'r') as f:
+        with open(PERCEPTION_LOG_PATH, "r") as f:
             perception_log = json.load(f)
-        
+
         logger.info(f"Loaded perception log with {len(perception_log)} objects")
-        
+
         # Run semantic uplift
         results = run_semantic_uplift(
             perception_log,
             neo4j_uri=Config.NEO4J_URI,
             neo4j_user=Config.NEO4J_USER,
-            neo4j_password=Config.NEO4J_PASSWORD
+            neo4j_password=Config.NEO4J_PASSWORD,
         )
-        
+
         # Save results
-        results_path = os.path.join(os.path.dirname(PERCEPTION_LOG_PATH), 'uplift_results.json')
-        with open(results_path, 'w') as f:
+        results_path = os.path.join(
+            os.path.dirname(PERCEPTION_LOG_PATH), "uplift_results.json"
+        )
+        with open(results_path, "w") as f:
             json.dump(results, f, indent=2)
-        
+
         logger.info(f"Results saved to: {results_path}")
-        
-        if results['success']:
+
+        if results["success"]:
             logger.info("\n✅ Semantic uplift completed successfully!")
         else:
             logger.warning("\n⚠️ Semantic uplift completed with errors")
-    
+
     except Exception as e:
         logger.error(f"Semantic uplift failed: {e}", exc_info=True)
         sys.exit(1)

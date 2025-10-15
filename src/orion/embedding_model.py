@@ -25,18 +25,21 @@ def _ensure_asset_environment() -> None:
     if _ASSET_MANAGER is None:
         _ASSET_MANAGER = AssetManager()
 
+
 # Try to import both options
 SENTENCE_TRANSFORMERS_AVAILABLE = False
 OLLAMA_AVAILABLE = False
 
 try:
     from sentence_transformers import SentenceTransformer
+
     SENTENCE_TRANSFORMERS_AVAILABLE = True
 except Exception:  # pragma: no cover - dependency may be missing or misconfigured
     SentenceTransformer = None  # type: ignore[assignment]
 
 try:
     import ollama
+
     OLLAMA_AVAILABLE = True
 except Exception:  # pragma: no cover - dependency may be missing or misconfigured
     ollama = None  # type: ignore[assignment]
@@ -63,7 +66,9 @@ class EmbeddingModel:
         if backend_choice == "ollama":
             attempts.append(("ollama", self.primary_model or DEFAULT_OLLAMA_MODEL))
         elif backend_choice == "sentence-transformer":
-            attempts.append(("sentence-transformer", self.primary_model or DEFAULT_SENTENCE_MODEL))
+            attempts.append(
+                ("sentence-transformer", self.primary_model or DEFAULT_SENTENCE_MODEL)
+            )
         else:
             attempts.append(("ollama", self.primary_model or DEFAULT_OLLAMA_MODEL))
             attempts.append(("sentence-transformer", DEFAULT_SENTENCE_MODEL))
@@ -97,7 +102,9 @@ class EmbeddingModel:
         self.ollama_model = model_name
         if self.embedding_dim is None:
             return False, f"Ollama model '{model_name}' did not return embeddings."
-        logger.info("✓ Using Ollama embeddings (%s, dim=%d)", model_name, self.embedding_dim)
+        logger.info(
+            "✓ Using Ollama embeddings (%s, dim=%d)", model_name, self.embedding_dim
+        )
         return True, ""
 
     def _initialize_sentence_transformer(self, model_name: str) -> Tuple[bool, str]:
@@ -113,7 +120,9 @@ class EmbeddingModel:
         self.model = transformer
         self.sentence_model_name = model_name
         self.embedding_dim = transformer.get_sentence_embedding_dimension()
-        logger.info("✓ Using sentence transformer %s (dim=%s)", model_name, self.embedding_dim)
+        logger.info(
+            "✓ Using sentence transformer %s (dim=%s)", model_name, self.embedding_dim
+        )
         return True, ""
 
     def encode(self, texts: List[str]) -> np.ndarray:
@@ -191,31 +200,31 @@ def create_embedding_model(
 if __name__ == "__main__":
     # Test the embedding model
     print("Testing embedding models...")
-    
+
     try:
         model = create_embedding_model(prefer_ollama=True)
         print(f"\n✓ Model loaded: {model.get_model_info()}")
-        
+
         # Test encoding
         texts = [
             "A person is walking down the street",
             "Someone is strolling on the sidewalk",
-            "A car is driving on the road"
+            "A car is driving on the road",
         ]
-        
+
         print(f"\nTesting with {len(texts)} sentences...")
         embeddings = model.encode(texts)
         print(f"✓ Embeddings shape: {embeddings.shape}")
-        
+
         # Test similarity
         sim1 = model.compute_similarity(texts[0], texts[1])
         sim2 = model.compute_similarity(texts[0], texts[2])
-        
+
         print(f"\nSimilarity scores:")
         print(f"  '{texts[0]}' vs '{texts[1]}': {sim1:.3f}")
         print(f"  '{texts[0]}' vs '{texts[2]}': {sim2:.3f}")
         print(f"\n✓ Higher similarity for similar sentences: {sim1 > sim2}")
-        
+
     except Exception as e:
         print(f"\n✗ Error: {e}")
         print("\nTo use EmbeddingGemma:")

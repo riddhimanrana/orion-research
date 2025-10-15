@@ -168,9 +168,7 @@ class MobileOneBlock(nn.Module):
                 norm_layer.bias = nn.Parameter(torch.zeros(in_channels))
 
             self.rbr_skip = (
-                norm_layer
-                if out_channels == in_channels and stride == 1
-                else None
+                norm_layer if out_channels == in_channels and stride == 1 else None
             )
 
             # Re-parameterizable conv branches
@@ -551,7 +549,10 @@ class ReparamLargeKernelConv(nn.Module):
 
 
 def convolutional_stem(
-    in_channels: int, out_channels: int, inference_mode: bool = False, use_scale_branch: bool = True,
+    in_channels: int,
+    out_channels: int,
+    inference_mode: bool = False,
+    use_scale_branch: bool = True,
 ) -> nn.Sequential:
     """Build convolutional stem with MobileOne blocks.
 
@@ -574,7 +575,7 @@ def convolutional_stem(
             inference_mode=inference_mode,
             use_se=False,
             num_conv_branches=1,
-            use_scale_branch=use_scale_branch
+            use_scale_branch=use_scale_branch,
         ),
         MobileOneBlock(
             in_channels=out_channels,
@@ -586,7 +587,7 @@ def convolutional_stem(
             inference_mode=inference_mode,
             use_se=False,
             num_conv_branches=1,
-            use_scale_branch=use_scale_branch
+            use_scale_branch=use_scale_branch,
         ),
         MobileOneBlock(
             in_channels=out_channels,
@@ -598,7 +599,7 @@ def convolutional_stem(
             inference_mode=inference_mode,
             use_se=False,
             num_conv_branches=1,
-            use_scale_branch=use_scale_branch
+            use_scale_branch=use_scale_branch,
         ),
     )
 
@@ -608,6 +609,7 @@ class LayerNormChannel(nn.Module):
     LayerNorm only for Channel Dimension.
     Input: tensor in shape [B, C, H, W]
     """
+
     def __init__(self, num_features, eps=1e-05) -> None:
         super().__init__()
         self.weight = nn.Parameter(torch.ones(num_features))
@@ -618,8 +620,9 @@ class LayerNormChannel(nn.Module):
         u = x.mean(1, keepdim=True)
         s = (x - u).pow(2).mean(1, keepdim=True)
         x = (x - u) / torch.sqrt(s + self.eps)
-        x = self.weight.unsqueeze(-1).unsqueeze(-1) * x \
-            + self.bias.unsqueeze(-1).unsqueeze(-1)
+        x = self.weight.unsqueeze(-1).unsqueeze(-1) * x + self.bias.unsqueeze(
+            -1
+        ).unsqueeze(-1)
         return x
 
 
@@ -1351,8 +1354,9 @@ class FastViT(nn.Module):
             se_downsamples = [False] * len(layers)
 
         # Convolutional stem
-        self.patch_embed = convolutional_stem(3, embed_dims[0], inference_mode,
-                                              use_scale_branch=stem_scale_branch)
+        self.patch_embed = convolutional_stem(
+            3, embed_dims[0], inference_mode, use_scale_branch=stem_scale_branch
+        )
 
         # Build the main stages of the network architecture
         network = []
@@ -1433,7 +1437,9 @@ class FastViT(nn.Module):
             x = block(x)
         return x
 
-    def forward(self, x: torch.Tensor, *args, **kwargs) -> Union[Tensor, Dict[str, Tensor]]:
+    def forward(
+        self, x: torch.Tensor, *args, **kwargs
+    ) -> Union[Tensor, Dict[str, Tensor]]:
         # input embedding
         x = self.forward_embeddings(x)
         # through backbone
@@ -1458,7 +1464,13 @@ def fastvithd(pretrained=False, **kwargs):
     embed_dims = [96, 192, 384, 768, 1536]
     mlp_ratios = [4, 4, 4, 4, 4]
     downsamples = [True, True, True, True, True]
-    pos_embs = [None, None, None, partial(RepCPE, spatial_shape=(7, 7)), partial(RepCPE, spatial_shape=(7, 7))]
+    pos_embs = [
+        None,
+        None,
+        None,
+        partial(RepCPE, spatial_shape=(7, 7)),
+        partial(RepCPE, spatial_shape=(7, 7)),
+    ]
     token_mixers = ("repmixer", "repmixer", "repmixer", "attention", "attention")
     model = FastViT(
         layers,

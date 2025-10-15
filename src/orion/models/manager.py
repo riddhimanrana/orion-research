@@ -125,7 +125,9 @@ class ModelManager:
     def ensure_runtime_assets(self, runtime: str, *, download: bool = True) -> None:
         assets = self.list_runtime_assets(runtime)
         if not assets:
-            console.print(f"[yellow]No assets registered for runtime '{runtime}'.[/yellow]")
+            console.print(
+                f"[yellow]No assets registered for runtime '{runtime}'.[/yellow]"
+            )
             return
 
         for asset in assets:
@@ -165,7 +167,9 @@ class ModelManager:
                 repo_id=asset.huggingface_repo,
                 revision=asset.huggingface_revision,
                 local_dir=str(target_dir),
-                allow_patterns=list(asset.allow_patterns) if asset.allow_patterns else None,
+                allow_patterns=(
+                    list(asset.allow_patterns) if asset.allow_patterns else None
+                ),
             )
         elif asset.url:
             destination = target_dir / (asset.primary_file or Path(asset.url).name)
@@ -188,7 +192,9 @@ class ModelManager:
     def _download_url(self, url: str, destination: Path) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
         with Progress() as progress:
-            task_id = progress.add_task(f"download {destination.name}", start=False, total=None)
+            task_id = progress.add_task(
+                f"download {destination.name}", start=False, total=None
+            )
             response = requests.get(url, stream=True, timeout=60)
             response.raise_for_status()
             progress.start_task(task_id)

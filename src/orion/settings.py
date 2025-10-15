@@ -41,7 +41,11 @@ class OrionSettings:
 
     _SECRET_KEYS: ClassVar[Tuple[str, ...]] = ("neo4j.password",)
     _VALID_RUNTIMES: ClassVar[Tuple[str, ...]] = ("auto", "torch")
-    _VALID_EMBEDDING_BACKENDS: ClassVar[Tuple[str, ...]] = ("auto", "ollama", "sentence-transformer")
+    _VALID_EMBEDDING_BACKENDS: ClassVar[Tuple[str, ...]] = (
+        "auto",
+        "ollama",
+        "sentence-transformer",
+    )
 
     # ------------------------------------------------------------------
     # Lifecycle helpers
@@ -53,7 +57,9 @@ class OrionSettings:
         if env_path:
             path = Path(env_path).expanduser()
         else:
-            base_dir = Path(os.getenv("ORION_CONFIG_DIR", Path.home() / ".orion")).expanduser()
+            base_dir = Path(
+                os.getenv("ORION_CONFIG_DIR", Path.home() / ".orion")
+            ).expanduser()
             path = base_dir / "config.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
@@ -69,8 +75,12 @@ class OrionSettings:
 
         try:
             raw: Dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:  # pragma: no cover - invalid config edge case
-            raise SettingsError(f"Configuration file at {path} is not valid JSON: {exc}") from exc
+        except (
+            json.JSONDecodeError
+        ) as exc:  # pragma: no cover - invalid config edge case
+            raise SettingsError(
+                f"Configuration file at {path} is not valid JSON: {exc}"
+            ) from exc
 
         known_fields = {field.name for field in fields(cls)}
         data: Dict[str, Any] = {}
@@ -95,7 +105,9 @@ class OrionSettings:
         self.validate()
         target = path or self.config_path()
         payload = self.to_dict()
-        target.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        target.write_text(
+            json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -156,7 +168,9 @@ class OrionSettings:
             if normalized == "mlx":
                 normalized = "torch"
             if normalized not in self._VALID_RUNTIMES:
-                raise SettingsError(f"Runtime backend must be one of {self._VALID_RUNTIMES}.")
+                raise SettingsError(
+                    f"Runtime backend must be one of {self._VALID_RUNTIMES}."
+                )
             value = normalized
         elif field_name == "embedding_backend":
             normalized = value.lower()
@@ -167,7 +181,12 @@ class OrionSettings:
             value = normalized
         elif field_name == "neo4j_uri":
             value = value or self.neo4j_uri
-        elif field_name in {"neo4j_user", "neo4j_password", "qa_model", "embedding_model"}:
+        elif field_name in {
+            "neo4j_user",
+            "neo4j_password",
+            "qa_model",
+            "embedding_model",
+        }:
             if not value:
                 raise SettingsError(f"Configuration '{key}' cannot be empty.")
         else:  # pragma: no cover - future-proof branch
@@ -191,7 +210,9 @@ class OrionSettings:
     # ------------------------------------------------------------------
     def validate(self) -> None:
         if self.runtime_backend not in self._VALID_RUNTIMES:
-            raise SettingsError(f"Runtime backend must be one of {self._VALID_RUNTIMES}.")
+            raise SettingsError(
+                f"Runtime backend must be one of {self._VALID_RUNTIMES}."
+            )
         if self.embedding_backend not in self._VALID_EMBEDDING_BACKENDS:
             raise SettingsError(
                 f"Embedding backend must be one of {self._VALID_EMBEDDING_BACKENDS}."
@@ -206,4 +227,3 @@ class OrionSettings:
             raise SettingsError("QA model cannot be empty.")
         if not self.embedding_model:
             raise SettingsError("Embedding model cannot be empty.")
-

@@ -37,7 +37,9 @@ def is_backend_available(backend: str) -> bool:
 
 def select_backend(preferred: Optional[str] = None) -> BackendName:
     """Resolve the backend to use based on user preference and environment."""
-    raw_preference = preferred if preferred is not None else os.getenv("ORION_RUNTIME", _AUTO)
+    raw_preference = (
+        preferred if preferred is not None else os.getenv("ORION_RUNTIME", _AUTO)
+    )
     choice = raw_preference.lower()
 
     if choice not in {_AUTO, "auto"}:
@@ -47,13 +49,17 @@ def select_backend(preferred: Optional[str] = None) -> BackendName:
                 "Requested backend 'torch' is not available. Install PyTorch to continue."
             )
         if choice == "mlx":
-            logger.info("'mlx' preference detected; routing to the unified PyTorch backend.")
+            logger.info(
+                "'mlx' preference detected; routing to the unified PyTorch backend."
+            )
         return "torch"
 
     if is_backend_available("torch"):
         return "torch"
 
-    raise RuntimeError("No supported backend found. Install PyTorch to run Orion's perception pipeline.")
+    raise RuntimeError(
+        "No supported backend found. Install PyTorch to run Orion's perception pipeline."
+    )
 
 
 def set_active_backend(backend: BackendName) -> None:
