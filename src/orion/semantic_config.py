@@ -14,10 +14,10 @@ Usage:
 # mypy: ignore-errors
 # pyright: reportGeneralTypeIssues=false, reportOptionalMemberAccess=false, reportArgumentType=false
 
+import logging
 from typing import Optional
 
 from .semantic_uplift import Config
-import logging
 
 
 # ============================================================================

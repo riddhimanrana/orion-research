@@ -17,8 +17,9 @@ Usage:
     set_description_mode(DescriptionMode.OBJECT)  # SCENE, OBJECT, or HYBRID
 """
 
-from .perception_engine import Config, DescriptionMode
 import logging
+
+from .perception_engine import Config, DescriptionMode
 
 
 # ============================================================================
