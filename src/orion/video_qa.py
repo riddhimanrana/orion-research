@@ -29,7 +29,6 @@ class VideoQASystem:
         model: str = "gemma3:4b",
         embedding_backend: str = "auto",
         embedding_model: str = "embeddinggemma",
-        embedding_fallback: str = "all-MiniLM-L6-v2",
     ):
         """
         Initialize QA system
@@ -41,7 +40,6 @@ class VideoQASystem:
             model: Ollama model to use (gemma3:4b for better quality)
             embedding_backend: Embedding backend ('auto', 'ollama', or 'sentence-transformer')
             embedding_model: Preferred embedding model identifier
-            embedding_fallback: Sentence-transformer fallback when using auto embeddings
         """
         self.neo4j_uri = neo4j_uri
         self.neo4j_user = neo4j_user
@@ -51,7 +49,6 @@ class VideoQASystem:
         self.embedding_model: Optional[Any] = None
         self.embedding_backend_choice = embedding_backend
         self.embedding_model_name = embedding_model
-        self.embedding_fallback_name = embedding_fallback
         self.vector_index_name = "entity_embedding"
         self.vector_search_enabled = True
         self.vector_index_dimensions: Optional[int] = None
@@ -82,7 +79,6 @@ class VideoQASystem:
                 prefer_ollama=prefer_ollama,
                 backend=self.embedding_backend_choice,
                 model=self.embedding_model_name,
-                fallback=self.embedding_fallback_name,
             )
             model_obj = self.embedding_model
             if model_obj is not None:

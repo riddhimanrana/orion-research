@@ -14,6 +14,9 @@ except ImportError:  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_OLLAMA_MODEL = "embeddinggemma"
+DEFAULT_SENTENCE_MODEL = "all-MiniLM-L6-v2"
+
 _ASSET_MANAGER: Optional[AssetManager] = None
 
 
@@ -42,10 +45,9 @@ except Exception:  # pragma: no cover - dependency may be missing or misconfigur
 class EmbeddingModel:
     """Unified embedding model interface across Ollama and Sentence Transformers."""
 
-    def __init__(self, backend: str = "auto", model: str = "embeddinggemma", fallback: str = "all-MiniLM-L6-v2") -> None:
+    def __init__(self, backend: str = "auto", model: Optional[str] = None) -> None:
         self.requested_backend = backend
         self.primary_model = model
-        self.fallback_model = fallback
         self.model_type: Optional[str] = None
         self.embedding_dim: Optional[int] = None
         self.model: Optional[Any] = None
@@ -57,13 +59,14 @@ class EmbeddingModel:
 
     def _initialize_model(self) -> None:
         attempts: List[Tuple[str, str]] = []
-        if self.requested_backend == "ollama":
-            attempts.append(("ollama", self.primary_model))
-        elif self.requested_backend == "sentence-transformer":
-            attempts.append(("sentence-transformer", self.primary_model))
+        backend_choice = (self.requested_backend or "auto").lower()
+        if backend_choice == "ollama":
+            attempts.append(("ollama", self.primary_model or DEFAULT_OLLAMA_MODEL))
+        elif backend_choice == "sentence-transformer":
+            attempts.append(("sentence-transformer", self.primary_model or DEFAULT_SENTENCE_MODEL))
         else:
-            attempts.append(("ollama", self.primary_model))
-            attempts.append(("sentence-transformer", self.fallback_model or self.primary_model))
+            attempts.append(("ollama", self.primary_model or DEFAULT_OLLAMA_MODEL))
+            attempts.append(("sentence-transformer", DEFAULT_SENTENCE_MODEL))
 
         errors: List[str] = []
         for backend_name, model_name in attempts:
@@ -168,7 +171,6 @@ def create_embedding_model(
     *,
     backend: Optional[str] = None,
     model: Optional[str] = None,
-    fallback: Optional[str] = None,
 ) -> EmbeddingModel:
     """Factory helper with backward-compatible defaults."""
 
@@ -177,17 +179,13 @@ def create_embedding_model(
     else:
         resolved_backend = backend
 
-    if resolved_backend == "sentence-transformer":
-        resolved_model = model or fallback or "all-MiniLM-L6-v2"
-        resolved_fallback = fallback or resolved_model
-    elif resolved_backend == "ollama":
-        resolved_model = model or "embeddinggemma"
-        resolved_fallback = fallback or "all-MiniLM-L6-v2"
-    else:  # auto
-        resolved_model = model or "embeddinggemma"
-        resolved_fallback = fallback or "all-MiniLM-L6-v2"
+    resolved_model = model
+    if resolved_backend == "sentence-transformer" and resolved_model is None:
+        resolved_model = DEFAULT_SENTENCE_MODEL
+    if resolved_backend == "ollama" and resolved_model is None:
+        resolved_model = DEFAULT_OLLAMA_MODEL
 
-    return EmbeddingModel(resolved_backend, resolved_model, resolved_fallback)
+    return EmbeddingModel(resolved_backend, resolved_model)
 
 
 if __name__ == "__main__":

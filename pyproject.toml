@@ -9,11 +9,11 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [project]
-name = "orion-research"
+name = "orion"
 version = "0.1.0"
 description = "Research for orion"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 license = {file = "LICENSE"}
 authors = [
     {name = "Riddhiman Rana", email = "contact@riddhimanrana.com"},

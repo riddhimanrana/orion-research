@@ -26,7 +26,6 @@ class OrionSettings:
     qa_model: str = "gemma3:4b"
     embedding_backend: str = "auto"
     embedding_model: str = "embeddinggemma"
-    embedding_fallback: str = "all-MiniLM-L6-v2"
     config_version: int = CURRENT_VERSION
 
     _KEY_ALIASES: ClassVar[Dict[str, str]] = {
@@ -38,7 +37,6 @@ class OrionSettings:
         "qa.model": "qa_model",
         "embedding.backend": "embedding_backend",
         "embedding.model": "embedding_model",
-        "embedding.fallback": "embedding_fallback",
     }
 
     _SECRET_KEYS: ClassVar[Tuple[str, ...]] = ("neo4j.password",)
@@ -115,7 +113,6 @@ class OrionSettings:
             "qa.model",
             "embedding.backend",
             "embedding.model",
-            "embedding.fallback",
         )
         flat = self._flatten()
         for key in ordering:
@@ -136,7 +133,6 @@ class OrionSettings:
             "qa.model": self.qa_model,
             "embedding.backend": self.embedding_backend,
             "embedding.model": self.embedding_model,
-            "embedding.fallback": self.embedding_fallback,
         }
 
     @staticmethod
@@ -171,7 +167,7 @@ class OrionSettings:
             value = normalized
         elif field_name == "neo4j_uri":
             value = value or self.neo4j_uri
-        elif field_name in {"neo4j_user", "neo4j_password", "qa_model", "embedding_model", "embedding_fallback"}:
+        elif field_name in {"neo4j_user", "neo4j_password", "qa_model", "embedding_model"}:
             if not value:
                 raise SettingsError(f"Configuration '{key}' cannot be empty.")
         else:  # pragma: no cover - future-proof branch
@@ -210,6 +206,4 @@ class OrionSettings:
             raise SettingsError("QA model cannot be empty.")
         if not self.embedding_model:
             raise SettingsError("Embedding model cannot be empty.")
-        if not self.embedding_fallback:
-            raise SettingsError("Embedding fallback model cannot be empty.")
 

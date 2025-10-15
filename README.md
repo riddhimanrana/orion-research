@@ -1,5 +1,6 @@
 # Orion
 
+[![CI](https://github.com/riddhimanrana/orion-research/actions/workflows/ci.yml/badge.svg)](https://github.com/riddhimanrana/orion-research/actions/workflows/ci.yml)
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/release/python-3100/)
 [![License](https://img.shields.io/badge/license-MIT-green)](https://opensource.org/licenses/MIT)
 [![Ollama](https://img.shields.io/badge/ollama-local%20LLM-blue)](https://ollama.com)
@@ -19,7 +20,7 @@ Runtime note: Orion ships a single PyTorch backend that auto-picks CPU, Apple MP
 ## Quick Start (one command)
 
 ```bash
-curl -sSfL https://raw.githubusercontent.com/riddhimanrana/orion-research/main/scripts/bootstrap.sh | bash
+curl -sSfL https://raw.githubusercontent.com/riddhimanrana/orion-research/refs/heads/main/scripts/bootstrap.sh | bash
 ```
 
 You can override pieces of the bootstrap with environment variables:
@@ -33,6 +34,8 @@ After it finishes:
 ```bash
 source orion-research/.orion-venv/bin/activate
 python -m orion.cli --help
+pip install -e .[dev]         # optional: install test/lint tooling
+pytest tests/test_quickstart.py  # smoke check shared with CI
 ```
 
 ## Install
@@ -105,6 +108,8 @@ orion config show
 orion config set neo4j.uri bolt://localhost:7687
 orion config set neo4j.password changeme
 orion config set qa.model mistral:7b
+orion config set embedding.backend sentence-transformer
+orion config set embedding.model all-MiniLM-L6-v2
 ```
 
 On-demand overrides are also available:
@@ -140,6 +145,10 @@ Perception and uplift presets remain in the repository if you wish to tweak adva
 - Semantic uplift: `production/semantic_uplift.py`
 
 Defaults work out of the box. Event composition uses Ollama with `gemma3:4b` (or your configured model) and validates Cypher before execution; invalid queries fall back to safe, idempotent ones. Neo4j is optional.
+
+## Continuous Integration
+
+GitHub Actions (`.github/workflows/ci.yml`) installs Orion with developer dependencies, runs formatting and lint checks, and executes `pytest tests/test_quickstart.py` to confirm the CLI boots. The status badge above reflects the latest run on `main`.
 
 ## Troubleshooting
 

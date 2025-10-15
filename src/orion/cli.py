@@ -219,10 +219,6 @@ For more help: orion <command> --help
         "--embedding-model",
         help="Embedding model identifier (Ollama or sentence-transformer, defaults to config)",
     )
-    analyze_parser.add_argument(
-        "--embedding-fallback",
-        help="Sentence-transformer fallback when using auto embeddings (defaults to config)",
-    )
     analyze_parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
     analyze_parser.add_argument(
         "--runtime",
@@ -242,10 +238,6 @@ For more help: orion <command> --help
     qa_parser.add_argument(
         "--embedding-model",
         help="Embedding model identifier (defaults to config)",
-    )
-    qa_parser.add_argument(
-        "--embedding-fallback",
-        help="Sentence-transformer fallback when using auto embeddings (defaults to config)",
     )
     qa_parser.add_argument(
         "--runtime",
@@ -311,7 +303,6 @@ def main(argv: list[str] | None = None) -> None:
         qa_model = args.qa_model or settings.qa_model
         embedding_backend = args.embedding_backend or settings.embedding_backend
         embedding_model = args.embedding_model or settings.embedding_model
-        embedding_fallback = args.embedding_fallback or settings.embedding_fallback
 
         console.print(f"\n[bold]Analyzing:[/bold] [cyan]{args.video}[/cyan]")
         config = "balanced"
@@ -349,7 +340,6 @@ def main(argv: list[str] | None = None) -> None:
                     model=qa_model,
                     embedding_backend=embedding_backend,
                     embedding_model=embedding_model,
-                    embedding_fallback=embedding_fallback,
                 )
                 qa.start_interactive_session()
 
@@ -371,7 +361,6 @@ def main(argv: list[str] | None = None) -> None:
                 model=args.model or settings.qa_model,
                 embedding_backend=args.embedding_backend or settings.embedding_backend,
                 embedding_model=args.embedding_model or settings.embedding_model,
-                embedding_fallback=args.embedding_fallback or settings.embedding_fallback,
             )
             qa.start_interactive_session()
 
