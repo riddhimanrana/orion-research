@@ -128,11 +128,16 @@ def print_current_config():
     
     print("\n[State Change Detection]")
     print(f"  STATE_CHANGE_THRESHOLD: {Config.STATE_CHANGE_THRESHOLD}")
-    print(f"  SENTENCE_MODEL: {Config.SENTENCE_MODEL}")  # type: ignore[attr-defined]
+    print(f"  EMBEDDING_MODEL_TYPE: {Config.EMBEDDING_MODEL_TYPE}")
     
     print("\n[Temporal Windowing]")
     print(f"  TIME_WINDOW_SIZE: {Config.TIME_WINDOW_SIZE}s")
     print(f"  MIN_EVENTS_PER_WINDOW: {Config.MIN_EVENTS_PER_WINDOW}")
+
+    print("\n[Scene & Location Inference]")
+    print(f"  SCENE_SIMILARITY_THRESHOLD: {Config.SCENE_SIMILARITY_THRESHOLD}")
+    print(f"  SCENE_SIMILARITY_TOP_K: {Config.SCENE_SIMILARITY_TOP_K}")
+    print(f"  SCENE_LOCATION_TOP_OBJECTS: {Config.SCENE_LOCATION_TOP_OBJECTS}")
     
     print("\n[LLM Event Composition - Ollama]")
     print(f"  OLLAMA_API_URL: {Config.OLLAMA_API_URL}")

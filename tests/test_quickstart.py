@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -18,5 +19,9 @@ def test_cli_help_executes() -> None:
         check=True,
         capture_output=True,
         text=True,
+        env={
+            **os.environ,
+            "PYTHONPATH": f"{REPO_ROOT / 'src'}{os.pathsep}" + os.environ.get("PYTHONPATH", ""),
+        },
     )
     assert "usage:" in result.stdout.lower()

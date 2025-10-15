@@ -8,6 +8,8 @@
 
 Orion turns videos into a simple knowledge graph you can query in plain English. It detects objects, describes scenes, tracks changes over time, and stores events in Neo4j. A local LLM (via Ollama) answers questions grounded by this graph.
 
+Part 2 of the pipeline now builds a richer scene graph: every frame snapshot becomes a `Scene`, related scenes are clustered into inferred `Location` nodes, entities are linked to the scenes they appear in, and similar rooms are connected with weighted `SIMILAR_TO` edges. Temporal `TRANSITIONS_TO` links capture how the narrative flows from one scene to the next.
+
 ## Requirements
 
 - macOS or Linux (Apple Silicon or CUDA recommended for speed)
@@ -127,6 +129,14 @@ orion init      # Re-sync model assets (or: python -m orion.cli init)
 orion --help    # CLI help and subcommand docs
 python -m orion.cli --help   # Direct module invocation if the entry point is absent
 ```
+
+## Scene & Location Graph
+
+- `Scene` nodes capture each analyzed frame with its dominant objects, descriptive text, and a vector embedding for similarity search.
+- `Location` nodes cluster scenes by their shared objects (e.g., “desk, monitor, keyboard”), enabling questions like “find rooms similar to the office scene.”
+- Relationships include `APPEARS_IN` (entities ↔ scenes with timestamps), `IN_LOCATION` (scene → location grouping), `TRANSITIONS_TO` (ordered timeline with gaps), and `SIMILAR_TO` (bi-directional cosine similarity scores between scenes).
+
+These structures are populated automatically during `orion analyze`, so downstream queries gain immediate context about spaces, transitions, and object co-occurrence.
 
 ## Configuration (optional)
 

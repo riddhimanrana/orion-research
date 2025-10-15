@@ -21,11 +21,13 @@ import time
 import logging
 import json
 import warnings
-from typing import List, Dict, Optional, Tuple, Any, Set
+from typing import List, Dict, Optional, Tuple, Any, Set, Iterable
 from dataclasses import dataclass, field
-from collections import defaultdict
+from collections import Counter, defaultdict
+import hashlib
 from datetime import datetime
 from pathlib import Path
+import math
 
 import numpy as np
 from neo4j import GraphDatabase, Session
@@ -70,12 +72,24 @@ class Config:
     # State Change Detection
     STATE_CHANGE_THRESHOLD = 0.85  # Cosine similarity threshold
     EMBEDDING_MODEL_TYPE = 'embeddinggemma'  # 'embeddinggemma' (Ollama) or 'sentence-transformer'
-    SENTENCE_MODEL_FALLBACK = 'all-MiniLM-L6-v2'  # Fallback if embeddinggemma unavailable
+    SCENE_SIMILARITY_THRESHOLD = 0.82  # Cosine threshold for scene similarity links
+    SCENE_SIMILARITY_TOP_K = 3  # Max similar scenes per scene
+    SCENE_LOCATION_TOP_OBJECTS = 3  # Number of dominant objects to describe a location
     
     # Temporal Windowing
     TIME_WINDOW_SIZE = 30.0  # seconds
     MIN_EVENTS_PER_WINDOW = 2  # Minimum state changes to trigger event composition
     
+    # Causal Influence Scoring
+    CAUSAL_MAX_PIXEL_DISTANCE = 600.0
+    CAUSAL_TEMPORAL_DECAY = 4.0  # seconds before influence decays
+    CAUSAL_PROXIMITY_WEIGHT = 0.45
+    CAUSAL_MOTION_WEIGHT = 0.25
+    CAUSAL_TEMPORAL_WEIGHT = 0.2
+    CAUSAL_EMBEDDING_WEIGHT = 0.1
+    CAUSAL_MIN_SCORE = 0.55
+    CAUSAL_TOP_K_PER_WINDOW = 5
+
     # LLM Event Composition (Ollama)
     USE_LLM_COMPOSITION = True  # Enable LLM composition with gemma3:4b
     OLLAMA_API_URL = "http://localhost:11434/api/generate"
@@ -139,6 +153,7 @@ class Entity:
     first_timestamp: float = 0.0
     last_timestamp: float = 0.0
     average_embedding: Optional[np.ndarray] = None
+    scene_ids: Set[str] = field(default_factory=set)
     
     def add_appearance(self, perception_obj: Dict[str, Any]):
         """Add an appearance of this entity"""
@@ -149,6 +164,11 @@ class Entity:
             self.first_timestamp = timestamp
         if not self.last_timestamp or timestamp > self.last_timestamp:
             self.last_timestamp = timestamp
+
+    def add_scene(self, scene_id: str) -> None:
+        """Associate the entity with a scene."""
+        if scene_id:
+            self.scene_ids.add(scene_id)
     
     def compute_average_embedding(self):
         """Compute average embedding from all appearances"""
@@ -178,6 +198,10 @@ class StateChange:
     description_after: str
     similarity_score: float
     change_magnitude: float  # 1 - similarity
+    centroid_before: Optional[Tuple[float, float]] = None
+    centroid_after: Optional[Tuple[float, float]] = None
+    displacement: float = 0.0
+    velocity: float = 0.0
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -187,7 +211,11 @@ class StateChange:
             'description_before': self.description_before,
             'description_after': self.description_after,
             'similarity_score': self.similarity_score,
-            'change_magnitude': self.change_magnitude
+            'change_magnitude': self.change_magnitude,
+            'centroid_before': self.centroid_before,
+            'centroid_after': self.centroid_after,
+            'displacement': self.displacement,
+            'velocity': self.velocity,
         }
 
 
@@ -198,6 +226,7 @@ class TemporalWindow:
     end_time: float
     active_entities: Set[str] = field(default_factory=set)
     state_changes: List[StateChange] = field(default_factory=list)
+    causal_links: List["CausalLink"] = field(default_factory=list)
     
     def add_state_change(self, change: StateChange):
         """Add a state change to this window"""
@@ -207,6 +236,254 @@ class TemporalWindow:
     def is_significant(self) -> bool:
         """Check if window has enough activity to warrant event composition"""
         return len(self.state_changes) >= Config.MIN_EVENTS_PER_WINDOW
+
+    def add_causal_link(self, link: "CausalLink") -> None:
+        """Attach a causal influence link to the window."""
+        self.causal_links.append(link)
+
+    def top_causal_links(self, limit: int) -> List["CausalLink"]:
+        """Return top scoring causal links for the window."""
+        if not self.causal_links:
+            return []
+        return sorted(self.causal_links, key=lambda link: link.influence_score, reverse=True)[:limit]
+
+
+@dataclass
+class CausalLink:
+    """Represents an inferred causal influence between two entities."""
+
+    agent_id: str
+    patient_id: str
+    agent_change: StateChange
+    patient_change: StateChange
+    influence_score: float
+    features: Dict[str, float]
+    justification: str
+
+
+@dataclass
+class SceneSegment:
+    """Represents an aggregated view of a video scene or room."""
+
+    scene_id: str
+    frame_number: int
+    start_timestamp: float
+    end_timestamp: float
+    description: str
+    object_classes: List[str]
+    entity_ids: List[str]
+    location_id: str
+    embedding: Optional[np.ndarray] = None
+
+    @property
+    def duration(self) -> float:
+        return max(0.0, self.end_timestamp - self.start_timestamp)
+
+
+@dataclass
+class LocationProfile:
+    """Encapsulates a logical location inferred from dominant scene objects."""
+
+    location_id: str
+    signature: str
+    label: str
+    object_classes: List[str]
+    scene_ids: List[str] = field(default_factory=list)
+
+
+@dataclass
+class SceneSimilarity:
+    """Represents similarity between two scenes."""
+
+    source_id: str
+    target_id: str
+    score: float
+
+
+def _compute_centroid_from_bbox(bbox: Optional[Iterable[float]]) -> Optional[Tuple[float, float]]:
+    """Compute centroid from bounding box if available."""
+    if not bbox or len(bbox) != 4:
+        return None
+    x1, y1, x2, y2 = [float(v) for v in bbox]
+    return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+
+
+def _euclidean_distance(p1: Optional[Tuple[float, float]], p2: Optional[Tuple[float, float]]) -> Optional[float]:
+    """Return Euclidean distance between two points if both exist."""
+    if p1 is None or p2 is None:
+        return None
+    return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
+
+
+class SceneAssembler:
+    """Builds scene segments, inferred locations, and similarity links."""
+
+    def __init__(self, tracker: "EntityTracker") -> None:
+        self.tracker = tracker
+        self.embedding_model = None
+        self.embedding_dim: Optional[int] = None
+        self._init_embedding_model()
+
+    def _init_embedding_model(self) -> None:
+        if not EMBEDDING_MODEL_AVAILABLE or create_embedding_model is None:
+            logger.warning("Scene embeddings unavailable; install embedding backends for richer links.")
+            return
+        try:
+            self.embedding_model = create_embedding_model(prefer_ollama=True)
+            self.embedding_dim = self.embedding_model.get_embedding_dimension()
+            logger.info(
+                "Scene assembler using %s embeddings (dim=%s)",
+                self.embedding_model.get_model_info().get("model_name"),
+                self.embedding_dim,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to initialize scene embedding model: %s", exc)
+            self.embedding_model = None
+            self.embedding_dim = None
+
+    def _encode(self, text: str) -> Optional[np.ndarray]:
+        if not text or self.embedding_model is None:
+            return None
+        try:
+            vector = self.embedding_model.encode([text])[0]
+            vector = np.asarray(vector, dtype=float)
+            norm = float(np.linalg.norm(vector))
+            if norm > 0:
+                vector = vector / norm
+            return vector
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Scene embedding generation failed: %s", exc)
+            return None
+
+    def build_scenes(
+        self,
+        perception_log: List[Dict[str, Any]],
+    ) -> Tuple[List[SceneSegment], Dict[str, LocationProfile]]:
+        """Aggregate perception objects into scene segments and locations."""
+
+        frames: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
+        for obj in perception_log:
+            frame_number = obj.get("frame_number")
+            if frame_number is None:
+                continue
+            frames[int(frame_number)].append(obj)
+
+        scenes: List[SceneSegment] = []
+        locations: Dict[str, LocationProfile] = {}
+
+        for frame_number in sorted(frames.keys()):
+            frame_objects = frames[frame_number]
+            if not frame_objects:
+                continue
+
+            timestamps = [float(obj.get("timestamp", 0.0)) for obj in frame_objects]
+            start_time = min(timestamps) if timestamps else 0.0
+            end_time = max(timestamps) if timestamps else start_time
+
+            entity_ids: List[str] = []
+            raw_classes: List[str] = []
+            description_parts: List[str] = []
+
+            for obj in frame_objects:
+                entity_id = obj.get("entity_id")
+                if entity_id:
+                    entity_ids.append(entity_id)
+                obj_class = obj.get("object_class", "object")
+                raw_classes.append(obj_class)
+                desc = obj.get("rich_description")
+                if desc:
+                    description_parts.append(desc)
+                else:
+                    description_parts.append(f"Observed {obj_class} in frame {frame_number}.")
+
+            description = " ".join(description_parts).strip() or f"Scene captured at frame {frame_number}."
+            embedding = self._encode(description)
+            scene_id = f"scene_{frame_number:06d}"
+
+            for obj in frame_objects:
+                obj["scene_id"] = scene_id
+
+            unique_entities = sorted(set(entity_ids))
+            class_counts = Counter(raw_classes)
+            dominant_classes = [cls for cls, _ in class_counts.most_common(Config.SCENE_LOCATION_TOP_OBJECTS)]
+            signature = "|".join(dominant_classes) if dominant_classes else "unspecified"
+            label = ", ".join(dominant_classes) if dominant_classes else "Uncategorized Space"
+            signature_hash = hashlib.sha1(signature.encode("utf-8")).hexdigest()[:12]
+            location_id = f"location_{signature_hash}"
+
+            if location_id not in locations:
+                locations[location_id] = LocationProfile(
+                    location_id=location_id,
+                    signature=signature,
+                    label=label,
+                    object_classes=dominant_classes,
+                )
+            locations[location_id].scene_ids.append(scene_id)
+
+            scene_segment = SceneSegment(
+                scene_id=scene_id,
+                frame_number=frame_number,
+                start_timestamp=start_time,
+                end_timestamp=end_time,
+                description=description,
+                object_classes=dominant_classes,
+                entity_ids=unique_entities,
+                location_id=location_id,
+                embedding=embedding,
+            )
+            scenes.append(scene_segment)
+
+            for entity_id in unique_entities:
+                entity = self.tracker.get_entity(entity_id)
+                if entity is not None:
+                    entity.add_scene(scene_id)
+
+        return scenes, locations
+
+    @staticmethod
+    def compute_similarities(
+        scenes: List[SceneSegment],
+        *,
+        threshold: float = Config.SCENE_SIMILARITY_THRESHOLD,
+        top_k: int = Config.SCENE_SIMILARITY_TOP_K,
+    ) -> List[SceneSimilarity]:
+        """Compute similarity edges between scenes."""
+
+        valid_indices = [idx for idx, scene in enumerate(scenes) if scene.embedding is not None]
+        if not valid_indices:
+            return []
+
+        embeddings = np.stack([np.asarray(scenes[idx].embedding) for idx in valid_indices])
+        similarity_matrix = embeddings @ embeddings.T
+
+        pairs_seen: Set[Tuple[str, str]] = set()
+        edges: List[SceneSimilarity] = []
+
+        for local_idx, global_idx in enumerate(valid_indices):
+            row = similarity_matrix[local_idx]
+            row[local_idx] = -np.inf  # Avoid self-selection
+            candidate_count = min(top_k, len(valid_indices) - 1)
+            if candidate_count <= 0:
+                continue
+            candidate_index_buffer = np.argpartition(-row, list(range(candidate_count)))[:candidate_count]
+            top_candidate_indices = sorted(candidate_index_buffer, key=lambda idx: row[idx], reverse=True)
+
+            for candidate_idx in top_candidate_indices:
+                score = float(row[candidate_idx])
+                if score < threshold:
+                    continue
+                other_global_idx = valid_indices[candidate_idx]
+                source_id = scenes[global_idx].scene_id
+                target_id = scenes[other_global_idx].scene_id
+                if source_id == target_id:
+                    continue
+                ordered = tuple(sorted((source_id, target_id)))
+                if ordered in pairs_seen:
+                    continue
+                pairs_seen.add(ordered)
+                edges.append(SceneSimilarity(source_id=source_id, target_id=target_id, score=score))
+
+        return edges
 
 
 # ============================================================================
@@ -451,6 +728,12 @@ class StateChangeDetector:
             
             # Detect state change
             if similarity < Config.STATE_CHANGE_THRESHOLD:
+                centroid_before = _compute_centroid_from_bbox(curr.get('bounding_box'))
+                centroid_after = _compute_centroid_from_bbox(next_app.get('bounding_box'))
+                displacement = _euclidean_distance(centroid_before, centroid_after) or 0.0
+                time_delta = float(next_app.get('timestamp', 0.0) - curr.get('timestamp', 0.0))
+                velocity = displacement / time_delta if time_delta > 0 else 0.0
+
                 change = StateChange(
                     entity_id=entity.entity_id,
                     timestamp_before=curr['timestamp'],
@@ -458,7 +741,11 @@ class StateChangeDetector:
                     description_before=curr_desc,
                     description_after=next_desc,
                     similarity_score=similarity,
-                    change_magnitude=1.0 - similarity
+                    change_magnitude=1.0 - similarity,
+                    centroid_before=centroid_before,
+                    centroid_after=centroid_after,
+                    displacement=displacement,
+                    velocity=velocity,
                 )
                 changes.append(change)
         
@@ -567,6 +854,184 @@ def create_temporal_windows(
 
 
 # ============================================================================
+# MODULE 3B: CAUSAL INFLUENCE SCORING
+# ============================================================================
+
+class CausalInfluenceScorer:
+    """Scores likely causal influences between entities inside temporal windows."""
+
+    def __init__(self, tracker: EntityTracker):
+        self.tracker = tracker
+
+    def score_windows(self, windows: List[TemporalWindow]) -> Dict[str, int]:
+        """Populate each window with high-confidence causal influence links."""
+
+        if not windows:
+            return {"total_links": 0, "windows_with_links": 0}
+
+        logger.info("\n" + "=" * 80)
+        logger.info("CAUSAL INFLUENCE SCORING")
+        logger.info("=" * 80)
+
+        total_links = 0
+        windows_with_links = 0
+
+        for window in windows:
+            links = self._score_window(window)
+            window.causal_links = links
+            if links:
+                windows_with_links += 1
+                total_links += len(links)
+
+        logger.info(
+            "Computed %d causal links across %d/%d windows",
+            total_links,
+            windows_with_links,
+            len(windows),
+        )
+        logger.info("=" * 80 + "\n")
+
+        return {
+            "total_links": total_links,
+            "windows_with_links": windows_with_links,
+        }
+
+    def _score_window(self, window: TemporalWindow) -> List[CausalLink]:
+        if len(window.state_changes) < 2:
+            return []
+
+        candidates: List[CausalLink] = []
+        for agent_change in window.state_changes:
+            for patient_change in window.state_changes:
+                if agent_change.entity_id == patient_change.entity_id:
+                    continue
+                link = self._evaluate_pair(agent_change, patient_change)
+                if link is not None:
+                    candidates.append(link)
+
+        if not candidates:
+            return []
+
+        dedup: Dict[Tuple[str, str], CausalLink] = {}
+        for link in candidates:
+            key = (link.agent_id, link.patient_id)
+            stored = dedup.get(key)
+            if stored is None or link.influence_score > stored.influence_score:
+                dedup[key] = link
+
+        sorted_links = sorted(
+            dedup.values(),
+            key=lambda item: item.influence_score,
+            reverse=True,
+        )
+
+        return sorted_links[: Config.CAUSAL_TOP_K_PER_WINDOW]
+
+    def _evaluate_pair(
+        self,
+        agent_change: StateChange,
+        patient_change: StateChange,
+    ) -> Optional[CausalLink]:
+        agent_entity = self.tracker.get_entity(agent_change.entity_id)
+        patient_entity = self.tracker.get_entity(patient_change.entity_id)
+
+        if agent_entity is None or patient_entity is None:
+            return None
+
+        proximity = self._compute_proximity(agent_change, patient_change)
+        motion = self._compute_motion(agent_change, patient_change)
+        temporal = self._compute_temporal(agent_change, patient_change)
+        embedding_sim = self._compute_embedding_similarity(agent_entity, patient_entity)
+
+        score = (
+            Config.CAUSAL_PROXIMITY_WEIGHT * proximity
+            + Config.CAUSAL_MOTION_WEIGHT * motion
+            + Config.CAUSAL_TEMPORAL_WEIGHT * temporal
+            + Config.CAUSAL_EMBEDDING_WEIGHT * embedding_sim
+        )
+
+        if score < Config.CAUSAL_MIN_SCORE:
+            return None
+
+        features = {
+            "proximity": proximity,
+            "motion": motion,
+            "temporal": temporal,
+            "embedding": embedding_sim,
+        }
+
+        justification = (
+            f"Proximity={proximity:.2f}, Motion={motion:.2f}, "
+            f"Temporal={temporal:.2f}, Embedding={embedding_sim:.2f}"
+        )
+
+        return CausalLink(
+            agent_id=agent_change.entity_id,
+            patient_id=patient_change.entity_id,
+            agent_change=agent_change,
+            patient_change=patient_change,
+            influence_score=score,
+            features=features,
+            justification=justification,
+        )
+
+    @staticmethod
+    def _compute_proximity(
+        agent_change: StateChange,
+        patient_change: StateChange,
+    ) -> float:
+        centroid_pairs = [
+            (agent_change.centroid_after, patient_change.centroid_after),
+            (agent_change.centroid_after, patient_change.centroid_before),
+            (agent_change.centroid_before, patient_change.centroid_after),
+            (agent_change.centroid_before, patient_change.centroid_before),
+        ]
+
+        distances = [
+            dist for dist in (
+                _euclidean_distance(a, b) for a, b in centroid_pairs
+            )
+            if dist is not None
+        ]
+
+        if not distances:
+            return 0.0
+
+        min_distance = min(distances)
+        clamped = min(min_distance, Config.CAUSAL_MAX_PIXEL_DISTANCE)
+        return max(0.0, 1.0 - clamped / Config.CAUSAL_MAX_PIXEL_DISTANCE)
+
+    @staticmethod
+    def _compute_motion(agent_change: StateChange, patient_change: StateChange) -> float:
+        agent_motion = float(agent_change.displacement) + float(agent_change.velocity) * Config.CAUSAL_TEMPORAL_DECAY
+        patient_motion = float(patient_change.displacement) + float(patient_change.velocity) * Config.CAUSAL_TEMPORAL_DECAY
+
+        total_motion = agent_motion + patient_motion
+        if total_motion <= 0:
+            return 0.0
+
+        ratio = agent_motion / total_motion
+        return max(0.0, min(1.0, ratio))
+
+    @staticmethod
+    def _compute_temporal(agent_change: StateChange, patient_change: StateChange) -> float:
+        delta = abs(agent_change.timestamp_after - patient_change.timestamp_after)
+        clamped = min(delta, Config.CAUSAL_TEMPORAL_DECAY)
+        return max(0.0, 1.0 - clamped / Config.CAUSAL_TEMPORAL_DECAY)
+
+    @staticmethod
+    def _compute_embedding_similarity(agent_entity: Entity, patient_entity: Entity) -> float:
+        emb_a = agent_entity.average_embedding
+        emb_b = patient_entity.average_embedding
+
+        if emb_a is None or emb_b is None:
+            return 0.0
+
+        similarity = float(np.dot(emb_a, emb_b))
+        similarity = max(-1.0, min(1.0, similarity))
+        return 0.5 * (similarity + 1.0)
+
+# ============================================================================
 # MODULE 4: EVENT COMPOSITION (LLM REASONING)
 # ============================================================================
 
@@ -635,7 +1100,7 @@ class EventComposer:
 
 SCHEMA:
 - Node types: :Entity, :Event, :State
-- Relationship types: [:PARTICIPATED_IN], [:CHANGED_TO], [:OCCURRED_AT]
+- Relationship types: [:PARTICIPATED_IN], [:CHANGED_TO], [:OCCURRED_AT], [:INFLUENCED]
 - Entity properties: id (STRING), label (STRING), embedding (LIST<FLOAT>), first_description (TEXT)
 - Event properties: type (STRING), timestamp (DATETIME), description (TEXT)
 - State properties: description (TEXT), timestamp (FLOAT)
@@ -657,12 +1122,28 @@ ACTIVE ENTITIES:
             prompt += f"   Before: {change.description_before}\n"
             prompt += f"   After: {change.description_after}\n"
             prompt += f"   Change magnitude: {change.change_magnitude:.3f}\n\n"
+
+        if window.causal_links:
+            prompt += "CAUSAL INFLUENCE CANDIDATES (Agent → Patient):\n"
+            for link in window.causal_links:
+                agent_change = link.agent_change
+                patient_change = link.patient_change
+                prompt += (
+                    f"- {link.agent_id} → {link.patient_id} | score={link.influence_score:.2f} | "
+                    f"prox={link.features['proximity']:.2f} | motion={link.features['motion']:.2f} | "
+                    f"dt={link.features['temporal']:.2f} | embed={link.features['embedding']:.2f}\n"
+                    f"  Agent after: {agent_change.description_after}\n"
+                    f"  Patient after: {patient_change.description_after}\n"
+                )
+        else:
+            prompt += "CAUSAL INFLUENCE CANDIDATES: None detected in this window.\n"
         
         prompt += """
 Generate Cypher queries to:
 1. Create or merge entity nodes with their labels
 2. Create event nodes for significant state changes
-3. Create relationships between entities and events
+3. Create relationships between entities and events, including agent → patient influence
+4. When causal links exist, emit an event with type 'causal_influence' capturing score, proximity, motion, temporal, and embedding metrics
 
 CRITICAL SYNTAX RULES:
 - Use MERGE for entities to avoid duplicates
@@ -676,6 +1157,9 @@ CORRECT EXAMPLES:
 MERGE (e:Entity {id: 'entity_cluster_0001'}) SET e.label = 'laptop';
 MERGE (ev:Event {id: 'event_001'}) SET ev.type = 'movement', ev.timestamp = datetime({epochSeconds: 5}), ev.description = 'Laptop moved across desk';
 MATCH (e:Entity {id: 'entity_cluster_0001'}), (ev:Event {id: 'event_001'}) MERGE (e)-[:PARTICIPATED_IN]->(ev);
+MATCH (agent:Entity {id: 'entity_cluster_0001'}), (patient:Entity {id: 'entity_cluster_0002'}), (ev:Event {id: 'event_001'})
+MERGE (agent)-[:PARTICIPATED_IN]->(ev)
+MERGE (ev)-[:INFLUENCED {score: 0.78}]->(patient);
 
 WRONG EXAMPLES (DO NOT DO THIS):
 MERGE (e:Entity {id: '1'}) SET e.label = 'Laptop' WHERE e.type = 'Laptop';  // WRONG: WHERE after SET
@@ -843,6 +1327,48 @@ Now generate Cypher queries for the state changes above:
                 f"(ev:Event {{id: '{event_id}'}}) "
                 f"MERGE (e)-[:PARTICIPATED_IN]->(ev);"
             )
+
+        # Create events for causal influence links
+        for idx, link in enumerate(window.causal_links):
+            event_id = (
+                f"causal_{link.agent_id}_{link.patient_id}_{int(window.start_time)}_{idx}"
+            )
+            score = f"{link.influence_score:.3f}"
+            prox = f"{link.features.get('proximity', 0.0):.3f}"
+            motion = f"{link.features.get('motion', 0.0):.3f}"
+            temporal = f"{link.features.get('temporal', 0.0):.3f}"
+            embedding = f"{link.features.get('embedding', 0.0):.3f}"
+            justification = link.justification.replace("'", "\\'")[:450]
+
+            queries.append(
+                f"MERGE (ev:Event {{id: '{event_id}'}}) "
+                f"SET ev.type = 'causal_influence', "
+                f"ev.timestamp = datetime({{epochSeconds: {int(window.end_time)}}}), "
+                f"ev.score = {score}, "
+                f"ev.proximity = {prox}, "
+                f"ev.motion = {motion}, "
+                f"ev.temporal = {temporal}, "
+                f"ev.embedding_similarity = {embedding}, "
+                f"ev.description = '{justification}';"
+            )
+
+            queries.append(
+                f"MATCH (agent:Entity {{id: '{link.agent_id}'}}), "
+                f"(patient:Entity {{id: '{link.patient_id}'}}), "
+                f"(ev:Event {{id: '{event_id}'}}) "
+                f"MERGE (agent)-[:PARTICIPATED_IN {{role: 'agent'}}]->(ev);"
+            )
+            queries.append(
+                f"MATCH (agent:Entity {{id: '{link.agent_id}'}}), "
+                f"(patient:Entity {{id: '{link.patient_id}'}}), "
+                f"(ev:Event {{id: '{event_id}'}}) "
+                f"MERGE (patient)-[:PARTICIPATED_IN {{role: 'patient'}}]->(ev);"
+            )
+            queries.append(
+                f"MATCH (ev:Event {{id: '{event_id}'}}), "
+                f"(patient:Entity {{id: '{link.patient_id}'}}) "
+                f"MERGE (ev)-[:INFLUENCED {{score: {score}}}]->(patient);"
+            )
         
         return queries
     
@@ -931,7 +1457,7 @@ class KnowledgeGraphBuilder:
             self.driver.close()
             logger.info("Neo4j connection closed")
     
-    def initialize_schema(self):
+    def initialize_schema(self, *, scene_embedding_dim: Optional[int] = None):
         """Initialize Neo4j schema with constraints and indexes"""
         logger.info("Initializing Neo4j schema...")
         
@@ -939,7 +1465,9 @@ class KnowledgeGraphBuilder:
             # Create constraints
             constraints = [
                 "CREATE CONSTRAINT entity_id IF NOT EXISTS FOR (e:Entity) REQUIRE e.id IS UNIQUE",
-                "CREATE CONSTRAINT event_id IF NOT EXISTS FOR (ev:Event) REQUIRE ev.id IS UNIQUE"
+                "CREATE CONSTRAINT event_id IF NOT EXISTS FOR (ev:Event) REQUIRE ev.id IS UNIQUE",
+                "CREATE CONSTRAINT scene_id IF NOT EXISTS FOR (s:Scene) REQUIRE s.id IS UNIQUE",
+                "CREATE CONSTRAINT location_id IF NOT EXISTS FOR (loc:Location) REQUIRE loc.id IS UNIQUE",
             ]
             
             for constraint in constraints:
@@ -953,7 +1481,9 @@ class KnowledgeGraphBuilder:
             indexes = [
                 "CREATE INDEX entity_label IF NOT EXISTS FOR (e:Entity) ON (e.label)",
                 "CREATE INDEX event_timestamp IF NOT EXISTS FOR (ev:Event) ON (ev.timestamp)",
-                "CREATE INDEX event_type IF NOT EXISTS FOR (ev:Event) ON (ev.type)"
+                "CREATE INDEX event_type IF NOT EXISTS FOR (ev:Event) ON (ev.type)",
+                "CREATE INDEX scene_frame IF NOT EXISTS FOR (s:Scene) ON (s.frame_number)",
+                "CREATE INDEX location_label IF NOT EXISTS FOR (loc:Location) ON (loc.label)",
             ]
             
             for index in indexes:
@@ -979,6 +1509,23 @@ class KnowledgeGraphBuilder:
                 logger.info("  Created vector index for embeddings")
             except Exception as e:
                 logger.warning(f"  Vector index not supported or already exists: {e}")
+
+            if scene_embedding_dim:
+                try:
+                    scene_vector_index = f"""
+                    CREATE VECTOR INDEX scene_embedding IF NOT EXISTS
+                    FOR (s:Scene) ON (s.embedding)
+                    OPTIONS {{
+                        indexConfig: {{
+                            `vector.dimensions`: {scene_embedding_dim},
+                            `vector.similarity_function`: 'cosine'
+                        }}
+                    }}
+                    """
+                    session.run(scene_vector_index)
+                    logger.info("  Created vector index for scene embeddings")
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f"  Scene vector index not created: {exc}")
         
         logger.info("Schema initialization complete")
     
@@ -1078,6 +1625,8 @@ class KnowledgeGraphBuilder:
                             first_desc = first_appearance.get('rich_description', '')
                         elif hasattr(first_appearance, 'rich_description'):
                             first_desc = first_appearance.rich_description
+
+                    scene_memberships = sorted(entity.scene_ids)
                     
                     # Create/merge entity node
                     query = """
@@ -1087,7 +1636,8 @@ class KnowledgeGraphBuilder:
                         e.last_seen = $last_seen,
                         e.appearance_count = $appearance_count,
                         e.embedding = $embedding,
-                        e.first_description = $first_description
+                        e.first_description = $first_description,
+                        e.scenes = $scenes
                     """
                     
                     session.run(query, {
@@ -1097,7 +1647,8 @@ class KnowledgeGraphBuilder:
                         'last_seen': entity.last_timestamp,
                         'appearance_count': len(entity.appearances) if entity.appearances else 0,
                         'embedding': embedding,
-                        'first_description': first_desc[:500] if first_desc else ""  # Truncate long descriptions
+                        'first_description': first_desc[:500] if first_desc else "",  # Truncate long descriptions
+                        'scenes': scene_memberships,
                     })
                     
                     successful += 1
@@ -1109,6 +1660,273 @@ class KnowledgeGraphBuilder:
         
         return successful
     
+    def ingest_locations(self, locations: Iterable[LocationProfile]) -> int:
+        """Create or update location nodes."""
+
+        location_list = list(locations)
+        if not location_list:
+            return 0
+
+        logger.info(f"Ingesting {len(location_list)} inferred locations...")
+        created = 0
+
+        with self.driver.session() as session:
+            for location in location_list:
+                try:
+                    session.run(
+                        """
+                        MERGE (loc:Location {id: $id})
+                        SET loc.label = $label,
+                            loc.signature = $signature,
+                            loc.object_classes = $object_classes,
+                            loc.scene_count = size($scene_ids)
+                        """,
+                        {
+                            "id": location.location_id,
+                            "label": location.label,
+                            "signature": location.signature,
+                            "object_classes": location.object_classes,
+                            "scene_ids": location.scene_ids,
+                        },
+                    )
+                    created += 1
+                except Exception as exc:  # noqa: BLE001
+                    logger.error(f"Failed to ingest location {location.location_id}: {exc}")
+
+        return created
+
+    def ingest_scenes(self, scenes: Iterable[SceneSegment]) -> int:
+        """Create or update scene nodes."""
+
+        scene_list = list(scenes)
+        if not scene_list:
+            return 0
+
+        logger.info(f"Ingesting {len(scene_list)} scene segments...")
+        created = 0
+
+        with self.driver.session() as session:
+            for scene in scene_list:
+                try:
+                    embedding = scene.embedding.tolist() if scene.embedding is not None else []
+                    session.run(
+                        """
+                        MERGE (s:Scene {id: $id})
+                        SET s.frame_number = $frame_number,
+                            s.start_timestamp = $start,
+                            s.end_timestamp = $end,
+                            s.description = $description,
+                            s.object_classes = $object_classes,
+                            s.entity_ids = $entity_ids,
+                            s.location_id = $location_id,
+                            s.embedding = $embedding
+                        """,
+                        {
+                            "id": scene.scene_id,
+                            "frame_number": scene.frame_number,
+                            "start": scene.start_timestamp,
+                            "end": scene.end_timestamp,
+                            "description": scene.description[:1000],
+                            "object_classes": scene.object_classes,
+                            "entity_ids": scene.entity_ids,
+                            "location_id": scene.location_id,
+                            "embedding": embedding,
+                        },
+                    )
+                    created += 1
+                except Exception as exc:  # noqa: BLE001
+                    logger.error(f"Failed to ingest scene {scene.scene_id}: {exc}")
+
+        return created
+
+    def link_scenes_to_locations(self, scenes: Iterable[SceneSegment]) -> int:
+        """Attach scenes to their inferred locations."""
+
+        scene_list = list(scenes)
+        if not scene_list:
+            return 0
+
+        linked = 0
+        with self.driver.session() as session:
+            for scene in scene_list:
+                try:
+                    session.run(
+                        """
+                        MATCH (s:Scene {id: $scene_id})
+                        MATCH (loc:Location {id: $location_id})
+                        MERGE (s)-[rel:IN_LOCATION]->(loc)
+                        SET rel.object_classes = $object_classes
+                        """,
+                        {
+                            "scene_id": scene.scene_id,
+                            "location_id": scene.location_id,
+                            "object_classes": scene.object_classes,
+                        },
+                    )
+                    linked += 1
+                except Exception as exc:  # noqa: BLE001
+                    logger.error(
+                        "Failed to link scene %s to location %s: %s",
+                        scene.scene_id,
+                        scene.location_id,
+                        exc,
+                    )
+
+        return linked
+
+    def link_entities_to_scenes(self, perception_log: Iterable[Dict[str, Any]]) -> int:
+        """Create appearance relationships between entities and scenes."""
+
+        appearance_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        for obj in perception_log:
+            entity_id = obj.get("entity_id")
+            scene_id = obj.get("scene_id")
+            if not entity_id or not scene_id:
+                continue
+            key = (entity_id, scene_id)
+            entry = appearance_map.setdefault(
+                key,
+                {
+                    "count": 0,
+                    "first": None,
+                    "last": None,
+                    "object_classes": set(),
+                },
+            )
+            entry["count"] += 1
+            timestamp = float(obj.get("timestamp", 0.0))
+            entry["first"] = (
+                timestamp if entry["first"] is None else min(entry["first"], timestamp)
+            )
+            entry["last"] = (
+                timestamp if entry["last"] is None else max(entry["last"], timestamp)
+            )
+            entry["object_classes"].add(obj.get("object_class", "object"))
+
+        if not appearance_map:
+            return 0
+
+        with self.driver.session() as session:
+            for (entity_id, scene_id), payload in appearance_map.items():
+                try:
+                    session.run(
+                        """
+                        MATCH (e:Entity {id: $entity_id})
+                        MATCH (s:Scene {id: $scene_id})
+                        MERGE (e)-[rel:APPEARS_IN]->(s)
+                        SET rel.count = $count,
+                            rel.first_timestamp = $first,
+                            rel.last_timestamp = $last,
+                            rel.object_classes = $object_classes
+                        """,
+                        {
+                            "entity_id": entity_id,
+                            "scene_id": scene_id,
+                            "count": payload["count"],
+                            "first": payload["first"],
+                            "last": payload["last"],
+                            "object_classes": sorted(payload["object_classes"]),
+                        },
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.error(
+                        "Failed to create APPEARS_IN for entity %s scene %s: %s",
+                        entity_id,
+                        scene_id,
+                        exc,
+                    )
+
+        return len(appearance_map)
+
+    def link_scene_transitions(self, scenes: Iterable[SceneSegment]) -> int:
+        """Link scenes in chronological order."""
+
+        scene_list = sorted(
+            list(scenes),
+            key=lambda scene: (scene.start_timestamp, scene.frame_number),
+        )
+        if len(scene_list) < 2:
+            return 0
+
+        transitions = 0
+        with self.driver.session() as session:
+            for first, second in zip(scene_list, scene_list[1:]):
+                try:
+                    gap = max(0.0, second.start_timestamp - first.end_timestamp)
+                    session.run(
+                        """
+                        MATCH (a:Scene {id: $from})
+                        MATCH (b:Scene {id: $to})
+                        MERGE (a)-[rel:TRANSITIONS_TO]->(b)
+                        SET rel.gap = $gap,
+                            rel.order = $order
+                        """,
+                        {
+                            "from": first.scene_id,
+                            "to": second.scene_id,
+                            "gap": gap,
+                            "order": transitions,
+                        },
+                    )
+                    transitions += 1
+                except Exception as exc:  # noqa: BLE001
+                    logger.error(
+                        "Failed to link transition %s -> %s: %s",
+                        first.scene_id,
+                        second.scene_id,
+                        exc,
+                    )
+
+        return transitions
+
+    def link_scene_similarities(self, similarities: Iterable[SceneSimilarity]) -> int:
+        """Create similarity relationships between scenes."""
+
+        similarity_list = list(similarities)
+        if not similarity_list:
+            return 0
+
+        created = 0
+        with self.driver.session() as session:
+            for similarity in similarity_list:
+                try:
+                    session.run(
+                        """
+                        MATCH (a:Scene {id: $source})
+                        MATCH (b:Scene {id: $target})
+                        MERGE (a)-[rel:SIMILAR_TO]->(b)
+                        SET rel.score = $score
+                        """,
+                        {
+                            "source": similarity.source_id,
+                            "target": similarity.target_id,
+                            "score": similarity.score,
+                        },
+                    )
+                    session.run(
+                        """
+                        MATCH (a:Scene {id: $target})
+                        MATCH (b:Scene {id: $source})
+                        MERGE (a)-[rel:SIMILAR_TO]->(b)
+                        SET rel.score = $score
+                        """,
+                        {
+                            "source": similarity.source_id,
+                            "target": similarity.target_id,
+                            "score": similarity.score,
+                        },
+                    )
+                    created += 2
+                except Exception as exc:  # noqa: BLE001
+                    logger.error(
+                        "Failed to link similarity between %s and %s: %s",
+                        similarity.source_id,
+                        similarity.target_id,
+                        exc,
+                    )
+
+        return created
+
     def get_graph_statistics(self) -> Dict[str, int]:
         """
         Get graph statistics
@@ -1127,11 +1945,35 @@ class KnowledgeGraphBuilder:
             result = session.run("MATCH (ev:Event) RETURN count(ev) as count")
             record = result.single()
             stats['event_nodes'] = record['count'] if record else 0
+
+            result = session.run("MATCH (s:Scene) RETURN count(s) as count")
+            record = result.single()
+            stats['scene_nodes'] = record['count'] if record else 0
+
+            result = session.run("MATCH (loc:Location) RETURN count(loc) as count")
+            record = result.single()
+            stats['location_nodes'] = record['count'] if record else 0
             
             # Count relationships
             result = session.run("MATCH ()-[r]->() RETURN count(r) as count")
             record = result.single()
             stats['relationships'] = record['count'] if record else 0
+
+            result = session.run("MATCH (:Entity)-[r:APPEARS_IN]->(:Scene) RETURN count(r) as count")
+            record = result.single()
+            stats['entity_scene_relationships'] = record['count'] if record else 0
+
+            result = session.run("MATCH (:Scene)-[r:IN_LOCATION]->(:Location) RETURN count(r) as count")
+            record = result.single()
+            stats['scene_location_relationships'] = record['count'] if record else 0
+
+            result = session.run("MATCH (:Scene)-[r:TRANSITIONS_TO]->(:Scene) RETURN count(r) as count")
+            record = result.single()
+            stats['scene_transition_relationships'] = record['count'] if record else 0
+
+            result = session.run("MATCH (:Scene)-[r:SIMILAR_TO]->(:Scene) RETURN count(r) as count")
+            record = result.single()
+            stats['scene_similarity_relationships'] = record['count'] if record else 0
         
         return stats
 
@@ -1169,8 +2011,13 @@ def run_semantic_uplift(
     results = {
         'success': False,
         'num_entities': 0,
+        'num_scenes': 0,
+        'num_locations': 0,
+        'num_scene_similarity_links': 0,
         'num_state_changes': 0,
         'num_windows': 0,
+        'num_causal_links': 0,
+        'windows_with_causal': 0,
         'num_queries': 0,
         'graph_stats': {}
     }
@@ -1180,6 +2027,18 @@ def run_semantic_uplift(
     tracker.track_entities(perception_log)
     entities = tracker.get_all_entities()
     results['num_entities'] = len(entities)
+
+    scene_assembler = SceneAssembler(tracker)
+    scenes, locations = scene_assembler.build_scenes(perception_log)
+    scene_similarities = SceneAssembler.compute_similarities(
+        scenes,
+        threshold=Config.SCENE_SIMILARITY_THRESHOLD,
+        top_k=Config.SCENE_SIMILARITY_TOP_K,
+    )
+    results['num_scenes'] = len(scenes)
+    results['num_locations'] = len(locations)
+    results['num_scene_similarity_links'] = len(scene_similarities)
+    scene_embedding_dim = scene_assembler.embedding_dim
     
     # Step 2: State Change Detection
     detector = StateChangeDetector()
@@ -1189,6 +2048,12 @@ def run_semantic_uplift(
     # Step 3: Temporal Windowing
     windows = create_temporal_windows(state_changes)
     results['num_windows'] = len(windows)
+
+    # Step 3B: Causal Influence Scoring
+    causal_scorer = CausalInfluenceScorer(tracker)
+    causal_stats = causal_scorer.score_windows(windows)
+    results['num_causal_links'] = causal_stats.get('total_links', 0)
+    results['windows_with_causal'] = causal_stats.get('windows_with_links', 0)
     
     # Step 4: Event Composition
     composer = EventComposer()
@@ -1212,10 +2077,18 @@ def run_semantic_uplift(
     
     try:
         # Initialize schema
-        graph_builder.initialize_schema()
+        graph_builder.initialize_schema(scene_embedding_dim=scene_embedding_dim)
         
         # Ingest entities
         graph_builder.ingest_entities(entities)
+
+        # Ingest scenes and inferred locations
+        graph_builder.ingest_locations(locations.values())
+        graph_builder.ingest_scenes(scenes)
+        graph_builder.link_scenes_to_locations(scenes)
+        graph_builder.link_entities_to_scenes(perception_log)
+        graph_builder.link_scene_transitions(scenes)
+        graph_builder.link_scene_similarities(scene_similarities)
         
         # Execute generated queries
         if cypher_queries:
@@ -1239,8 +2112,15 @@ def run_semantic_uplift(
     logger.info("SEMANTIC UPLIFT COMPLETE")
     logger.info("="*80)
     logger.info(f"Entities tracked: {results['num_entities']}")
+    logger.info(f"Scenes segmented: {results['num_scenes']}")
+    logger.info(f"Locations inferred: {results['num_locations']}")
+    logger.info(f"Scene similarity links: {results['num_scene_similarity_links']}")
     logger.info(f"State changes detected: {results['num_state_changes']}")
     logger.info(f"Temporal windows: {results['num_windows']}")
+    logger.info(
+        f"Causal links scored: {results['num_causal_links']} "
+        f"across {results['windows_with_causal']} windows"
+    )
     logger.info(f"Cypher queries generated: {results['num_queries']}")
     logger.info(f"Total time: {elapsed_time:.2f}s")
     logger.info("="*80 + "\n")
