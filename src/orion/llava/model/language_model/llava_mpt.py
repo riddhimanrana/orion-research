@@ -16,7 +16,7 @@
 from typing import Optional, Tuple
 
 import torch
-
+from llava.model.llava_arch import LlavaMetaForCausalLM, LlavaMetaModel
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
@@ -24,7 +24,6 @@ from transformers import (
     MptForCausalLM,
     MptModel,
 )
-from llava.model.llava_arch import LlavaMetaModel, LlavaMetaForCausalLM
 
 
 class LlavaMptConfig(MptConfig):

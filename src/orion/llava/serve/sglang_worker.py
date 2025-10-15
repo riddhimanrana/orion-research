@@ -4,32 +4,28 @@ A model worker executes the model.
 
 import argparse
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 import json
-import time
-import threading
-import uuid
-
-from fastapi import FastAPI, Request, BackgroundTasks
-from fastapi.responses import StreamingResponse
-import requests
 import re
-import uvicorn
+import threading
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
-from llava.constants import WORKER_HEART_BEAT_INTERVAL
-from llava.utils import build_logger, server_error_msg, pretty_print_semaphore
-from llava.mm_utils import (
-    process_images,
-    load_image_from_base64,
-    tokenizer_image_token,
-    expand2square,
-)
-from llava.constants import DEFAULT_IMAGE_TOKEN
-
+import requests
 import sglang as sgl
+import uvicorn
+from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi.responses import StreamingResponse
+from llava.constants import DEFAULT_IMAGE_TOKEN, WORKER_HEART_BEAT_INTERVAL
+from llava.mm_utils import (
+    expand2square,
+    load_image_from_base64,
+    process_images,
+    tokenizer_image_token,
+)
+from llava.utils import build_logger, pretty_print_semaphore, server_error_msg
 from sglang.backend.runtime_endpoint import RuntimeEndpoint
-
 
 GB = 1 << 30
 

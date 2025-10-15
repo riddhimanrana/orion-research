@@ -19,18 +19,18 @@ Author: Orion Research Team
 Date: January 2025
 """
 
+import logging
+import multiprocessing as mp
 import os
 import sys
 import time
-import logging
-import multiprocessing as mp
-from multiprocessing import Queue, Process, Manager
-from queue import Empty as QueueEmpty
-from typing import List, Dict, Optional, Tuple, Any, TYPE_CHECKING, cast
-from dataclasses import dataclass, field, asdict
-from enum import Enum
 import warnings
 from collections.abc import MutableSequence
+from dataclasses import asdict, dataclass
+from enum import Enum
+from multiprocessing import Manager, Process, Queue
+from queue import Empty as QueueEmpty
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, cast
 
 try:  # Local import works both as package and script
     from .models import ModelManager as AssetManager
@@ -55,8 +55,8 @@ except RuntimeError:
     # Already set
     pass
 
-import numpy as np
 import cv2
+import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image
@@ -785,7 +785,7 @@ class RealTimeObjectProcessor:
                         ),
                         timeout=Config.QUEUE_TIMEOUT,
                     )
-                except:
+                except Exception:
                     logger.warning(f"Queue full, skipping description for {temp_id}")
 
         # SCENE MODE: Queue frame once for all objects
@@ -795,7 +795,7 @@ class RealTimeObjectProcessor:
                     (frame.copy(), frame_number, frame_detections, object_indices),
                     timeout=Config.QUEUE_TIMEOUT,
                 )
-            except:
+            except Exception:
                 logger.warning(
                     f"Queue full, skipping scene description for frame {frame_number}"
                 )
@@ -828,7 +828,7 @@ def load_fastvlm_model() -> Optional[Any]:
         or os.getenv("ORION_FASTVLM_TORCH_PATH")
     )
 
-    from .backends.torch_fastvlm import FastVLMTorchWrapper, DEFAULT_MODEL_ID
+    from .backends.torch_fastvlm import DEFAULT_MODEL_ID, FastVLMTorchWrapper
 
     asset_manager = _get_asset_manager()
     asset_dir = asset_manager.get_asset_dir("fastvlm-0.5b")

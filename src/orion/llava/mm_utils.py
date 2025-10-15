@@ -2,14 +2,14 @@ import PIL
 from PIL import Image
 
 PIL.Image.MAX_IMAGE_PIXELS = 500000000
-from io import BytesIO
-import base64
-import torch
-import math
 import ast
+import base64
+import math
+from io import BytesIO
 
-from transformers import StoppingCriteria
+import torch
 from llava.constants import IMAGE_TOKEN_INDEX
+from transformers import StoppingCriteria
 
 
 def select_best_resolution(original_size, possible_resolutions):

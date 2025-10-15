@@ -17,8 +17,9 @@ from .models import ModelManager
 from .runtime import select_backend, set_active_backend
 from .settings import OrionSettings, SettingsError
 
+# We avoid importing the heavy pipeline at module import time.
 if TYPE_CHECKING:  # pragma: no cover
-    from .run_pipeline import run_pipeline
+    from .run_pipeline import run_pipeline as _RunPipeline
 
 console = Console()
 
@@ -332,7 +333,7 @@ def main(argv: list[str] | None = None) -> None:
         print_banner()
 
     if args.command == "analyze":
-        from .run_pipeline import run_pipeline  # Lazy import to speed up CLI startup
+        from .run_pipeline import run_pipeline as run_pipeline_main
 
         VideoQASystem = _import_video_qa()
 
@@ -357,7 +358,7 @@ def main(argv: list[str] | None = None) -> None:
         console.print(f"[bold]Mode:[/bold] [yellow]{config}[/yellow]")
         console.print(f"[bold]Runtime:[/bold] [yellow]{backend}[/yellow]\n")
 
-        results = run_pipeline(
+        results = run_pipeline_main(
             video_path=args.video,
             output_dir=args.output,
             neo4j_uri=neo4j_uri,

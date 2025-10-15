@@ -2,8 +2,8 @@
 # For licensing see accompanying LICENSE file.
 # Copyright (C) 2025 Apple Inc. All Rights Reserved.
 #
-import os
 import json
+import os
 from typing import Any
 
 import torch.nn as nn

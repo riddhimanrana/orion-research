@@ -2,12 +2,11 @@
 # For licensing see accompanying LICENSE file.
 # Copyright (C) 2025 Apple Inc. All Rights Reserved.
 #
+import llava.model.multimodal_encoder.mobileclip as mobileclip
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from transformers import CLIPImageProcessor
-import llava.model.multimodal_encoder.mobileclip as mobileclip
 
 
 class MobileCLIPVisionTower(nn.Module):

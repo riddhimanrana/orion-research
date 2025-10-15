@@ -4,17 +4,16 @@
 #
 import copy
 from functools import partial
-from typing import List, Tuple, Optional, Union, Dict
+from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
-from torch import Tensor
 import torch.nn.functional as F
-from torch.nn.init import normal_
-
-from timm.models import register_model
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 from timm.layers import DropPath, SqueezeExcite
+from timm.models import register_model
+from torch import Tensor
+from torch.nn.init import normal_
 
 
 def _cfg(url="", **kwargs):

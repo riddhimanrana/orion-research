@@ -6,12 +6,11 @@ about the video content using a local LLM (Gemini 3B).
 """
 
 import logging
-from typing import List, Dict, Any, Optional
-
-from neo4j import Driver, GraphDatabase
-from neo4j.exceptions import Neo4jError
+from typing import Any, Dict, List, Optional
 
 import ollama
+from neo4j import Driver, GraphDatabase
+from neo4j.exceptions import Neo4jError
 
 from .embedding_model import create_embedding_model
 
@@ -259,8 +258,8 @@ Answer:"""
     def start_interactive_session(self):
         """Start an interactive Q&A session"""
         from rich.console import Console
-        from rich.panel import Panel
         from rich.markdown import Markdown
+        from rich.panel import Panel
 
         console = Console()
 

@@ -21,7 +21,6 @@ import logging
 
 from .perception_engine import Config, DescriptionMode
 
-
 # ============================================================================
 # PRESET CONFIGURATIONS
 # ============================================================================
@@ -240,37 +239,28 @@ def recommend_config(video_duration: float, available_memory_gb: float = 8.0):
 
 
 def set_description_mode(mode: DescriptionMode):
-    """
-    Set the FastVLM description generation mode
+    """Configure the FastVLM description generation mode.
 
     Args:
-        mode: DescriptionMode.SCENE, DescriptionMode.OBJECT, or DescriptionMode.HYBRID
+        mode: Desired description mode.
 
     Modes:
-        - SCENE: One description per frame, shared by all objects
-          * Pros: Most efficient (1 FastVLM call per frame)
-          * Cons: No object-specific details
-          * Best for: Scene understanding, minimizing compute time
-
-        - OBJECT: One description per object, focused on individual object
-          * Pros: Detailed entity attributes, unique per object
-          * Cons: More expensive (N FastVLM calls per frame)
-          * Best for: Entity-centric knowledge graphs, object queries
-
-        - HYBRID: Both scene + object descriptions
-          * Pros: Most comprehensive, both scene context + object details
-          * Cons: Most expensive (1 + N FastVLM calls per frame)
-          * Best for: Complete knowledge graphs, rich queries
+        - SCENE: One description per frame, shared by all objects (fastest).
+        - OBJECT: One description per detected object (balanced detail vs. cost).
+        - HYBRID: Scene description plus per-object details (most comprehensive).
     """
+
     Config.DESCRIPTION_MODE = mode  # type: ignore[attr-defined]
     print(f"Description mode set to: {mode.value.upper()}")
-    print(f"  - FastVLM calls per frame: ", end="")
+    print("  - FastVLM calls per frame: ", end="")
+
     if mode == DescriptionMode.SCENE:
         print("1 (shared by all objects)")
     elif mode == DescriptionMode.OBJECT:
         print("N (one per object)")
     else:  # HYBRID
         print("1 + N (scene + objects)")
+
     print()
 
 

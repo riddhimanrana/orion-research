@@ -1,6 +1,6 @@
 """Orion research toolkit package."""
 
-from importlib.metadata import version, PackageNotFoundError
+from importlib.metadata import PackageNotFoundError, version
 
 try:
     __all__ = ["__version__"]

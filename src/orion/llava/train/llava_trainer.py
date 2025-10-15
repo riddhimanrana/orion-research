@@ -1,20 +1,13 @@
 import os
-import torch
-import torch.nn as nn
-
-from torch.utils.data import Sampler
-
-import transformers
-from transformers import Trainer
-from transformers.trainer import (
-    is_sagemaker_mp_enabled,
-    get_parameter_names,
-    has_length,
-    # ALL_LAYERNORM_LAYERS,
-    logger,
-)
 from typing import List, Optional
 
+import torch
+import torch.nn as nn
+import transformers
+from torch.utils.data import Sampler
+from transformers import Trainer
+from transformers.trainer import get_parameter_names  # ALL_LAYERNORM_LAYERS,
+from transformers.trainer import has_length, is_sagemaker_mp_enabled, logger
 
 ALL_LAYERNORM_LAYERS = [nn.LayerNorm, nn.BatchNorm2d]
 

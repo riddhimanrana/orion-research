@@ -3,9 +3,10 @@ Embedding Model Wrapper
 Supports both Sentence Transformers and Ollama EmbeddingGemma
 """
 
-import numpy as np
-from typing import Any, List, Optional, Tuple
 import logging
+from typing import Any, List, Optional, Tuple
+
+import numpy as np
 
 try:  # Ensure shared model caches are configured before downloads
     from .models import ModelManager as AssetManager
@@ -220,7 +221,7 @@ if __name__ == "__main__":
         sim1 = model.compute_similarity(texts[0], texts[1])
         sim2 = model.compute_similarity(texts[0], texts[2])
 
-        print(f"\nSimilarity scores:")
+        print("\nSimilarity scores:")
         print(f"  '{texts[0]}' vs '{texts[1]}': {sim1:.3f}")
         print(f"  '{texts[0]}' vs '{texts[2]}': {sim2:.3f}")
         print(f"\n✓ Higher similarity for similar sentences: {sim1 > sim2}")

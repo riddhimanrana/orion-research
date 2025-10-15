@@ -6,8 +6,9 @@ including clearing all data before new pipeline runs.
 """
 
 import logging
-from neo4j import GraphDatabase
 from typing import Optional
+
+from neo4j import GraphDatabase
 
 logger = logging.getLogger(__name__)
 

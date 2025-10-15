@@ -10,9 +10,9 @@ Date: January 2025
 """
 
 import os
-from typing import Dict, Any, Optional
-from query_evaluation import Config
+from typing import Any, Dict, Optional
 
+from query_evaluation import Config
 
 # ============================================================================
 # CONFIGURATION PRESETS

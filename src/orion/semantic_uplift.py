@@ -15,24 +15,22 @@ Date: October 3, 2025
 # mypy: ignore-errors
 # pyright: reportGeneralTypeIssues=false, reportOptionalMemberAccess=false, reportArgumentType=false
 
+import hashlib
+import json
+import logging
+import math
 import os
 import sys
 import time
-import logging
-import json
 import warnings
-from typing import List, Dict, Optional, Tuple, Any, Set, Iterable
-from dataclasses import dataclass, field
 from collections import Counter, defaultdict
-import hashlib
-from datetime import datetime
-from pathlib import Path
-import math
+from dataclasses import dataclass, field
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import numpy as np
-from neo4j import GraphDatabase, Session
-from neo4j.exceptions import ServiceUnavailable, SessionExpired
 import requests
+from neo4j import GraphDatabase
+from neo4j.exceptions import ServiceUnavailable
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
@@ -740,10 +738,6 @@ class StateChangeDetector:
         try:
             # Use the unified embedding model's similarity method
             return self.model.compute_similarity(desc1, desc2)
-            similarity = np.dot(embeddings[0], embeddings[1]) / (
-                np.linalg.norm(embeddings[0]) * np.linalg.norm(embeddings[1])
-            )
-            return float(similarity)
         except Exception as e:
             logger.warning(f"Failed to compute similarity: {e}")
             return 1.0
@@ -2232,8 +2226,6 @@ def run_semantic_uplift(
 # ============================================================================
 
 if __name__ == "__main__":
-    import json
-
     # Load perception log from Part 1
     PERCEPTION_LOG_PATH = "/Users/riddhiman.rana/Desktop/Coding/Orion/orion-research/data/testing/perception_log.json"
 

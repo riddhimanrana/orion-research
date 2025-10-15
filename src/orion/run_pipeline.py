@@ -10,35 +10,27 @@ Complete video understanding pipeline with:
 Author: Orion Research Team
 """
 
-import json
-import time
-import logging
+from __future__ import annotations
+
 import argparse
-from pathlib import Path
+import json
+import logging
+import time
 from datetime import datetime
-from typing import Any, Dict, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 from rich.console import Console
-from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 from rich.table import Table
-from rich import print as rprint
 
-# Import pipeline components
+from .models import ModelManager
+from .neo4j_manager import clear_neo4j_for_new_run
 from .perception_engine import run_perception_engine
 from .semantic_uplift import run_semantic_uplift
-from .neo4j_manager import clear_neo4j_for_new_run
-from .models import ModelManager
 
 try:
-    from .runtime import (
-        BackendName,
-        get_active_backend,
-        select_backend,
-        set_active_backend,
-    )
+    from .runtime import get_active_backend, select_backend, set_active_backend
 except ImportError:  # pragma: no cover
-    BackendName = str  # type: ignore[assignment,misc]
     from .runtime import get_active_backend, select_backend, set_active_backend
 
 VideoQASystem: Any
@@ -98,7 +90,7 @@ def print_banner():
     console.print(banner)
 
 
-def _resolve_runtime(preferred: Optional[str]) -> Tuple[BackendName, ModelManager]:
+def _resolve_runtime(preferred: Optional[str]) -> Tuple[str, ModelManager]:
     normalized: Optional[str] = preferred.lower() if preferred else None
     if normalized == "auto":
         normalized = None
@@ -167,6 +159,9 @@ def run_pipeline(
         "errors": [],
     }
 
+    perception_log: Optional[List[Dict[str, Any]]] = None
+    perception_log_path: Optional[str] = None
+
     try:
         backend, _ = _resolve_runtime(runtime)
         results["runtime"] = backend
@@ -206,24 +201,32 @@ def run_pipeline(
 
             start_time = time.time()
 
-            perception_output = run_perception_engine(video_path)
+            perception_log = run_perception_engine(video_path)
 
             duration = time.time() - start_time
+
+            perception_log_path = str(
+                Path(output_dir)
+                / f"perception_log_{Path(video_path).stem}_{results['timestamp']}.json"
+            )
+            Path(perception_log_path).parent.mkdir(parents=True, exist_ok=True)
+            with open(perception_log_path, "w") as log_file:
+                json.dump(perception_log, log_file, indent=2)
 
             results["part1"] = {
                 "success": True,
                 "duration_seconds": duration,
-                "num_objects": len(perception_output),
-                "output_file": perception_output,
+                "num_objects": len(perception_log),
+                "output_file": perception_log_path,
             }
 
             # Show stats
             table = Table(title="Perception Results", show_header=True)
             table.add_column("Metric", style="cyan")
             table.add_column("Value", style="green")
-            table.add_row("Objects Detected", str(len(perception_output)))
+            table.add_row("Objects Detected", str(len(perception_log)))
             table.add_row("Processing Time", f"{duration:.1f}s")
-            table.add_row("Output File", str(perception_output))
+            table.add_row("Output File", perception_log_path)
 
             console.print(table)
 
@@ -231,7 +234,8 @@ def run_pipeline(
             console.print(
                 "[yellow]Skipping Part 1 (using existing perception data)[/yellow]"
             )
-            perception_output = None
+            perception_log = None
+            perception_log_path = None
 
         # PART 2: Semantic Uplift
         if not skip_part2:
@@ -258,17 +262,23 @@ def run_pipeline(
             start_time = time.time()
 
             # Get perception log path
-            if perception_output:
-                perception_log_path = perception_output
-            else:
-                # Find most recent
-                logs = sorted(Path(output_dir).glob("perception_log_*.json"))
-                if not logs:
-                    raise ValueError("No perception logs found. Run Part 1 first!")
-                perception_log_path = str(logs[-1])
+            if perception_log is None:
+                if perception_log_path is None:
+                    logs = sorted(Path(output_dir).glob("perception_log_*.json"))
+                    if not logs:
+                        raise ValueError("No perception logs found. Run Part 1 first!")
+                    perception_log_path = str(logs[-1])
 
-            uplift_results = run_semantic_uplift(  # type: ignore[arg-type]
-                perception_log_path, neo4j_uri=neo4j_uri, neo4j_password=neo4j_password
+                with open(perception_log_path, "r") as log_file:
+                    perception_log = json.load(log_file)
+
+            if perception_log is None:
+                raise RuntimeError("Unable to load perception log for semantic uplift.")
+
+            uplift_results = run_semantic_uplift(
+                perception_log,
+                neo4j_uri=neo4j_uri,
+                neo4j_password=neo4j_password,
             )
 
             duration = time.time() - start_time
@@ -276,6 +286,7 @@ def run_pipeline(
             results["part2"] = {
                 "success": uplift_results.get("success", False),
                 "duration_seconds": duration,
+                "perception_log": perception_log_path,
                 **uplift_results,
             }
 
@@ -314,7 +325,7 @@ def run_pipeline(
         with open(output_file, "w") as f:
             json.dump(results, f, indent=2)
 
-        console.print(f"\n✓ [bold green]Pipeline complete![/bold green]")
+        console.print("\n✓ [bold green]Pipeline complete![/bold green]")
         console.print(f"[dim]Results saved to: {output_file}[/dim]")
 
         return results
