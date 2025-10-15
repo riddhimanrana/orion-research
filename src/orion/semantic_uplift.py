@@ -56,6 +56,24 @@ except ImportError:
         "Warning: embedding_model not available. Ensure embedding_model.py is present."
     )
 
+try:
+    from .causal_inference import (
+        CausalInferenceEngine,
+        CausalConfig,
+        AgentCandidate,
+        StateChange as CISStateChange,
+    )
+    CAUSAL_INFERENCE_AVAILABLE = True
+except ImportError:
+    CausalInferenceEngine = None  # type: ignore[assignment, misc]
+    CausalConfig = None  # type: ignore[assignment, misc]
+    AgentCandidate = None  # type: ignore[assignment, misc]
+    CISStateChange = None  # type: ignore[assignment, misc]
+    CAUSAL_INFERENCE_AVAILABLE = False
+    print(
+        "Warning: causal_inference not available. Using basic causal scoring."
+    )
+
 
 # ============================================================================
 # CONFIGURATION CONSTANTS

@@ -10,10 +10,16 @@ This module implements a two-tier asynchronous video processing system that:
 Models Used:
 - Object Detection: YOLO11m (ultralytics) - 80 COCO classes, 20.1M params
 - Scene Detection: FastViT-T8 (timm) - Lightweight vision transformer
-- Visual Embeddings: ResNet50 (timm) - 512-dim feature vectors
+- Visual Embeddings: OSNet (torchreid/timm) - 512-dim Re-ID feature vectors
+  * OSNet is optimized for person/object re-identification across varying scales,
+    poses, and lighting conditions - critical for long-term tracking
 - Description Generation: FastVLM-0.5B (apple/FastVLM-0.5B via Hugging Face transformers)
 All model weights are cached under the repository's ``models/`` directory via the shared
 asset manager so runs remain self-contained.
+
+Motion Tracking:
+- Velocity estimation via frame-to-frame centroid tracking
+- Direction analysis for causal inference (agents moving towards patients)
 
 Author: Orion Research Team
 Date: January 2025
@@ -41,6 +47,11 @@ try:
     from .runtime import get_active_backend, select_backend
 except ImportError:  # pragma: no cover
     from runtime import get_active_backend, select_backend  # type: ignore
+
+try:
+    from .motion_tracker import MotionTracker, MotionData
+except ImportError:  # pragma: no cover
+    from motion_tracker import MotionTracker, MotionData  # type: ignore
 
 # Set multiprocessing start method to 'spawn' for accelerator compatibility
 # CRITICAL: GPU/Metal-backed models often fail with 'fork' on macOS
@@ -192,6 +203,12 @@ class RichPerceptionObject:
     rich_description: Optional[str] = None  # FastVLM generated description
     entity_id: Optional[str] = None  # To be filled in Part 2
     temp_id: Optional[str] = None  # Temporary unique ID
+    
+    # Motion tracking data (for causal inference)
+    centroid: Optional[Tuple[float, float]] = None  # (x, y) center
+    velocity: Optional[Tuple[float, float]] = None  # (vx, vy) pixels/second
+    speed: Optional[float] = None  # Magnitude of velocity
+    direction: Optional[float] = None  # Angle in radians
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
@@ -292,33 +309,110 @@ class PerceptionModelManager:
         return result
 
     def get_embedding_model(self) -> Dict[str, Any]:
-        """Load OSNet model for visual embeddings"""
+        """Load OSNet model for visual embeddings (Re-ID optimized)"""
         if "embedding_model" not in self._models:
             try:
-                import timm
-                from timm.data.config import resolve_model_data_config
-                from timm.data.transforms_factory import create_transform
+                logger.info("Loading Re-ID model for visual embeddings...")
 
-                logger.info("Loading OSNet model for visual embeddings...")
-
-                # Use a ResNet-based feature extractor as OSNet alternative
-                # OSNet might not be directly available in timm, so we use resnet50
-                model = timm.create_model("resnet50", pretrained=True, num_classes=0)
+                # Try multiple OSNet sources in order of preference
+                model = None
+                model_name = None
+                
+                # Option 1: Try torchreid (dedicated Re-ID library)
+                try:
+                    import torchreid
+                    logger.info("Attempting to load OSNet from torchreid...")
+                    model = torchreid.models.build_model(
+                        name='osnet_x1_0',
+                        num_classes=1000,  # Will use feature layer
+                        pretrained=True,
+                        loss='softmax'
+                    )
+                    model_name = "OSNet (torchreid)"
+                    logger.info(f"✓ Loaded {model_name}")
+                except ImportError:
+                    logger.debug("torchreid not available, trying timm...")
+                except Exception as e:
+                    logger.debug(f"torchreid failed: {e}")
+                
+                # Option 2: Try timm (might have OSNet)
+                if model is None:
+                    try:
+                        import timm
+                        logger.info("Attempting to load OSNet from timm...")
+                        model = timm.create_model(
+                            "osnet_x1_0",
+                            pretrained=True,
+                            num_classes=0  # Feature extraction mode
+                        )
+                        model_name = "OSNet (timm)"
+                        logger.info(f"✓ Loaded {model_name}")
+                    except Exception as e:
+                        logger.debug(f"timm OSNet failed: {e}")
+                
+                # Option 3: Try OSNet variants from timm
+                if model is None:
+                    try:
+                        import timm
+                        logger.info("Attempting OSNet variants from timm...")
+                        # Try different OSNet model names
+                        for variant in ['osnet_x0_75', 'osnet_ibn_x1_0']:
+                            try:
+                                model = timm.create_model(
+                                    variant,
+                                    pretrained=True,
+                                    num_classes=0
+                                )
+                                model_name = f"OSNet-{variant} (timm)"
+                                logger.info(f"✓ Loaded {model_name}")
+                                break
+                            except:
+                                continue
+                    except Exception as e:
+                        logger.debug(f"timm OSNet variants failed: {e}")
+                
+                # If all OSNet attempts failed, raise helpful error
+                if model is None:
+                    error_msg = (
+                        "Failed to load OSNet Re-ID model. Please install one of:\n"
+                        "  1. torchreid: pip install torchreid\n"
+                        "  2. timm with OSNet support: pip install timm>=0.9.0\n"
+                        "OSNet is required for robust person/object re-identification."
+                    )
+                    logger.error(error_msg)
+                    raise RuntimeError(error_msg)
+                
+                # Move model to device and set to eval
                 model = model.to(self.device)
                 model.eval()
 
                 # Create preprocessing transforms
-                data_config = resolve_model_data_config(model)
-                transforms = create_transform(**data_config, is_training=False)
+                if 'torchreid' in str(type(model)):
+                    # torchreid models expect specific preprocessing
+                    import torchvision.transforms as T
+                    transforms = T.Compose([
+                        T.Resize((256, 128)),
+                        T.ToTensor(),
+                        T.Normalize(mean=[0.485, 0.456, 0.406],
+                                   std=[0.229, 0.224, 0.225])
+                    ])
+                else:
+                    # Use timm's transforms
+                    import timm
+                    from timm.data.config import resolve_model_data_config
+                    from timm.data.transforms_factory import create_transform
+                    data_config = resolve_model_data_config(model)
+                    transforms = create_transform(**data_config, is_training=False)
 
                 self._models["embedding_model"] = {
                     "model": model,
                     "transforms": transforms,
+                    "model_name": model_name,
                 }
-                logger.info("Embedding model loaded successfully")
+                logger.info(f"✓ Re-ID embedding model ready: {model_name}")
             except Exception as e:
                 logger.error(f"Failed to load embedding model: {e}")
-                raise RuntimeError("Embedding model is required for perception engine")
+                raise RuntimeError(f"Embedding model is required for perception engine: {e}")
 
         result = self._models.get("embedding_model")
         if result is None:
@@ -541,6 +635,9 @@ class RealTimeObjectProcessor:
             raise RuntimeError("Embedding model failed to initialize")
         self.embedding_model: Dict[str, Any] = embedding_model
         self.detection_count = 0
+        
+        # Initialize motion tracker for causal inference
+        self.motion_tracker = MotionTracker(smoothing_window=3)
 
     def detect_objects(self, frame: np.ndarray) -> List[Dict[str, Any]]:
         """
@@ -716,6 +813,13 @@ class RealTimeObjectProcessor:
             # Create perception object
             temp_id = f"det_{self.detection_count:06d}"
             self.detection_count += 1
+            
+            # Update motion tracking
+            motion_data = self.motion_tracker.update(
+                temp_id,
+                timestamp,
+                detection["bbox"]
+            )
 
             perception_obj = RichPerceptionObject(
                 timestamp=timestamp,
@@ -726,6 +830,11 @@ class RealTimeObjectProcessor:
                 object_class=detection["class_name"],
                 crop_size=crop_size,
                 temp_id=temp_id,
+                # Motion data for causal inference
+                centroid=motion_data.centroid if motion_data else None,
+                velocity=motion_data.velocity if motion_data else None,
+                speed=motion_data.speed if motion_data else None,
+                direction=motion_data.direction if motion_data else None,
             )
 
             # Add to shared log (will be updated by workers)

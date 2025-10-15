@@ -1,0 +1,245 @@
+Percept to Predicate: Semantic Uplift of Egocentric Video into a Dynamic Knowledge Graph
+
+Core Question: Can an LLM-based Semantic Uplift Engine construct a more causally accurate and coherent knowledge graph from egocentric video than a heuristic, rule-based system?
+Instructions
+Proposals must be specific and detailed so the direction of the research is clear. If you’re not sure about a given item, please mark it as such and we can discuss.
+Add text using your assigned color for all tabs in this doc:
+mentor, Riddhiman Rana, Aryav Semwal, Yogesh Atluru
+Relevant Past Papers ✅
+Things to include for each paper:
+One sentence summary of theGap / limitation of the paper
+LifelongMemory: Leveraging LLMs for Answering Queries in Egocentric Videos
+LLM-DA uses large language models to dynamically adapt rules for reasoning over temporal knowledge graphs, enabling prediction of future relationships. A limitation of the paper is that it assumes a pre-existing temporal knowledge graph, and it lacks a mechanism for semantic uplift from raw video to construct such graphs.
+Adaptive Path-Memory Network for Temporal Knowledge Graph Reasoning
+DAEMON tracks relationship sequences in temporal knowledge graphs to predict future events, focusing on path extrapolation. A limit is that it requires pre-constructed graphs and can’t perform initial entity resolution or state tracking from raw video streams
+Action Scene Graphs for Long-Form Understanding of Egocentric Videos
+The paper introduces egocentric Action Scene Graphs (EASGs), extending Ego4D annotations into temporal graphs of actions and objects for tasks like action anticipation. The limitation of this paper is that it relies on heuristic, annotation-heavy graph construction without automated causal uplift from raw egocentric perception
+Video-of-Thought: Step-by-Step Video Reasoning from Perception to Cognition
+Video-of-Thought (VoT) uses a chain-of-thought framework with a multimodal LLM to decompose video reasoning into cognitive steps, achieving strong performance on Causal-VidQA. A limitation for this paper is that it depends on unstructured captions, lacking structured perceptual logs for precise causal graph construction in egocentric settings
+CausalVQA: A Physically Grounded Causal Reasoning Benchmark for Video Models
+CausalVQA provides an egocentric video dataset with 7M QA pairs to probe causal reasoning, using a hybrid human-model pipeline for grounded annotations. A limitation for this paper is that it focuses on QA evaluation without automated methods for constructing causal knowledge graphs from raw video.
+HyperGLM: HyperGraph for VideoScene Graph Generation and Anticipation
+HyperGLM employs a multimodal LLM to build hypergraphs capturing multi-way interactions and causal transitions in videos, including egocentric data, for scene graph generation. The limitation for this paper is that it uses annotated inputs for hypergraph construction, lacking real-time semantic uplift from raw egocentric perception.
+
+
+Motivation ✅
+Things to include:
+What limitation or problem are you solving and how do you know it exists
+Why is this limitation important
+Why does your idea solve it
+Why would your idea probably work
+
+Current perception-driven systems, such as object detectors and action recognizers, excel at identifying objects and actions in egocentric video but fail to synthesize these observations into a structured, causal representation of events. For example, while a system can detect a cup moving, it cannot reliably infer whether it was picked up, dropped, or knocked over, nor how these events are causally linked. This limitation is evident in the literature: temporal reasoning models like LLM-DA or DAEMON require pre-existing symbolic knowledge graphs and cannot construct them from raw video, while heuristic systems rely on brittle spatial rules that miss semantic and causal nuances. The inability to create accurate, causally coherent knowledge graphs from video hinders the development of intelligent systems that can understand and reason about dynamic scenes. Such graphs are essential for enabling systems to model the why and how of events, supporting applications like robotics, personal assistants, or augmented reality, where understanding causal sequences (e.g., “opening a door caused entry into a room”) is critical for decision-making, learning, or context-aware assistance. Without this capability, systems remain limited to reactive, moment-to-moment perception, lacking the deeper understanding needed for real-world intelligence. Our Semantic Uplift Engine addresses this gap by transforming raw egocentric video into a causally structured knowledge graph. By integrating object detection, entity tracking, and LLM-based reasoning, our pipeline generates symbolic event triples (subject–predicate–object) and causal links that capture the dynamics of a scene. Unlike heuristic methods that rely on rigid geometric rules, our LLM-driven approach leverages contextual and commonsense reasoning to produce a more accurate and human-like causal model, distinguishing nuanced events like “picked up” versus “knocked over.” Our approach is likely to succeed because LLMs encode rich priors about object interactions and causal patterns, enabling them to interpret perceptual logs with semantic depth. By constraining LLM outputs to a structured JSON format with a predefined predicate set, we minimize hallucination and ensure consistency. Using identical perceptual inputs for both LLM and heuristic baselines isolates the reasoning component, allowing us to measure the uplift engine’s ability to construct more accurate and coherent causal graphs, a foundational step toward intelligent scene understanding.
+
+Key Ideas/Contributions/Novelty ✅
+What are we doing that hasn’t been done before? Things to consider:
+What is the novelty of the idea with respect to the existing literature? What is “new”?
+What is the main contribution (to science) of this paper? Are we creating an improved method or a benchmark? What new insights or findings are we providing? What research question are we answering that was not answered? 
+Our work introduces a novel Semantic Uplift Engine that uses a large language model (LLM) to transform raw egocentric video into a causally structured knowledge graph, addressing a gap unaddressed by existing systems. Unlike temporal reasoning models like LLM-DA or DAEMON, which operate on pre-existing symbolic graphs, or heuristic systems that rely on rigid spatial rules, our approach integrates perception and LLM-based reasoning to construct causal representations directly from video. The novelty lies in using a constrained LLM to infer event triples and causal links from structured perceptual logs, capturing semantic and causal nuances that heuristics cannot. The primary contribution is a validated method for semantic uplift, demonstrating that LLM-based reasoning produces more accurate and causally coherent knowledge graphs from egocentric video than heuristic baselines. We evaluate on the VSGR dataset, a collection of annotated video clips specifically designed to assess causal graph construction and video scene graph reasoning in egocentric settings, aligning closely with our benchmarks for evaluating entity relations, events, and causal dynamics. These contributions provide new insights into bridging perception and symbolic reasoning, enabling systems to model the causal structure of dynamic scenes with greater fidelity. We answer: “Can an LLM-based Semantic Uplift Engine construct a more causally accurate and coherent knowledge graph from egocentric video than a heuristic, rule-based system?” This question is unanswered because prior work focuses either on reasoning over existing graphs or action execution, not on building causal representations from raw perceptual data.
+Our concrete contributions are:
+Semantic Uplift: A pipeline combining object detection, entity tracking, and constrained LLM reasoning to generate causally accurate event triples and knowledge graphs
+Empirical Validation on VSGR: A controlled study adapting the VSGR dataset for evaluation, showing that LLM-driven uplift outperforms heuristic methods in triplet accuracy and causal coherence, with ablations isolating the contributions of structured inputs and LLM reasoning.
+
+Methods ✅
+How does your idea work? Describe the way you will get your results from the initial step. Make a diagram. 
+
+Our method is a multi-stage, offline processing pipeline designed to transform a raw video file into a structured, causally coherent, and queryable knowledge graph. The architecture is designed to be modular and scientifically rigorous, with two primary engines.
+Part 1: The Asynchronous Perception Engine
+Objective: To process a raw video file and convert it into a time-ordered log of rich, object-centric perception data. This engine is designed for efficiency and depth, decoupling fast tracking from slower, detailed analysis.
+1.1: Intelligent Frame Selection
+Process: We first decode the video at a steady 4 FPS. For each frame, we generate a scene_embedding using a lightweight ViT. We only pass frames to the next, more expensive stage if their scene_embedding's cosine similarity to the last processed frame is below a threshold of 0.98, ensuring we only process moments of meaningful change.
+1.2: Two-Pronged Object Analysis For each "interesting" frame, we run a two-pronged analysis on every object detected by a YOLO11m model.
+Path A: Real-Time Fingerprinting (for Permanence)
+Model: OSNet (Omni-Scale Network).
+Justification: We use OSNet as it is a state-of-the-art Re-ID model specifically designed to generate robust visual fingerprints (visual_embedding vectors) that are resilient to changes in scale, pose, and lighting. This is critical for reliable long-term tracking.
+Process: The cropped image of each detected object is passed to OSNet to generate its persistent fingerprint. This is a fast, real-time capable operation.
+Path B: Asynchronous Description (for Specificity)
+Model: FastVLM.
+Justification: To manage the high computational cost of VLM inference, this step is handled asynchronously. This allows the system to maintain a high throughput for tracking while progressively enriching the data with detailed descriptions.
+Process: The cropped image of each object is added to a background processing queue. A separate worker process pulls from this queue, runs the FastVLM model to generate a detailed rich_description string (e.g., "a blue stainless steel water bottle with a silver cap"), and updates the data log.
+1.3: The Structured Perception Log The final output of this engine is a consolidated log of RichPerceptionObjects, where each object has both a unique fingerprint and a detailed description, ready for high-level reasoning.
+Part 2: The Semantic Uplift Engine (The Core Novelty)
+Objective: To ingest the Structured Perception Log and use a novel, two-stage causal inference process to construct a high-level, dynamic knowledge graph.
+2.1: Entity Tracking & State Consolidation
+Process: We first run HDBSCAN on the visual_embeddings from the entire perception log (spanning all clips in a story arc). This clusters all observations of the same object and assigns a single, persistent entity_id. This step achieves long-term object permanence. Parameters: min_cluster_size = 3, min_samples = 1
+Output: A clean, time-ordered event log where each observation is now associated with a persistent entity (e.g., Entity_001, Entity_002).
+State Change Detection:
+Compute state vector per entity in 1-2s windows:
+Detect changes via score: S(t1, t2) = weighted sum of cosine(embedding) difference
+Output: Perception log (JSON) with entity IDs, timestamps, and events
+2.2: Two-Stage Causal Inference This is the heart of our contribution. We do not ask the LLM to watch the video. We ask it to act as a causal reasoning engine on the clean, structured data we have prepared.
+Stage 1: The Causal Influence Score (CIS)
+For any detected state change in an object (the "patient," P), our system calculates a Causal Influence Score for every other object in the immediate temporal vicinity (the potential "agents," A).
+The function is defined as:
+C(A,P,ΔS)=w1​⋅fprox​(A,P,tΔS​)+w2​⋅fmotion​(A,tΔS​)
+Where:
+fprox​ is a spatio-temporal proximity function measuring the inverse distance between the agent and patient in the frames immediately preceding the state change.
+fmotion​ is a directed motion function measuring if the agent was moving towards the patient before the state change.
+w1​ and w2​ are learned weights.
+Novelty: This score provides a formal, non-LLM basis for our causal reasoning, pruning away spurious correlations and focusing the LLM on only the most plausible physical interactions.
+Stage 2: LLM-based Event Verification and Labeling
+Only the agent-patient pairs with a Causal Influence Score above a set threshold are passed to a locally hosted GPT-OSS-20B model.
+The LLM's task is now a highly constrained verification and labeling problem, prompted as follows:
+"Given that Entity_A (a person's hand) is the likely physical cause of Entity_B's (a light switch) state change from 'off' to 'on', provide the most precise semantic label for this event (e.g., FlipSwitch, PushButton) and generate the corresponding Cypher query."
+2.3: Knowledge Ingestion The generated Cypher queries are executed against our Neo4j 5 database, which uses a native vector index on the OSNet visual_embeddings. This populates our graph not with simple descriptions, but with high-level, inferred causal events, creating a true episodic memory.
+Heuristic Baseline:
+Given that such a semantic uplift process to generate such graph data hasn’t yet been introduced, we falter to a baseline heuristic-based methodology as such:
+Instead of our two-stage inference, it uses a comprehensive set of hand-crafted if/then rules to generate the knowledge graph.
+How it Works: The baseline will consist of a Python script with a rule engine.
+Example Rules:
+Proximity Rule: IF distance(A.bbox, B.bbox) < 50 pixels for 10 frames THEN CREATE (A)-[:IS_NEAR]->(B)
+Containment Rule: IF A.bbox is 95% inside B.bbox THEN CREATE (A)-[:IS_INSIDE]->(B)
+Simple Causal Rule: IF (A)-[:IS_NEAR]->(B) AND B.description changes from 'closed' to 'open' THEN CREATE (A)-[:CAUSED]->(:Event {type: 'StateChange'})
+Limitations (which we aim to prove): This system is brittle, cannot handle events not explicitly coded, struggles with ambiguity, and lacks the deep semantic understanding to provide rich labels like FlipSwitch vs. PushButton.
+Experimental Setup ✅
+How are you going to test your idea to prove that it works?
+Think about social science experiments where researchers have a plan of what to make participants do, what to ask them and how to calculate results based on the responses.
+What are your baselines for comparison? i.e control group
+What models? What datasets? What metrics (if not accuracy)?
+
+We will evaluate the Semantic Uplift Engine’s ability to construct accurate and causally coherent knowledge graphs from egocentric video, comparing it to heuristic and caption-based baselines using the VSGR dataset. By providing identical perceptual inputs to all systems, we isolate the reasoning component, ensuring that differences reflect the effectiveness of LLM-based semantic uplift.
+Baseline for Comparisons (Control Group):
+Heuristic Uplift Engine:
+Input: same perception log as the main pipeline
+Method: determines rules for event decisions
+Output: S-P-O triples and casual links in Neo4j
+Purpose: To Test whether the LLM reasoning improves causal accuracy over rule-based methods.
+Models:
+Detector: YOLO11m
+Re-ID: OSNet
+Clustering: HDBSCAN
+LLM: GPT-OSS-20B
+Graph DB: Neo4j 5 with native vector indexing
+Dataset:
+VSGR: Video clips with annotations for scene graph reasoning, entities, relations, and causal dynamics in egocentric videos (e.g., interactions involving pick-up, place, open)
+Annotations: Entities (ID, class), events (type, timestamps), causal edges annotated/adapted
+Metrics:
+Triplet Precision/Recall/F1: Correct if S, P, O match ground truth and timestamps overlap within +- 2s
+Causal Reasoning Score: Precision/Recall/F1 for causal edges
+Entity Continuity: % of events attributed to correct ground-truth entity ID
+Procedure:
+Process each VSGR clip through the perception layer to generate a unified perception log
+Feed the log to:
+Full Semantic Uplift Engine
+Heuristic Uplift Engine
+Compare output graphs to VSGR ground-truth annotations
+
+What additional analysis do you plan on doing?
+How are you going to prove that any improvements in the system are because of your idea alone, i.e. reduce confounding factors and do ablation testing
+How does your idea impact the system? What metrics are you quantifying with? 
+Visualizations? Statistics?
+
+Ablation Studies:
+Remove re-ID (use per-frame detections): Measures entity continuity impact
+Remove state change detection (feed all frames): Tests event abstraction value
+Remove structured prompting (allow free-text LLM output): Evaluates constraint importance
+Qualitative Analysis: Case studies (3-5 clips) showing LLM successes and failures
+Visualizations: UMAP of OSNet embeddings by entity ID; predicate confusion matrices
+How are you going to prove that any improvements in the system are because of your idea alone, i.e. reduce confounding factors and do ablation testing
+Identical inputs: all systems use the same perception log, isolating the reasoning module
+Deterministic settings: fix seeds for HDBSCAN and use deterministic LLM decoding
+Ablations: Show performance drops when removing re-ID, state detection, or structured prompting
+How does your idea impact the system? What metrics are you quantifying with? Visualizations? Statistics?
+The Semantic Uplift Engine improves causal accuracy (Triplet F1, Causal Reasoning Score) by leveraging LLM reasoning to capture semantic nuances
+Visualizations and case studies illustrate how LLM reasoning enhances causal coherence, supporting applications like robotics and scene understandings
+
+Datasets and Evaluation (only thing remaining…ill put the chatgpt version below so you can take a look at what we’re trying to do)
+Which datasets are you going to use to evaluate your method? Or, are you creating your own?
+If you’re training, what dataset will you use for that?
+Our system is not trained end-to-end. Instead:
+YOLO11m is pre-trained on MS-COCO
+OSNet (Re-ID) is pre-trained on large-scale re-identification datasets (ex: Market-1501, DukeMTMC)
+GPT-OSS-120B is pre-trained and not fine-tuned; it is only prompt engineered for structured event
+HDBSCAN (clustering) is unsupervised
+What is the evaluation metric(s)? 
+Some tasks are straightforward to measure (e.g accuracy, for mathematical reasoning). Some are much harder (e.g LLM persuasive ability - think about how you would do this).
+Step 1: Data Extraction
+Our Graph: The script will connect to our Neo4j database and execute a Cypher query to extract all generated relationships as a list of triplets: [(subject_id, predicate, object_id), ...].
+Ground Truth Graph: The script will parse the annotation files provided by the dataset (e.g., the JSON files from Action Genome) to extract the ground-truth triplets for the same video clip.
+Step 2: Normalization and Canonicalization
+To ensure a fair "apples-to-apples" comparison, the script will perform normalization. This involves:
+Entity Normalization: Mapping our system's internally generated entity_id (e.g., Entity_001) to the ground-truth object ID by comparing bounding box overlap using Intersection over Union (IoU). If the IoU between a detected object and a ground-truth object is greater than 0.5, they are considered a match.
+Predicate Normalization: Mapping different but semantically similar relationship labels to a single canonical form (e.g., mapping both is_holding and holds to a single holding predicate).
+Step 3: Calculating Accuracy (The Metrics)
+The script will treat the normalized set of generated triplets and the set of ground-truth triplets as two sets. It will then calculate:
+True Positives (TP): The number of generated triplets that have a direct match in the ground truth.
+False Positives (FP): The number of generated triplets that do not have a match in the ground truth.
+False Negatives (FN): The number of ground-truth triplets that were not generated by our system.
+From these counts, we will calculate our primary metrics:
+Precision = TP / (TP + FP)
+Recall = TP / (TP + FN)
+F1-Score = 2 * (Precision * Recall) / (Precision + Recall)
+This F1-score gives us a single, rigorous, and standard number to quantify the accuracy of our generated graph.
+
+## Part 3: Baselines for Comparison
+Our evaluation will use two different types of baselines to test both the descriptive and causal capabilities of our system.
+Baseline 1: State-of-the-Art VSGG Models
+Who are they? Yes, there are other SOTA models that do this. These are existing research models designed to generate descriptive scene graphs from video. Key examples from the papers we’ve reviewed include the model from "Action Scene Graphs for Long-Form Understanding" and HyperGLM.
+How do we compare?
+We will compare the F1-score of our system's descriptive triplets against the published F1-scores of these SOTA models on the Action Genome and Ego4D ASG datasets.
+Our Goal: To show that our system is competitive on this established task. We don't need to be number one, but we need to prove our system is capable of generating a high-quality descriptive graph before we can claim it can generate a causal one.
+Baseline 2: The Heuristic Baseline (for our Novel Causal Task)
+Why do we need this? No, the heuristic baseline is not the only one that exists, but it's the most important one for proving our novelty. The SOTA models listed above do not generate explicit causal relationships (-[:CAUSED]->). Therefore, a direct comparison for our primary novel contribution is impossible. This is where our Heuristic Baseline comes in.
+What is it? It's a non-AI system that receives the exact same Structured Perception Log as our main system but uses a comprehensive set of hand-crafted if/then rules to generate the knowledge graph.
+How do we compare?
+We will first need to create a small, targeted benchmark for causality. We will create Causal-AG, where we manually add causal annotations to 20-30 representative clips from the Action Genome dataset.
+We will then compare the Causal Agent Accuracy of our system against the Heuristic Baseline on this Causal-AG set. This metric measures how often each system correctly identifies the agent that caused a state change.
+Our Goal: To show that our Semantic Uplift Engine is significantly superior to the Heuristic Baseline on this novel task. This will definitively prove the value of our Causal Influence Score and LLM-based reasoning approach.
+
+
+Benchmarks/Evaluation Sets ✅
+Evaluation and comparison with existing systems
+We evaluate the Semantic Uplift Engine on the VSGR dataset, which was designed to test knowledge graph construction and relational reasoning.
+We compare against the Heuristic Uplift baseline
+Heuristic Uplift Engine: Uses the same perception log as our system but replaces LLM reasoning with hand-crafted rules. Provides an “apples-to-apples” baseline for causal accuracy
+We will evaluate the Semantic Uplift Engine on the VSGR dataset, which is a dataset designed to assess the accuracy and coherence of knowledge graph construction from egocentric video.
+This benchmark allows direct comparison between LLM-based and rule-based reasoning systems under identical perceptual conditions.
+Semantic Uplift Engine (ours):
+Our system integrates object detection (YOLO11m), re-identification (OSNet + HDBSCAN), and an LLM reasoning module (GPT-OSS 20B) to infer event triples and causal relationships.
+The LLM interprets a structured perception log containing entities, timestamps, and detected state changes and outputs subject predicate object triples and causal edges.
+These outputs are converted into Cypher queries and stored in Neo4j v5, forming a dynamic, causally structured knowledge graph that summarizes each video clip.
+Heuristic Uplift Engine (baseline):
+This baseline uses the same perception log as our system but replaces the LLM reasoning step with a set of deterministic, hand-crafted rules.
+For instance, spatial overlap between entities combined with sequential state changes is used to infer causal relationships (e.g., Object A caused Object B to move).
+This provides an apples-to-apples comparison that isolates the effect of LLM-based reasoning on causal accuracy.
+Baseline:
+This model receives frame-level captions or short textual descriptions as input, without structured tracking or state change logs.
+It tests the importance of the structured semantic uplift process specifically, whether maintaining consistent entity identities and temporal context contributes to more coherent causal reasoning.
+
+
+Ideal Results ✅
+What’s the best case scenario/what do you hope to demonstrate?
+What is your hypothesis? What results would prove it to be true?
+
+The best-case scenario is that our Semantic Uplift Engine significantly outperforms baselines in constructing causally accurate and coherent knowledge graphs from egocentric video on the VSGR dataset.
+We hope to show higher Triplet F1 and Causal Reasoning Scores compared to the heuristic baseline, demonstrating that LLM-guided reasoning builds more accurate and causally coherent graphs within short video clips
+Our hypothesis is: using an LLM as a structured reasoning engine within a semantic uplift pipeline produces significantly more accurate and causally coherent knowledge graphs from egocentric video than heuristic rules or unstructured caption-based methods
+This is expected because:
+Entity continuity via re-identification ensures consistent tracking of objects/people, reducing graph fragmentation
+State change detection identifies key events, providing reliable inputs for causal inference
+LLM-guided reasoning captures semantic nuances and causal links that heuristics miss
+
+Base Case Scenario / Goal
+The ideal outcome is that the Semantic Uplift Engine makes knowledge graphs from our egocentric videos that are significantly better/more accurate than those made by a heuristic model. On the VSGR dataset we are expecting to see significantly higher F1-scores and Causal Reasoning Scores which would show a significantly better identification of cause and effect relationship between entities.  
+Metrics for Success:
+On VSGR: LLM-based graphs achieve ≥0.08 higher F1 and ≥0.10 higher Causal Reasoning Score than the heuristic baseline.
+Ablation studies: Removing re-ID, event structure, or LLM reasoning consistently reduces performance, demonstrating that these components drive improvement.
+
+
+
+Potential Limitations ✅
+Computation limits, generalization limits, dataset limits, ethical limits?
+Computation Limits
+LLM inference and perception modules (YOLO11m, OSNET, FastVLM) are computationally intensive. Real-time or on-device execution may be limited, creating trade-offs between accuracy and latency.
+Knowledge graphs can grow large during long recordings, potentially slowing query operations unless pruning or summarization is implemented.
+Generalization Limits
+Domain shift: Performance may degrade in outdoor, crowded, or unusual environments not represented in training data.
+Re-ID errors: Failure to correctly track entities across frames (e.g., due to appearance changes or lookalike subjects) can reduce graph accuracy.
+LLM reasoning bias: The LLM may occasionally infer plausible but unsupported causal links, producing “hallucinated” relations.
+Dataset Limits
+Annotating ground-truth causal KGs is time-consuming and subjective, potentially introducing inter-annotator variability.
+Benchmarks like VSGR may require adaptation, limiting immediate diversity of scenarios for evaluation if not fully aligned without custom extensions.
+Ethical Limits
+Persistent memory could inadvertently track individuals’ activities, raising privacy concerns.
+Biases from perception models or LLM training data may propagate to the knowledge graphs, affecting fairness.
+Future use in autonomous or agentic systems raises ethical questions about memory retention and control.

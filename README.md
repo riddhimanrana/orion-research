@@ -168,6 +168,33 @@ GitHub Actions (`.github/workflows/ci.yml`) installs Orion with developer depend
 - Ensure enough disk space (several GB for models)
 - Ollama issues → verify the model name you configured exists locally (`ollama list`)
 
+## Research & Evaluation
+
+Orion implements a novel **two-stage causal inference** approach for building knowledge graphs from videos:
+
+1. **Mathematical Causal Influence Score (CIS)**: Filters agent-patient pairs using spatial proximity, directed motion, temporal decay, and visual similarity
+2. **LLM Verification**: Only high-scoring pairs are passed to Gemma 3 4B for semantic labeling
+
+### Evaluation Framework
+
+Compare CIS+LLM vs. heuristic baseline:
+
+```bash
+# Single video evaluation
+python scripts/run_evaluation.py --video path/to/video.mp4
+
+# VSGR benchmark evaluation
+python scripts/run_evaluation.py --mode benchmark --benchmark vsgr --dataset-path /path/to/vsgr
+```
+
+See [EVALUATION.md](EVALUATION.md) for detailed documentation on:
+- Causal Inference Score (CIS) calculation
+- Heuristic baseline implementation
+- VSGR benchmark support
+- Metrics and comparison tools
+
+See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for technical architecture details.
+
 ## License
 
 MIT — see LICENSE

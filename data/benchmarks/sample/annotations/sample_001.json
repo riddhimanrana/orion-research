@@ -1,0 +1,47 @@
+{
+  "video_id": "sample_001",
+  "objects": [
+    {
+      "id": "person_1",
+      "class": "person",
+      "bbox": [
+        100,
+        100,
+        200,
+        300
+      ],
+      "frame_id": 0
+    },
+    {
+      "id": "cup_1",
+      "class": "cup",
+      "bbox": [
+        250,
+        200,
+        300,
+        250
+      ],
+      "frame_id": 0
+    }
+  ],
+  "relationships": [
+    {
+      "subject_id": "person_1",
+      "object_id": "cup_1",
+      "predicate": "holding",
+      "frame_id": 0
+    }
+  ],
+  "actions": [
+    {
+      "id": "action_1",
+      "class": "pick_up",
+      "person_id": "person_1",
+      "start_frame": 0,
+      "end_frame": 30,
+      "objects": [
+        "cup_1"
+      ]
+    }
+  ]
+}
