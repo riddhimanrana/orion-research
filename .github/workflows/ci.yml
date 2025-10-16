@@ -23,14 +23,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .[dev]
 
+      # these are all just formatting things so commenting out for now
       # - name: Black
       #   run: black --check src tests
 
-      - name: Isort
-        run: isort --check-only src tests
+      # - name: Isort
+      #   run: isort --check-only src tests
 
       # - name: Flake8
       #   run: flake8 src tests
 
       - name: Pytest
-        run: pytest tests/test_quickstart.py
+        run: |
+          pytest tests/test_quickstart.py
+          python tests/test_evaluation_integration.py

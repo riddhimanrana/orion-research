@@ -71,9 +71,9 @@ This collects everything Orion needs under `models/`:
 - Suggested Ollama models: `gemma3:4b` for Q&A and `embeddinggemma` for embeddings
 - Shared caches for Hugging Face, Ultralytics, and Torch assets
 
-## Neo4j (optional)
+## Neo4j
 
-You can run Neo4j locally or use Neo4j Aura. Orion works without Neo4j, but using it lets you visualize and query the event graph.
+You can run Neo4j locally or use Neo4j Aura. Orion works without Neo4j, but using it lets you visualize and query the event graph which is sort of the main point of the project.
 
 Option A — Docker:
 
@@ -173,8 +173,8 @@ GitHub Actions (`.github/workflows/ci.yml`) installs Orion with developer depend
 Orion implements a novel **two-stage causal inference** approach for building knowledge graphs from videos:
 
 1. **Mathematical Causal Influence Score (CIS)**: Filters agent-patient pairs using spatial proximity, directed motion, temporal decay, and visual similarity
-2. **LLM Verification**: Only high-scoring pairs are passed to Gemma 3 4B for semantic labeling
-
+2. **LLM Verification**: Only high-scoring pairs are passed to Gemma 3 4B(or gpt-oss-20b but you choose based on the models available to be run in your environments as you need) for semantic labeling
+  
 ### Evaluation Framework
 
 Compare CIS+LLM vs. heuristic baseline:
