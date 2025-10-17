@@ -15,7 +15,7 @@ Date: October 2025
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 
@@ -192,13 +192,13 @@ class OrionConfig:
         print(config.detection.confidence_threshold)  # 0.25
     """
     
-    video: VideoConfig = VideoConfig()
-    detection: DetectionConfig = DetectionConfig()
-    embedding: EmbeddingConfig = EmbeddingConfig()
-    clustering: ClusteringConfig = ClusteringConfig()
-    description: DescriptionConfig = DescriptionConfig()
-    performance: PerformanceConfig = PerformanceConfig()
-    logging: LoggingConfig = LoggingConfig()
+    video: VideoConfig = field(default_factory=VideoConfig)
+    detection: DetectionConfig = field(default_factory=DetectionConfig)
+    embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
+    clustering: ClusteringConfig = field(default_factory=ClusteringConfig)
+    description: DescriptionConfig = field(default_factory=DescriptionConfig)
+    performance: PerformanceConfig = field(default_factory=PerformanceConfig)
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
     
     def __post_init__(self):
         """Initialize sub-configs if not provided"""

@@ -287,6 +287,52 @@ class ModelManager:
         
         return usage
     
+    def generate_with_ollama(
+        self,
+        prompt: str,
+        model: str = "gemma3:4b",
+        temperature: float = 0.7,
+        max_tokens: int = 1000,
+    ) -> str:
+        """
+        Generate text using Ollama LLM.
+        
+        This is a convenience method for calling Ollama models.
+        Requires ollama to be installed and running.
+        
+        Args:
+            prompt: The prompt to send to the LLM
+            model: Ollama model name (default: gemma3:4b)
+            temperature: Sampling temperature (default: 0.7)
+            max_tokens: Maximum tokens to generate (default: 1000)
+            
+        Returns:
+            Generated text response
+            
+        Raises:
+            ImportError: If ollama package is not installed
+            RuntimeError: If ollama service is not running
+        """
+        try:
+            import ollama
+        except ImportError:
+            raise ImportError(
+                "Ollama package not installed. Install with: pip install ollama"
+            )
+        
+        try:
+            response = ollama.chat(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                options={
+                    "temperature": temperature,
+                    "num_predict": max_tokens,
+                }
+            )
+            return response['message']['content']
+        except Exception as e:
+            raise RuntimeError(f"Ollama generation failed: {e}")
+    
     def __repr__(self) -> str:
         return (
             f"ModelManager(device={self.device}, "

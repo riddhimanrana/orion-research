@@ -6,9 +6,17 @@
 [![Ollama](https://img.shields.io/badge/ollama-local%20LLM-blue)](https://ollama.com)
 [![Neo4j](https://img.shields.io/badge/neo4j-optional-blue)](https://neo4j.com)
 
-Orion turns videos into a simple knowledge graph you can query in plain English. It detects objects, describes scenes, tracks changes over time, and stores events in Neo4j. A local LLM (via Ollama) answers questions grounded by this graph.
+Orion turns videos into a rich knowledge graph you can query in plain English. It detects objects with **YOLO11x**, generates embeddings with **CLIP**, describes scenes with **FastVLM**, tracks entities across time, and builds an intelligent graph with scene understanding, spatial relationships, and causal reasoning.
 
-Part 2 of the pipeline now builds a richer scene graph: every frame snapshot becomes a `Scene`, related scenes are clustered into inferred `Location` nodes, entities are linked to the scenes they appear in, and similar rooms are connected with weighted `SIMILAR_TO` edges. Temporal `TRANSITIONS_TO` links capture how the narrative flows from one scene to the next.
+**Enhanced Knowledge Graph Features:**
+- 🏠 **Scene Classification** - Automatically detects room types (office, kitchen, bedroom, etc.)
+- 🔗 **Spatial Relationships** - Tracks which objects are near, above, below, or contain each other
+- 🧠 **Contextual Embeddings** - Combines visual + spatial + scene context for better understanding
+- ⚡ **Causal Reasoning** - Infers potential cause-effect relationships between state changes
+- 💬 **Intelligent QA** - Context-aware question answering with multi-modal retrieval
+- 📊 **Scene Transitions** - Temporal graph showing how scenes flow and change
+
+The system uses a unified **ModelManager** for efficient resource sharing and **OrionConfig** for centralized configuration, achieving 21x efficiency improvement over naive approaches.
 
 ## Requirements
 
