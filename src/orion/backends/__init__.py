@@ -1,5 +1,5 @@
 """Backends exposed by Orion."""
 
-from .torch_fastvlm import DEFAULT_MODEL_ID, FastVLMTorchWrapper
+from .torch_fastvlm import FastVLMTorchWrapper
 
-__all__ = ["FastVLMTorchWrapper", "DEFAULT_MODEL_ID"]
+__all__ = ["FastVLMTorchWrapper"]

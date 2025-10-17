@@ -15,12 +15,18 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import time
+from collections import OrderedDict
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from rich import box
 from rich.console import Console
+from rich.live import Live
+from rich.panel import Panel
 from rich.table import Table
 
 from .models import ModelManager
@@ -61,9 +67,267 @@ except ImportError:  # pragma: no cover
 console = Console()
 
 
+def _format_duration(seconds: float) -> str:
+    seconds = max(0.0, seconds)
+    minutes, sec = divmod(int(seconds + 0.5), 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours:d}:{minutes:02d}:{sec:02d}"
+    return f"{minutes:02d}:{sec:02d}"
+
+
+@dataclass
+class StageState:
+    title: str
+    style: str = "cyan"
+    total: Optional[int] = None
+    current: int = 0
+    status: str = "Pending"
+    icon: str = "[dim]○[/]"
+    start_time: Optional[float] = None
+    end_time: Optional[float] = None
+
+    def start(self, message: Optional[str] = None) -> None:
+        if self.start_time is None:
+            self.start_time = time.time()
+        self.status = message or self.status or "Running"
+        self.icon = f"[{self.style}]⏳[/]"
+
+    def set_total(self, total: Optional[int]) -> None:
+        self.total = total
+        if total is not None:
+            self.current = min(self.current, total)
+
+    def set_status(self, message: str) -> None:
+        self.status = message
+
+    def advance(self, *, current: Optional[int] = None, increment: Optional[int] = None) -> None:
+        if current is not None:
+            self.current = current
+        elif increment is not None:
+            self.current += increment
+        elif self.total is not None:
+            self.current += 1
+        if self.total is not None:
+            self.current = max(0, min(self.current, self.total))
+
+    def complete(self, message: Optional[str] = None) -> None:
+        if self.total not in (None, 0):
+            self.current = self.total
+        self.status = message or self.status or "Completed"
+        self.icon = "[green]✓[/]"
+        if self.end_time is None:
+            self.end_time = time.time()
+
+    def warn(self, message: str) -> None:
+        self.status = message
+        self.icon = "[yellow]![/]"
+        if self.end_time is None:
+            self.end_time = time.time()
+
+    def fail(self, message: str) -> None:
+        self.status = message
+        self.icon = "[red]✗[/]"
+        if self.end_time is None:
+            self.end_time = time.time()
+
+    def skip(self, message: str) -> None:
+        if self.start_time is None:
+            self.start_time = time.time()
+        self.end_time = time.time()
+        self.status = message
+        self.icon = "[yellow]⏭[/]"
+
+    def progress_ratio(self) -> Optional[float]:
+        if self.total in (None, 0):
+            return None
+        return min(1.0, self.current / self.total if self.total else 0.0)
+
+    def progress_display(self) -> str:
+        ratio = self.progress_ratio()
+        if ratio is None:
+            return "—"
+        percent = ratio * 100.0
+        if self.total is None:
+            return f"{percent:4.0f}%"
+        return f"{self.current}/{self.total} ({percent:4.0f}%)"
+
+    def elapsed_display(self) -> str:
+        if self.start_time is None:
+            return "—"
+        end = self.end_time or time.time()
+        return _format_duration(end - self.start_time)
+
+    def eta_display(self) -> str:
+        ratio = self.progress_ratio()
+        if (
+            ratio is None
+            or ratio <= 0.0
+            or ratio >= 1.0
+            or self.start_time is None
+            or self.end_time is not None
+        ):
+            return "—"
+        elapsed = time.time() - self.start_time
+        remaining = (1.0 - ratio) * elapsed / max(ratio, 1e-9)
+        return _format_duration(remaining)
+
+
+class PipelineUI:
+    """Live-updating terminal dashboard for pipeline stages."""
+
+    def __init__(self, console: Console, enabled: bool = True) -> None:
+        self.console = console
+        self.enabled = enabled
+        self.stages: "OrderedDict[str, StageState]" = OrderedDict()
+        self.live: Optional[Live] = None
+        self._last_refresh = 0.0
+        self._refresh_interval = 0.1
+
+    def __enter__(self) -> "PipelineUI":
+        if self.enabled:
+            self.live = Live(
+                self.render(),
+                console=self.console,
+                refresh_per_second=8,
+                transient=False,
+            )
+            self.live.__enter__()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc: Optional[BaseException],
+        tb: Optional[Any],
+    ) -> None:
+        if self.enabled and self.live is not None:
+            self.refresh(force=True)
+            self.live.__exit__(exc_type, exc, tb)
+            self.live = None
+
+    # ------------------------------------------------------------------
+    # Stage management helpers
+    # ------------------------------------------------------------------
+    def add_stage(
+        self,
+        key: str,
+        title: str,
+        *,
+        style: str = "cyan",
+        total: Optional[int] = None,
+    ) -> None:
+        if key not in self.stages:
+            self.stages[key] = StageState(title=title, style=style, total=total)
+            self.refresh(force=True)
+
+    def start_stage(self, key: str, message: Optional[str] = None) -> None:
+        stage = self.stages.get(key)
+        if stage is None:
+            return
+        stage.start(message or "Running")
+        self.refresh()
+
+    def set_stage_total(self, key: str, total: Optional[int]) -> None:
+        stage = self.stages.get(key)
+        if stage is None:
+            return
+        stage.set_total(total)
+        self.refresh()
+
+    def advance_stage(
+        self,
+        key: str,
+        *,
+        current: Optional[int] = None,
+        increment: Optional[int] = None,
+        message: Optional[str] = None,
+    ) -> None:
+        stage = self.stages.get(key)
+        if stage is None:
+            return
+        if stage.start_time is None:
+            stage.start()
+        stage.advance(current=current, increment=increment)
+        if message is not None:
+            stage.set_status(message)
+        self.refresh()
+
+    def complete_stage(self, key: str, message: Optional[str] = None) -> None:
+        stage = self.stages.get(key)
+        if stage is None:
+            return
+        stage.complete(message)
+        self.refresh(force=True)
+
+    def fail_stage(self, key: str, message: str) -> None:
+        stage = self.stages.get(key)
+        if stage is None:
+            return
+        stage.fail(message)
+        self.refresh(force=True)
+
+    def warn_stage(self, key: str, message: str) -> None:
+        stage = self.stages.get(key)
+        if stage is None:
+            return
+        stage.warn(message)
+        self.refresh(force=True)
+
+    def skip_stage(self, key: str, message: str) -> None:
+        stage = self.stages.get(key)
+        if stage is None:
+            return
+        stage.skip(message)
+        self.refresh(force=True)
+
+    def set_stage_status(self, key: str, message: str) -> None:
+        stage = self.stages.get(key)
+        if stage is None:
+            return
+        stage.set_status(message)
+        self.refresh()
+
+    # ------------------------------------------------------------------
+    # Rendering
+    # ------------------------------------------------------------------
+    def render(self) -> Panel:
+        table = Table(box=box.SIMPLE_HEAVY, expand=True, show_edge=False)
+        table.add_column("Stage", style="bold", no_wrap=True)
+        table.add_column("Status", overflow="fold")
+        table.add_column("Progress", justify="right", width=18)
+        table.add_column("Elapsed", justify="right", width=8)
+        table.add_column("ETA", justify="right", width=8)
+
+        for stage in self.stages.values():
+            table.add_row(
+                f"{stage.icon} {stage.title}",
+                stage.status,
+                stage.progress_display(),
+                stage.elapsed_display(),
+                stage.eta_display(),
+            )
+
+        return Panel(
+            table,
+            title="[bold]Pipeline Status[/bold]",
+            border_style="cyan",
+            padding=(0, 1),
+        )
+
+    def refresh(self, force: bool = False) -> None:
+        if not self.enabled or self.live is None:
+            return
+        now = time.time()
+        if not force and now - self._last_refresh < self._refresh_interval:
+            return
+        self._last_refresh = now
+        self.live.update(self.render(), refresh=True)
+
+
 def setup_logging(verbose: bool = False):
     """Setup clean logging"""
-    level = logging.DEBUG if verbose else logging.INFO
+    level = logging.DEBUG if verbose else logging.WARNING
 
     # Configure logging (console only, no file logging)
     logging.basicConfig(
@@ -77,6 +341,24 @@ def setup_logging(verbose: bool = False):
     logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
     logging.getLogger("transformers").setLevel(logging.WARNING)
     logging.getLogger("coremltools").setLevel(logging.WARNING)
+
+
+def _refresh_engine_loggers() -> None:
+    """Re-evaluate engine loggers after toggling suppression flags."""
+
+    try:
+        from . import perception_engine
+
+        perception_engine.logger = perception_engine.setup_logger("PerceptionEngine")
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+    try:
+        from . import semantic_uplift
+
+        semantic_uplift.logger = semantic_uplift.setup_logger("SemanticUplift")
+    except Exception:  # pragma: no cover - defensive
+        pass
 
 
 def print_banner():
@@ -128,29 +410,39 @@ def run_pipeline(
     skip_part2: bool = False,
     verbose: bool = False,
     runtime: Optional[str] = None,
+    use_progress_ui: bool = True,
 ) -> Dict[str, Any]:
     """
-    Run complete video analysis pipeline
+    Run the complete video analysis pipeline with a streamlined terminal UI.
 
     Args:
-        video_path: Path to input video
-        output_dir: Directory for output files
-        neo4j_uri: Neo4j database URI
-    neo4j_user: Neo4j username
-        neo4j_password: Neo4j password
-        clear_db: Whether to clear Neo4j before running
-        part1_config: Configuration for perception engine (fast/balanced/accurate)
-        part2_config: Configuration for semantic uplift (fast/balanced/accurate)
-        skip_part1: Skip perception engine (use existing results)
-        skip_part2: Skip semantic uplift
-        verbose: Enable debug logging
+        video_path: Path to input video.
+        output_dir: Directory for output artifacts.
+        neo4j_uri: Neo4j database URI.
+        neo4j_user: Neo4j username.
+        neo4j_password: Neo4j password.
+        clear_db: Whether to clear Neo4j before running Part 2.
+        part1_config: Perception configuration preset (fast/balanced/accurate).
+        part2_config: Semantic uplift configuration preset (fast/balanced/accurate).
+        skip_part1: Skip perception engine (use existing results).
+        skip_part2: Skip semantic uplift stage.
+        verbose: Enable verbose logging.
+        runtime: Preferred runtime backend.
+        use_progress_ui: Render Rich progress bars instead of verbose logs.
 
     Returns:
-        Results dictionary with statistics and file paths
+        Results dictionary with statistics and file paths.
     """
+
     setup_logging(verbose)
 
-    results = {
+    previous_suppress = None
+    if not verbose:
+        previous_suppress = os.environ.get("ORION_SUPPRESS_ENGINE_LOGS")
+        os.environ["ORION_SUPPRESS_ENGINE_LOGS"] = "1"
+        _refresh_engine_loggers()
+
+    results: Dict[str, Any] = {
         "video_path": video_path,
         "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
         "part1": {},
@@ -161,189 +453,393 @@ def run_pipeline(
 
     perception_log: Optional[List[Dict[str, Any]]] = None
     perception_log_path: Optional[str] = None
+    perception_duration: Optional[float] = None
+    uplift_results: Dict[str, Any] = {}
+    uplift_duration: Optional[float] = None
+    neo4j_status: Optional[str] = None
+
+    ui = PipelineUI(console, enabled=use_progress_ui and not verbose)
 
     try:
-        backend, _ = _resolve_runtime(runtime)
-        results["runtime"] = backend
-        console.print(f"[dim]Runtime backend: {backend}[/dim]")
+        with ui:
+            if ui.enabled:
+                ui.add_stage("runtime", "Runtime backend", style="cyan")
+                ui.start_stage("runtime", "Preparing runtime backend")
+            try:
+                backend, _ = _resolve_runtime(runtime)
+            except Exception as exc:
+                if ui.enabled:
+                    ui.fail_stage("runtime", f"Runtime preparation failed: {exc}")
+                raise
+            results["runtime"] = backend
+            if ui.enabled:
+                ui.complete_stage("runtime", f"Runtime ready ({backend})")
 
-        # Clear Neo4j if requested
-        if clear_db and not skip_part2:
-            with console.status("[yellow]Clearing Neo4j database...[/yellow]"):
-                if clear_neo4j_for_new_run(neo4j_uri, neo4j_user, neo4j_password):
-                    console.print("✓ [green]Neo4j cleared[/green]")
+            if not skip_part2:
+                if ui.enabled:
+                    ui.add_stage("neo4j", "Neo4j database", style="yellow")
+                    ui.start_stage("neo4j", "Preparing Neo4j database")
+                if clear_db:
+                    cleared = clear_neo4j_for_new_run(
+                        neo4j_uri, neo4j_user, neo4j_password
+                    )
+                    if cleared:
+                        neo4j_status = "Cleared"
+                        if ui.enabled:
+                            ui.complete_stage("neo4j", "Neo4j cleared")
+                    else:
+                        neo4j_status = "Unavailable (kept data)"
+                        if ui.enabled:
+                            ui.warn_stage(
+                                "neo4j", "Neo4j unavailable – kept existing data"
+                            )
                 else:
-                    console.print(
-                        "⚠ [yellow]Could not clear Neo4j (may not be running)[/yellow]"
+                    neo4j_status = "Preserved"
+                    if ui.enabled:
+                        ui.skip_stage("neo4j", "Preserving existing Neo4j data")
+
+            if skip_part1:
+                results["part1"] = {"success": False, "skipped": True}
+                if ui.enabled:
+                    ui.add_stage("perception", "Perception engine", style="yellow")
+                    ui.skip_stage("perception", "Perception engine skipped")
+            else:
+                if CONFIGS_AVAILABLE:
+                    if part1_config == "fast":
+                        from .perception_config import FAST_CONFIG
+
+                        apply_part1_config(FAST_CONFIG)
+                    elif part1_config == "accurate":
+                        from .perception_config import ACCURATE_CONFIG
+
+                        apply_part1_config(ACCURATE_CONFIG)
+                    else:
+                        from .perception_config import BALANCED_CONFIG
+
+                        apply_part1_config(BALANCED_CONFIG)
+
+                if ui.enabled:
+                    ui.add_stage(
+                        "perception",
+                        f"Perception engine ({part1_config} mode)",
+                        style="cyan",
+                    )
+                    ui.start_stage(
+                        "perception",
+                        f"Perception engine ({part1_config} mode)",
+                    )
+                    ui.add_stage(
+                        "perception.frames",
+                        "Frame sampling & detection",
+                        style="cyan",
+                    )
+                    ui.add_stage(
+                        "perception.descriptions",
+                        "Description workers",
+                        style="magenta",
                     )
 
-        # PART 1: Perception Engine
-        if not skip_part1:
-            console.print("\n" + "=" * 65)
-            console.print("[bold cyan]PART 1: VISUAL PERCEPTION ENGINE[/bold cyan]")
-            console.print("=" * 65)
+                worker_tasks: List[Tuple[str, str]] = []
+                if ui.enabled:
+                    from .perception_engine import Config as PerceptionConfig
 
-            # Apply configuration
-            if CONFIGS_AVAILABLE:
-                if part1_config == "fast":
-                    from .perception_config import FAST_CONFIG
+                    for idx in range(PerceptionConfig.NUM_WORKERS):
+                        key = f"worker-{idx + 1}"
+                        label = f"Worker {idx + 1}"
+                        ui.add_stage(key, label, style="magenta")
+                        ui.start_stage(key, "Waiting for jobs")
+                        worker_tasks.append((key, label))
 
-                    apply_part1_config(FAST_CONFIG)
-                elif part1_config == "accurate":
-                    from .perception_config import ACCURATE_CONFIG
+                from .perception_engine import Config as PerceptionConfig
 
-                    apply_part1_config(ACCURATE_CONFIG)
-                else:  # balanced
-                    from .perception_config import BALANCED_CONFIG
+                prev_progress = getattr(PerceptionConfig, "PROGRESS_BAR", True)
+                setattr(PerceptionConfig, "PROGRESS_BAR", False)
 
-                    apply_part1_config(BALANCED_CONFIG)
-                console.print(f"[dim]Using {part1_config} mode[/dim]\n")
+                def handle_progress(event: str, payload: Dict[str, Any]) -> None:
+                    if not ui.enabled:
+                        return
+                    if event == "perception.frames.start":
+                        total = payload.get("total")
+                        if total is not None:
+                            ui.set_stage_total("perception.frames", total)
+                        ui.start_stage("perception.frames", "Processing frames")
+                        ui.set_stage_status("perception", "Processing frames")
+                    elif event == "perception.frames.progress":
+                        current = payload.get("current")
+                        total = payload.get("total")
+                        if total is not None:
+                            ui.set_stage_total("perception.frames", total)
+                        ui.advance_stage("perception.frames", current=current)
+                        frame = payload.get("frame")
+                        detections = payload.get("detections")
+                        if frame is not None and detections is not None:
+                            ui.set_stage_status(
+                                "perception.frames",
+                                f"Frame {frame}: +{detections} detections",
+                            )
+                        elif current is not None and total is not None:
+                            ui.set_stage_status(
+                                "perception.frames",
+                                f"{current}/{total} frames processed",
+                            )
+                        if current is not None and total is not None:
+                            ui.set_stage_status(
+                                "perception",
+                                f"{current}/{total} frames processed",
+                            )
+                    elif event == "perception.frames.complete":
+                        detections = payload.get("detections")
+                        total = payload.get("total")
+                        if detections is not None and total is not None:
+                            msg = f"{total} frames, {detections} detections"
+                        elif total is not None:
+                            msg = f"{total} frames processed"
+                        else:
+                            msg = "Frame processing complete"
+                        ui.complete_stage("perception.frames", msg)
+                        ui.set_stage_status("perception", "Awaiting descriptions")
+                    elif event == "perception.descriptions.start":
+                        total = payload.get("total")
+                        if total is not None:
+                            ui.set_stage_total("perception.descriptions", total)
+                        ui.start_stage(
+                            "perception.descriptions", "Generating descriptions"
+                        )
+                        ui.set_stage_status("perception", "Generating descriptions")
+                    elif event == "perception.descriptions.progress":
+                        current = payload.get("current")
+                        total = payload.get("total")
+                        if total is not None:
+                            ui.set_stage_total("perception.descriptions", total)
+                        ui.advance_stage(
+                            "perception.descriptions", current=current
+                        )
+                        if current is not None and total:
+                            ui.set_stage_status(
+                                "perception.descriptions",
+                                f"{current}/{total} complete",
+                            )
+                            ui.set_stage_status(
+                                "perception",
+                                f"{current}/{total} descriptions ready",
+                            )
+                        elif current is not None:
+                            ui.set_stage_status(
+                                "perception.descriptions",
+                                f"{current} descriptions ready",
+                            )
+                    elif event == "perception.descriptions.complete":
+                        total = payload.get("total")
+                        if total is not None:
+                            msg = f"{total} descriptions generated"
+                        else:
+                            msg = "Descriptions complete"
+                        ui.complete_stage("perception.descriptions", msg)
+                        ui.set_stage_status("perception", "Finalizing")
 
-            start_time = time.time()
+                start_time = time.time()
+                try:
+                    perception_log = run_perception_engine(
+                        video_path,
+                        progress_callback=handle_progress if ui.enabled else None,
+                    )
+                except Exception as exc:
+                    if ui.enabled:
+                        ui.fail_stage("perception", "Perception engine failed")
+                        for key, label in worker_tasks:
+                            ui.fail_stage(key, f"{label} error")
+                    raise
+                finally:
+                    setattr(PerceptionConfig, "PROGRESS_BAR", prev_progress)
 
-            perception_log = run_perception_engine(video_path)
+                perception_duration = time.time() - start_time
+                num_objects = len(perception_log)
 
-            duration = time.time() - start_time
+                if ui.enabled:
+                    ui.complete_stage(
+                        "perception",
+                        f"Perception complete ({num_objects} objects)",
+                    )
+                    for key, label in worker_tasks:
+                        ui.complete_stage(key, f"{label} complete")
 
-            perception_log_path = str(
-                Path(output_dir)
-                / f"perception_log_{Path(video_path).stem}_{results['timestamp']}.json"
-            )
-            Path(perception_log_path).parent.mkdir(parents=True, exist_ok=True)
-            with open(perception_log_path, "w") as log_file:
-                json.dump(perception_log, log_file, indent=2)
+                perception_log_path = str(
+                    Path(output_dir)
+                    / f"perception_log_{Path(video_path).stem}_{results['timestamp']}.json"
+                )
+                Path(perception_log_path).parent.mkdir(parents=True, exist_ok=True)
+                with open(perception_log_path, "w") as log_file:
+                    json.dump(perception_log, log_file, indent=2)
 
-            results["part1"] = {
-                "success": True,
-                "duration_seconds": duration,
-                "num_objects": len(perception_log),
-                "output_file": perception_log_path,
-            }
+                results["part1"] = {
+                    "success": True,
+                    "duration_seconds": perception_duration,
+                    "num_objects": num_objects,
+                    "output_file": perception_log_path,
+                    "mode": part1_config,
+                }
 
-            # Show stats
-            table = Table(title="Perception Results", show_header=True)
-            table.add_column("Metric", style="cyan")
-            table.add_column("Value", style="green")
-            table.add_row("Objects Detected", str(len(perception_log)))
-            table.add_row("Processing Time", f"{duration:.1f}s")
-            table.add_row("Output File", perception_log_path)
+            if skip_part2:
+                results["part2"] = {"success": False, "skipped": True}
+                if ui.enabled:
+                    ui.add_stage("semantic", "Semantic uplift", style="yellow")
+                    ui.skip_stage("semantic", "Semantic uplift skipped")
+            else:
+                if CONFIGS_AVAILABLE:
+                    if part2_config == "fast":
+                        from .semantic_config import FAST_CONFIG as SEM_FAST
 
-            console.print(table)
+                        apply_part2_config(SEM_FAST)
+                    elif part2_config == "accurate":
+                        from .semantic_config import ACCURATE_CONFIG as SEM_ACCURATE
 
-        else:
-            console.print(
-                "[yellow]Skipping Part 1 (using existing perception data)[/yellow]"
-            )
-            perception_log = None
-            perception_log_path = None
+                        apply_part2_config(SEM_ACCURATE)
+                    else:
+                        from .semantic_config import BALANCED_CONFIG as SEM_BALANCED
 
-        # PART 2: Semantic Uplift
-        if not skip_part2:
-            console.print("\n" + "=" * 65)
-            console.print("[bold cyan]PART 2: SEMANTIC KNOWLEDGE GRAPH[/bold cyan]")
-            console.print("=" * 65)
+                        apply_part2_config(SEM_BALANCED)
 
-            # Apply configuration
-            if CONFIGS_AVAILABLE:
-                if part2_config == "fast":
-                    from .semantic_config import FAST_CONFIG as SEM_FAST
+                if ui.enabled:
+                    ui.add_stage(
+                        "semantic",
+                        f"Semantic uplift ({part2_config} mode)",
+                        style="cyan",
+                    )
+                    ui.start_stage(
+                        "semantic",
+                        f"Semantic uplift ({part2_config} mode)",
+                    )
 
-                    apply_part2_config(SEM_FAST)
-                elif part2_config == "accurate":
-                    from .semantic_config import ACCURATE_CONFIG as SEM_ACCURATE
+                if perception_log is None:
+                    if perception_log_path is None:
+                        logs = sorted(Path(output_dir).glob("perception_log_*.json"))
+                        if not logs:
+                            if ui.enabled:
+                                ui.fail_stage(
+                                    "semantic", "No perception logs available"
+                                )
+                            raise ValueError(
+                                "No perception logs found. Run Part 1 or provide logs."
+                            )
+                        perception_log_path = str(logs[-1])
 
-                    apply_part2_config(SEM_ACCURATE)
-                else:  # balanced
-                    from .semantic_config import BALANCED_CONFIG as SEM_BALANCED
+                    with open(perception_log_path, "r") as log_file:
+                        perception_log = json.load(log_file)
 
-                    apply_part2_config(SEM_BALANCED)
-                console.print(f"[dim]Using {part2_config} mode[/dim]\n")
+                if perception_log is None:
+                    if ui.enabled:
+                        ui.fail_stage("semantic", "Failed to load perception log")
+                    raise RuntimeError(
+                        "Unable to load perception log for semantic uplift."
+                    )
 
-            start_time = time.time()
+                start_time = time.time()
+                try:
+                    uplift_results = run_semantic_uplift(
+                        perception_log,
+                        neo4j_uri=neo4j_uri,
+                        neo4j_password=neo4j_password,
+                    )
+                except Exception as exc:
+                    if ui.enabled:
+                        ui.fail_stage("semantic", "Semantic uplift failed")
+                    raise
 
-            # Get perception log path
-            if perception_log is None:
-                if perception_log_path is None:
-                    logs = sorted(Path(output_dir).glob("perception_log_*.json"))
-                    if not logs:
-                        raise ValueError("No perception logs found. Run Part 1 first!")
-                    perception_log_path = str(logs[-1])
+                uplift_duration = time.time() - start_time
+                entities_tracked = uplift_results.get("num_entities", 0)
 
-                with open(perception_log_path, "r") as log_file:
-                    perception_log = json.load(log_file)
+                if ui.enabled:
+                    ui.complete_stage(
+                        "semantic",
+                        f"Semantic uplift complete ({entities_tracked} entities)",
+                    )
 
-            if perception_log is None:
-                raise RuntimeError("Unable to load perception log for semantic uplift.")
-
-            uplift_results = run_semantic_uplift(
-                perception_log,
-                neo4j_uri=neo4j_uri,
-                neo4j_password=neo4j_password,
-            )
-
-            duration = time.time() - start_time
-
-            results["part2"] = {
-                "success": uplift_results.get("success", False),
-                "duration_seconds": duration,
-                "perception_log": perception_log_path,
-                **uplift_results,
-            }
-
-            # Show stats
-            table = Table(title="Semantic Uplift Results", show_header=True)
-            table.add_column("Metric", style="cyan")
-            table.add_column("Value", style="green")
-            table.add_row(
-                "Entities Tracked", str(uplift_results.get("num_entities", 0))
-            )
-            table.add_row("Scenes Segmented", str(uplift_results.get("num_scenes", 0)))
-            table.add_row(
-                "Locations Inferred", str(uplift_results.get("num_locations", 0))
-            )
-            table.add_row(
-                "Scene Similarity Links",
-                str(uplift_results.get("num_scene_similarity_links", 0)),
-            )
-            table.add_row(
-                "State Changes", str(uplift_results.get("num_state_changes", 0))
-            )
-            table.add_row("Cypher Queries", str(uplift_results.get("num_queries", 0)))
-            table.add_row("Processing Time", f"{duration:.1f}s")
-
-            console.print(table)
+                results["part2"] = {
+                    "success": uplift_results.get("success", False),
+                    "duration_seconds": uplift_duration,
+                    "perception_log": perception_log_path,
+                    "mode": part2_config,
+                    **uplift_results,
+                }
 
         results["success"] = True
 
-        # Save results
         output_file = (
             Path(output_dir)
             / f"pipeline_results_{Path(video_path).stem}_{results['timestamp']}.json"
         )
         output_file.parent.mkdir(parents=True, exist_ok=True)
-
         with open(output_file, "w") as f:
             json.dump(results, f, indent=2)
 
-        console.print("\n✓ [bold green]Pipeline complete![/bold green]")
-        console.print(f"[dim]Results saved to: {output_file}[/dim]")
+        summary = Table(title="Pipeline Summary", box=box.ROUNDED, expand=False)
+        summary.add_column("Stage", style="cyan", no_wrap=True)
+        summary.add_column("Details", style="green")
+
+        runtime_label = results.get("runtime", "-")
+        summary.add_row("Runtime", runtime_label)
+
+        if skip_part1:
+            summary.add_row("Perception", "Skipped")
+        elif perception_duration is not None and results["part1"].get("success"):
+            summary.add_row(
+                "Perception",
+                f"{results['part1']['num_objects']} objects in {perception_duration:.1f}s",
+            )
+        else:
+            summary.add_row("Perception", "Failed")
+
+        if skip_part2:
+            summary.add_row("Semantic Uplift", "Skipped")
+        elif uplift_duration is not None and results["part2"].get("success"):
+            summary.add_row(
+                "Semantic Uplift",
+                f"{uplift_results.get('num_entities', 0)} entities in {uplift_duration:.1f}s",
+            )
+        else:
+            summary.add_row("Semantic Uplift", "Failed")
+
+        if neo4j_status is not None:
+            summary.add_row("Neo4j", neo4j_status)
+
+        summary.add_row("Artifacts", str(output_file))
+
+        console.print()
+        console.print(summary)
+        console.print(
+            Panel(
+                f"Pipeline complete\n[bold]{output_file}[/bold]",
+                title="Status",
+                subtitle="Results saved",
+                style="green",
+                expand=False,
+            )
+        )
 
         return results
 
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Pipeline interrupted by user[/yellow]")
+    except Exception as exc:
+        console.print(
+            Panel(
+                f"Pipeline failed: {exc}",
+                title="Error",
+                style="red",
+                expand=False,
+            )
+        )
         results["success"] = False
-        results["errors"].append("User interrupt")
-        return results
-
-    except Exception as e:
-        console.print(f"\n[bold red]✗ Pipeline failed: {e}[/bold red]")
-        results["success"] = False
-        results["errors"].append(str(e))
+        results["errors"].append(str(exc))
         import traceback
 
         logging.error(traceback.format_exc())
         return results
+
+    finally:
+        if previous_suppress is None:
+            os.environ.pop("ORION_SUPPRESS_ENGINE_LOGS", None)
+        else:
+            os.environ["ORION_SUPPRESS_ENGINE_LOGS"] = previous_suppress
+        _refresh_engine_loggers()
 
 
 def main():

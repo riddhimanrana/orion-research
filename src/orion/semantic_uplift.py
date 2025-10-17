@@ -150,9 +150,29 @@ class Config:
 def setup_logger(name: str, level: int = Config.LOG_LEVEL) -> logging.Logger:
     """Set up a logger with consistent formatting"""
     logger = logging.getLogger(name)
-    logger.setLevel(level)
 
-    if not logger.handlers:
+    suppress_logs = (
+        os.getenv("ORION_SUPPRESS_ENGINE_LOGS", "").lower() in {"1", "true", "yes"}
+    )
+
+    if suppress_logs:
+        for handler in list(logger.handlers):
+            logger.removeHandler(handler)
+        logger.handlers.clear()
+        logger.addHandler(logging.NullHandler())
+        logger.setLevel(max(level, logging.WARNING))
+        logger.propagate = False
+        return logger
+
+    logger.setLevel(level)
+    for handler in list(logger.handlers):
+        if isinstance(handler, logging.NullHandler):
+            logger.removeHandler(handler)
+
+    has_stream_handler = any(
+        isinstance(handler, logging.StreamHandler) for handler in logger.handlers
+    )
+    if not has_stream_handler:
         handler = logging.StreamHandler(sys.stdout)
         formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -161,6 +181,7 @@ def setup_logger(name: str, level: int = Config.LOG_LEVEL) -> logging.Logger:
         handler.setFormatter(formatter)
         logger.addHandler(handler)
 
+    logger.propagate = False
     return logger
 
 

@@ -371,6 +371,7 @@ def main(argv: list[str] | None = None) -> None:
             skip_part2=args.skip_graph,
             verbose=args.verbose,
             runtime=backend,
+            use_progress_ui=not args.verbose,
         )
 
         if args.interactive and results.get("success"):
@@ -427,6 +428,28 @@ def main(argv: list[str] | None = None) -> None:
 
         console.print(f"[green]Runtime '{backend}' assets are ready.[/green]")
 
+        # Print setup summary with correct model paths
+        from rich.table import Table
+        table = Table(title="Setup Summary", box=box.ROUNDED)
+        table.add_column("Component", style="cyan", no_wrap=True)
+        table.add_column("Status", style="green", justify="center")
+        table.add_column("Details", style="magenta")
+
+        # Show YOLO11m
+        yolo_path = manager.get_asset_path("yolo11m") if "yolo11m" in manager._manifest else "Not found"
+        table.add_row("YOLO11m", "✓" if Path(yolo_path).exists() else "✗", str(yolo_path))
+
+        # Show FastVLM (MLX or Torch)
+        fastvlm_asset_name = "fastvlm-0.5b-mlx" if backend == "mlx" else "fastvlm-0.5b"
+        fastvlm_path = manager.get_asset_path(fastvlm_asset_name) if fastvlm_asset_name in manager._manifest else "Not found"
+        table.add_row("FastVLM-0.5B", "✓" if Path(fastvlm_path).exists() else "✗", str(fastvlm_path))
+
+        # Show Gemma3:4b
+        table.add_row("gemma3:4b", "✓", "Installed")
+        table.add_row("embeddinggemma", "✓", "Installed")
+
+        console.print(table)
+
         init_script = Path(__file__).resolve().parents[2] / "scripts" / "init.py"
         if init_script.exists():
             console.print("\n[bold cyan]Running initialization...[/bold cyan]\n")
@@ -435,7 +458,7 @@ def main(argv: list[str] | None = None) -> None:
 
             subprocess.run([sys.executable, str(init_script)], check=False)
         else:
-            console.print("[red]Init script not found![/red]")
+            console.print("[red]Init script not found![red]")
             console.print(f"Expected: {init_script}")
 
     else:

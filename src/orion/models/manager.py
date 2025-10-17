@@ -5,6 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
@@ -46,6 +49,11 @@ class ModelManager:
     def _default_cache_dir() -> Path:
         project_root = Path(__file__).resolve().parents[3]
         return project_root / "models"
+
+    @staticmethod
+    def _is_apple_silicon() -> bool:
+        """Check if running on Apple Silicon (M1/M2/M3/etc)."""
+        return platform.system() == "Darwin" and platform.processor() == "arm"
 
     def _configure_environment(self) -> None:
         torch_home = self.cache_dir / "_torch"
@@ -159,7 +167,103 @@ class ModelManager:
                 f"Model '{asset.name}' is missing from {target_dir} and downloads are disabled."
             )
 
-        if asset.huggingface_repo:
+        # Special case: MLX backend - download pre-converted Apple model with wget
+        if "mlx" in asset.runtimes:
+            if not self._is_apple_silicon():
+                console.print("[yellow]MLX backend requires Apple Silicon (M1/M2/M3).[/yellow]")
+                return target_dir
+            
+            if not asset.url:
+                console.print(f"[red]Missing Apple CDN URL for MLX asset '{asset.name}'[/red]")
+                raise ValueError(f"No download URL configured for MLX asset: {asset.name}")
+            
+            console.print(f"[cyan]🍎 Apple Silicon detected - downloading pre-converted fp16 model for MLX[/cyan]")
+            console.print(f"[yellow]Downloading from Apple CDN: {asset.url}[/yellow]")
+            
+            # Download using wget (Apple Silicon standard workflow)
+            zip_filename = Path(asset.url).name
+            target_dir.mkdir(parents=True, exist_ok=True)
+            zip_path = target_dir.parent / zip_filename
+            
+            try:
+                # wget to models directory
+                console.print(f"[dim]Running: wget -O {zip_path} {asset.url}[/dim]")
+                subprocess.run(
+                    ["wget", "-O", str(zip_path), asset.url],
+                    check=True,
+                    cwd=str(self.cache_dir),
+                    capture_output=True
+                )
+                console.print(f"[green]✓ Downloaded {zip_filename}[/green]")
+                
+                # unzip -qq (quiet mode) to a temp location
+                temp_extract = target_dir.parent / f"{target_dir.name}_temp"
+                console.print(f"[dim]Running: unzip -qq {zip_path} -d {temp_extract}[/dim]")
+                subprocess.run(
+                    ["unzip", "-qq", str(zip_path), "-d", str(temp_extract)],
+                    check=True
+                )
+                console.print(f"[green]✓ Extracted archive[/green]")
+                
+                # Move files from subdirectory to target (Apple zip has nested dir)
+                import shutil
+                extracted_subdir = temp_extract / "llava-fastvithd_0.5b_stage3_llm.fp16"
+                if extracted_subdir.exists():
+                    # Rename the subdirectory to the target name
+                    extracted_subdir.rename(target_dir)
+                    # Clean up temp directory and __MACOSX
+                    shutil.rmtree(temp_extract, ignore_errors=True)
+                    console.print(f"[green]✓ Moved to {target_dir}[/green]")
+                else:
+                    # Fallback: rename temp to target
+                    temp_extract.rename(target_dir)
+                    console.print(f"[green]✓ Extracted to {target_dir}[/green]")
+                
+                # rm zip file
+                zip_path.unlink()
+                console.print(f"[green]✓ Cleaned up {zip_filename}[/green]")
+                
+                # Convert to MLX format using mlx-vlm convert
+                console.print(f"[yellow]Converting model to MLX format...[/yellow]")
+                console.print(f"[dim]This may take a few minutes...[/dim]")
+                mlx_converted_dir = target_dir.parent / f"{target_dir.name}_mlx"
+                try:
+                    subprocess.run(
+                        [
+                            "python", "-m", "mlx_vlm.convert",
+                            "--hf-path", str(target_dir),
+                            "--mlx-path", str(mlx_converted_dir),
+                            "--only-llm"
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True
+                    )
+                    # Move converted files back to target_dir
+                    import shutil
+                    shutil.rmtree(target_dir)
+                    mlx_converted_dir.rename(target_dir)
+                    console.print(f"[green]✓ Converted to MLX format[/green]")
+                except subprocess.CalledProcessError as conv_exc:
+                    console.print(f"[yellow]Warning: MLX conversion failed: {conv_exc}[/yellow]")
+                    console.print(f"[yellow]Model will use PyTorch format (slower)[/yellow]")
+                    if mlx_converted_dir.exists():
+                        import shutil
+                        shutil.rmtree(mlx_converted_dir, ignore_errors=True)
+                
+                console.print(f"[bold green]✓ MLX fp16 model ready at {target_dir}[/bold green]")
+                
+            except subprocess.CalledProcessError as exc:
+                console.print(f"[red]Failed to download/extract MLX model: {exc}[/red]")
+                if zip_path.exists():
+                    zip_path.unlink()
+                raise RuntimeError(f"MLX model download failed: {exc}")
+            except FileNotFoundError as exc:
+                console.print(f"[red]wget or unzip not found. Please install: brew install wget[/red]")
+                raise RuntimeError("Missing required tools for MLX download") from exc
+            
+            return target_dir
+        elif asset.huggingface_repo:
             console.print(
                 f"[cyan]Syncing {asset.name} from Hugging Face ({asset.huggingface_repo})...[/cyan]"
             )

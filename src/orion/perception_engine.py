@@ -10,9 +10,9 @@ This module implements a two-tier asynchronous video processing system that:
 Models Used:
 - Object Detection: YOLO11m (ultralytics) - 80 COCO classes, 20.1M params
 - Scene Detection: FastViT-T8 (timm) - Lightweight vision transformer
-- Visual Embeddings: OSNet (torchreid/timm) - 512-dim Re-ID feature vectors
-  * OSNet is optimized for person/object re-identification across varying scales,
-    poses, and lighting conditions - critical for long-term tracking
+- Visual Embeddings: ResNet50 (timm) - 2048-dim global feature vectors
+  * ResNet50 provides robust visual features for object re-identification
+  * Higher dimensional embeddings (2048 vs 512) improve discrimination
 - Description Generation: FastVLM-0.5B (apple/FastVLM-0.5B via Hugging Face transformers)
 All model weights are cached under the repository's ``models/`` directory via the shared
 asset manager so runs remain self-contained.
@@ -36,7 +36,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from multiprocessing import Manager, Process, Queue
 from queue import Empty as QueueEmpty
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, cast
 
 try:  # Local import works both as package and script
     from .models import ModelManager as AssetManager
@@ -125,9 +125,10 @@ class Config:
     MIN_OBJECT_SIZE = 32  # Minimum width/height in pixels
     BBOX_PADDING_PERCENT = 0.10  # 10% padding around bounding box
 
-    # Visual Embedding (OSNet)
-    OSNET_INPUT_SIZE = (256, 128)  # Height, Width for ReID models
-    EMBEDDING_DIM = 512
+    # Visual Embedding (ResNet50 - better for re-identification)
+    EMBEDDING_MODEL = 'resnet50'  # Use ResNet50 instead of OSNet
+    EMBEDDING_DIM = 2048  # ResNet50 feature dimension
+    EMBEDDING_POOLING = 'avg'  # Average pooling for global features
 
     # Multiprocessing
     NUM_WORKERS = 2  # Number of worker processes for descriptions
@@ -137,6 +138,9 @@ class Config:
 
     # FastVLM Description Generation (Graph-Optimized)
     DESCRIPTION_MODE = DescriptionMode.OBJECT  # SCENE, OBJECT, or HYBRID
+    # SCENE mode: One description per frame (283 frames = 283 descriptions)
+    # OBJECT mode: One description per object crop (436 detections = 436 descriptions) 
+    # HYBRID mode: Both scene + object descriptions (most expensive)
     DESCRIPTION_MAX_TOKENS = 200  # Optimized for <200 tokens (graph DB friendly)
     DESCRIPTION_TEMPERATURE = 0.3  # Lower temp for more focused, consistent outputs
     # Note: Prompts are handled by FastVLM wrapper based on mode
@@ -164,10 +168,32 @@ def setup_logger(name: str, level: int = Config.LOG_LEVEL) -> logging.Logger:
         Configured logger instance
     """
     logger = logging.getLogger(name)
-    logger.setLevel(level)
 
-    # Avoid duplicate handlers
-    if not logger.handlers:
+    suppress_logs = (
+        os.getenv("ORION_SUPPRESS_ENGINE_LOGS", "").lower() in {"1", "true", "yes"}
+    )
+
+    if suppress_logs:
+        # Remove existing handlers to prevent stdout spam
+        for handler in list(logger.handlers):
+            logger.removeHandler(handler)
+        logger.handlers.clear()
+        logger.addHandler(logging.NullHandler())
+        logger.setLevel(max(level, logging.WARNING))
+        logger.propagate = False
+        return logger
+
+    # Restore standard logging when not suppressed
+    logger.setLevel(level)
+    # Remove any null handlers from previous suppression
+    for handler in list(logger.handlers):
+        if isinstance(handler, logging.NullHandler):
+            logger.removeHandler(handler)
+
+    has_stream_handler = any(
+        isinstance(handler, logging.StreamHandler) for handler in logger.handlers
+    )
+    if not has_stream_handler:
         handler = logging.StreamHandler(sys.stdout)
         formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -176,6 +202,7 @@ def setup_logger(name: str, level: int = Config.LOG_LEVEL) -> logging.Logger:
         handler.setFormatter(formatter)
         logger.addHandler(handler)
 
+    logger.propagate = False
     return logger
 
 
@@ -281,7 +308,7 @@ class PerceptionModelManager:
         """Load YOLO11m model for object detection"""
         if "object_detector" not in self._models:
             try:
-                from ultralytics import YOLO
+                from ultralytics import YOLO  # type: ignore[attr-defined]
 
                 logger.info("Loading YOLO11m model...")
 
@@ -309,110 +336,33 @@ class PerceptionModelManager:
         return result
 
     def get_embedding_model(self) -> Dict[str, Any]:
-        """Load OSNet model for visual embeddings (Re-ID optimized)"""
+        """Load ResNet50 model for visual embeddings"""
         if "embedding_model" not in self._models:
             try:
-                logger.info("Loading Re-ID model for visual embeddings...")
+                import timm
+                from timm.data.config import resolve_model_data_config
+                from timm.data.transforms_factory import create_transform
 
-                # Try multiple OSNet sources in order of preference
-                model = None
-                model_name = None
-                
-                # Option 1: Try torchreid (dedicated Re-ID library)
-                try:
-                    import torchreid
-                    logger.info("Attempting to load OSNet from torchreid...")
-                    model = torchreid.models.build_model(
-                        name='osnet_x1_0',
-                        num_classes=1000,  # Will use feature layer
-                        pretrained=True,
-                        loss='softmax'
-                    )
-                    model_name = "OSNet (torchreid)"
-                    logger.info(f"✓ Loaded {model_name}")
-                except ImportError:
-                    logger.debug("torchreid not available, trying timm...")
-                except Exception as e:
-                    logger.debug(f"torchreid failed: {e}")
-                
-                # Option 2: Try timm (might have OSNet)
-                if model is None:
-                    try:
-                        import timm
-                        logger.info("Attempting to load OSNet from timm...")
-                        model = timm.create_model(
-                            "osnet_x1_0",
-                            pretrained=True,
-                            num_classes=0  # Feature extraction mode
-                        )
-                        model_name = "OSNet (timm)"
-                        logger.info(f"✓ Loaded {model_name}")
-                    except Exception as e:
-                        logger.debug(f"timm OSNet failed: {e}")
-                
-                # Option 3: Try OSNet variants from timm
-                if model is None:
-                    try:
-                        import timm
-                        logger.info("Attempting OSNet variants from timm...")
-                        # Try different OSNet model names
-                        for variant in ['osnet_x0_75', 'osnet_ibn_x1_0']:
-                            try:
-                                model = timm.create_model(
-                                    variant,
-                                    pretrained=True,
-                                    num_classes=0
-                                )
-                                model_name = f"OSNet-{variant} (timm)"
-                                logger.info(f"✓ Loaded {model_name}")
-                                break
-                            except:
-                                continue
-                    except Exception as e:
-                        logger.debug(f"timm OSNet variants failed: {e}")
-                
-                # If all OSNet attempts failed, raise helpful error
-                if model is None:
-                    error_msg = (
-                        "Failed to load OSNet Re-ID model. Please install one of:\n"
-                        "  1. torchreid: pip install torchreid\n"
-                        "  2. timm with OSNet support: pip install timm>=0.9.0\n"
-                        "OSNet is required for robust person/object re-identification."
-                    )
-                    logger.error(error_msg)
-                    raise RuntimeError(error_msg)
-                
-                # Move model to device and set to eval
+                logger.info("Loading ResNet50 for visual embeddings...")
+
+                # Load ResNet50 in feature extraction mode (no classification head)
+                model = timm.create_model('resnet50', pretrained=True, num_classes=0)
                 model = model.to(self.device)
                 model.eval()
 
                 # Create preprocessing transforms
-                if 'torchreid' in str(type(model)):
-                    # torchreid models expect specific preprocessing
-                    import torchvision.transforms as T
-                    transforms = T.Compose([
-                        T.Resize((256, 128)),
-                        T.ToTensor(),
-                        T.Normalize(mean=[0.485, 0.456, 0.406],
-                                   std=[0.229, 0.224, 0.225])
-                    ])
-                else:
-                    # Use timm's transforms
-                    import timm
-                    from timm.data.config import resolve_model_data_config
-                    from timm.data.transforms_factory import create_transform
-                    data_config = resolve_model_data_config(model)
-                    transforms = create_transform(**data_config, is_training=False)
+                data_config = resolve_model_data_config(model)
+                transforms = create_transform(**data_config, is_training=False)
 
                 self._models["embedding_model"] = {
                     "model": model,
                     "transforms": transforms,
-                    "model_name": model_name,
+                    "model_name": "ResNet50",
                 }
-                logger.info(f"✓ Re-ID embedding model ready: {model_name}")
+                logger.info("✓ ResNet50 embedding model loaded (2048-dim features)")
             except Exception as e:
-                logger.error(f"Failed to load embedding model: {e}")
-                raise RuntimeError(f"Embedding model is required for perception engine: {e}")
+                logger.error(f"Failed to load ResNet50 model: {e}")
+                raise RuntimeError("Embedding model is required for perception engine")
 
         result = self._models.get("embedding_model")
         if result is None:
@@ -937,40 +887,69 @@ def load_fastvlm_model() -> Optional[Any]:
         or os.getenv("ORION_FASTVLM_TORCH_PATH")
     )
 
-    from .backends.torch_fastvlm import DEFAULT_MODEL_ID, FastVLMTorchWrapper
-
     asset_manager = _get_asset_manager()
-    asset_dir = asset_manager.get_asset_dir("fastvlm-0.5b")
 
-    if model_source is None:
-        try:
-            asset_manager.ensure_asset("fastvlm-0.5b")
-            model_source = str(asset_dir)
-        except Exception as asset_exc:  # pragma: no cover - handled below
-            logger.warning(
-                "FastVLM asset preparation failed locally (%s); falling back to Hugging Face streaming.",
-                asset_exc,
-            )
-            model_source = DEFAULT_MODEL_ID
-
-    logger.info(
-        "Loading FastVLM model '%s' via Hugging Face transformers (requested backend: %s)",
-        model_source,
-        backend,
-    )
-
-    try:
-        _FASTVLM_MODEL = FastVLMTorchWrapper(
-            model_source=model_source,
-            cache_dir=asset_dir,
+    # Choose backend-specific wrapper and asset
+    if backend == "mlx":
+        from .backends.mlx_fastvlm import FastVLMMLXWrapper
+        
+        asset_name = "fastvlm-0.5b-mlx"
+        asset_dir = asset_manager.get_asset_dir(asset_name)
+        
+        if model_source is None:
+            try:
+                asset_manager.ensure_asset(asset_name)
+                model_source = str(asset_dir)
+            except Exception as asset_exc:  # pragma: no cover
+                logger.error(
+                    "MLX FastVLM asset preparation failed: %s", asset_exc
+                )
+                raise RuntimeError(f"MLX backend requires proper model setup: {asset_exc}")
+        
+        logger.info(
+            "Loading FastVLM model '%s' via MLX (Apple Silicon optimized with CoreML)",
+            model_source,
         )
-    except Exception as exc:  # pragma: no cover - handled by caller fallback
-        logger.error("Failed to load FastVLM model '%s': %s", model_source, exc)
-        logger.warning("Falling back to placeholder descriptions")
-        import traceback
+        
+        try:
+            _FASTVLM_MODEL = FastVLMMLXWrapper(model_source=model_source)
+        except Exception as exc:  # pragma: no cover
+            logger.error("Failed to load MLX FastVLM model '%s': %s", model_source, exc)
+            import traceback
+            logger.debug(traceback.format_exc())
+            raise RuntimeError(f"MLX FastVLM initialization failed: {exc}")
+    
+    else:  # torch backend
+        from .backends.torch_fastvlm import FastVLMTorchWrapper
+        
+        asset_name = "fastvlm-0.5b"
+        asset_dir = asset_manager.get_asset_dir(asset_name)
+        
+        if model_source is None:
+            try:
+                asset_manager.ensure_asset(asset_name)
+                model_source = str(asset_dir)
+            except Exception as asset_exc:  # pragma: no cover - handled below
+                logger.warning(
+                    "FastVLM asset preparation failed locally (%s); falling back to default.",
+                    asset_exc,
+                )
+                # For torch backend, continue with MLX wrapper (see torch_fastvlm.py)
+                # The FastVLMTorchWrapper now wraps FastVLMMLXWrapper
 
-        logger.debug(traceback.format_exc())
-        _FASTVLM_MODEL = None
+        logger.info(
+            "Loading FastVLM model '%s' via torch backend wrapper",
+            model_source,
+        )
+
+        try:
+            _FASTVLM_MODEL = FastVLMTorchWrapper(model_source=model_source)
+        except Exception as exc:  # pragma: no cover - handled by caller fallback
+            logger.error("Failed to load FastVLM model '%s': %s", model_source, exc)
+            logger.warning("Falling back to placeholder descriptions")
+            import traceback
+            logger.debug(traceback.format_exc())
+            _FASTVLM_MODEL = None
 
     return _FASTVLM_MODEL
 
@@ -1308,7 +1287,10 @@ def description_worker(
 # ============================================================================
 
 
-def run_perception_engine(video_path: str) -> List[Dict[str, Any]]:
+def run_perception_engine(
+    video_path: str,
+    progress_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+) -> List[Dict[str, Any]]:
     """
     Main perception engine function - orchestrates the entire pipeline
 
@@ -1358,23 +1340,56 @@ def run_perception_engine(video_path: str) -> List[Dict[str, Any]]:
 
     total_detections = 0
 
+    total_frames = len(selected_frames)
+    if progress_callback is not None:
+        progress_callback(
+            "perception.frames.start",
+            {"total": total_frames},
+        )
+
     logger.info("\nProcessing selected frames...")
-    for frame_number, timestamp, frame in tqdm(
-        selected_frames,
-        desc="Detecting & embedding objects",
-        disable=not Config.PROGRESS_BAR,
+    for idx, (frame_number, timestamp, frame) in enumerate(
+        tqdm(
+            selected_frames,
+            desc="Detecting & embedding objects",
+            disable=not Config.PROGRESS_BAR,
+        ),
+        start=1,
     ):
         num_detections = object_processor.process_frame(
             frame, frame_number, timestamp, background_queue, shared_perception_log
         )
         total_detections += num_detections
 
+        if progress_callback is not None:
+            progress_callback(
+                "perception.frames.progress",
+                {
+                    "current": idx,
+                    "total": total_frames,
+                    "frame": frame_number,
+                    "detections": num_detections,
+                },
+            )
+
     logger.info(f"\nTier 1 complete: {total_detections} objects detected")
+    if progress_callback is not None:
+        progress_callback(
+            "perception.frames.complete",
+            {"total": total_frames, "detections": total_detections},
+        )
 
     # Phase 2: Wait for Tier 2 (description generation) to complete
     logger.info("\n" + "-" * 80)
     logger.info("PHASE 2: TIER 2 ASYNCHRONOUS DESCRIPTION GENERATION")
     logger.info("-" * 80)
+
+    total_objects = len(shared_perception_log)
+    if progress_callback is not None:
+        progress_callback(
+            "perception.descriptions.start",
+            {"total": total_objects},
+        )
 
     # Send poison pills to workers
     for _ in range(Config.NUM_WORKERS):
@@ -1382,11 +1397,42 @@ def run_perception_engine(video_path: str) -> List[Dict[str, Any]]:
 
     logger.info("Waiting for description workers to complete...")
 
-    # Wait for all workers with timeout
+    # Wait for all workers while reporting progress
+    last_progress_emit = 0.0
+    while True:
+        alive = False
+        for worker in workers:
+            worker.join(timeout=0.25)
+            if worker.is_alive():
+                alive = True
+
+        if progress_callback is not None and total_objects > 0:
+            now = time.time()
+            if now - last_progress_emit >= 0.25 or not alive:
+                completed = sum(
+                    1 for obj in shared_perception_log if obj.get("rich_description")
+                )
+                progress_callback(
+                    "perception.descriptions.progress",
+                    {"current": completed, "total": total_objects},
+                )
+                last_progress_emit = now
+
+        if not alive:
+            break
+
+    if progress_callback is not None:
+        progress_callback(
+            "perception.descriptions.complete",
+            {"total": total_objects},
+        )
+
+    # Ensure worker processes have terminated
     for i, worker in enumerate(workers):
-        worker.join(timeout=Config.WORKER_SHUTDOWN_TIMEOUT)
         if worker.is_alive():
-            logger.warning(f"Worker {i} did not terminate gracefully, forcing shutdown")
+            logger.warning(
+                f"Worker {i} did not terminate gracefully, forcing shutdown"
+            )
             worker.terminate()
 
     # Convert shared list to regular list of dicts

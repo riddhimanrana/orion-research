@@ -5,11 +5,12 @@ from __future__ import annotations
 import importlib.util
 import logging
 import os
+import platform
 from typing import Literal, Optional
 
-BackendName = Literal["torch"]
+BackendName = Literal["torch", "mlx"]
 _AUTO = "auto"
-_SUPPORTED: set[str] = {"torch"}
+_SUPPORTED: set[str] = {"torch", "mlx"}
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +19,13 @@ def _module_exists(module_name: str) -> bool:
     return importlib.util.find_spec(module_name) is not None
 
 
+def _is_apple_silicon() -> bool:
+    """Check if running on Apple Silicon (M1/M2/M3/etc)."""
+    return platform.system() == "Darwin" and platform.processor() == "arm"
+
+
 def _normalize_backend_name(name: str) -> str:
     lowered = name.lower()
-    if lowered == "mlx":
-        return "torch"
     if lowered in _SUPPORTED:
         return lowered
     raise ValueError(f"Unsupported backend preference '{name}'.")
@@ -32,6 +36,8 @@ def is_backend_available(backend: str) -> bool:
     normalized = _normalize_backend_name(backend)
     if normalized == "torch":
         return _module_exists("torch")
+    if normalized == "mlx":
+        return _is_apple_silicon() and _module_exists("mlx")
     return False
 
 
@@ -48,17 +54,25 @@ def select_backend(preferred: Optional[str] = None) -> BackendName:
             raise RuntimeError(
                 "Requested backend 'torch' is not available. Install PyTorch to continue."
             )
-        if choice == "mlx":
-            logger.info(
-                "'mlx' preference detected; routing to the unified PyTorch backend."
-            )
-        return "torch"
+        if normalized == "mlx":
+            if not is_backend_available("mlx"):
+                raise RuntimeError(
+                    "MLX backend requires Apple Silicon (M1/M2/M3) and mlx-vlm package."
+                )
+            logger.info("Using MLX backend for Apple Silicon optimization.")
+            return "mlx"
+        return normalized  # type: ignore[return-value]
 
+    # Auto-select: prefer MLX on Apple Silicon if available
+    if is_backend_available("mlx"):
+        logger.info("Auto-selected MLX backend for Apple Silicon.")
+        return "mlx"
+    
     if is_backend_available("torch"):
         return "torch"
 
     raise RuntimeError(
-        "No supported backend found. Install PyTorch to run Orion's perception pipeline."
+        "No supported backend found. Install PyTorch or MLX to run Orion's perception pipeline."
     )
 
 
