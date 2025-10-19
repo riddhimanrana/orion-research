@@ -545,8 +545,8 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "init":
         console.print("\n[bold cyan]🚀 Orion Initialization[/bold cyan]\n")
         
-        # Step 1: Check services (integrated from setup_command)
-        console.print("[bold]Step 1: Detecting services...[/bold]\n")
+        # Pre-flight check: Verify all required services are available
+        console.print("[bold]Step 1: Pre-flight Check - Verifying Prerequisites[/bold]\n")
         from .auto_config import AutoConfiguration
         config = AutoConfiguration()
         results = config.detect_all_services()
@@ -578,32 +578,46 @@ def main(argv: list[str] | None = None) -> None:
         
         console.print(status_table)
         
-        # Step 2: Auto-start services if needed
-        if not (neo4j_ok and ollama_ok):
+        # Check if prerequisites are met
+        if not neo4j_ok or not ollama_ok:
+            console.print("\n[bold red]⚠️  Missing Prerequisites[/bold red]\n")
+            console.print("[yellow]Orion requires Neo4j and Ollama to be running before initialization.[/yellow]\n")
+            
             if docker_ok:
-                console.print("\n[bold]Step 2: Starting services with Docker...[/bold]\n")
-                if config.auto_setup_with_docker():
-                    console.print("[green]✓ All services started successfully![/green]\n")
-                else:
-                    console.print("[yellow]⚠ Some services may still be starting...[/yellow]\n")
-            else:
-                console.print("\n[bold yellow]Step 2: Manual service startup required[/bold yellow]\n")
+                console.print("[bold cyan]Option 1: Use Docker (Recommended)[/bold cyan]")
+                console.print("[dim]The easiest way to get both services running:[/dim]\n")
                 commands = config.suggest_setup_docker()
-                console.print("[bold]To start Neo4j:[/bold]")
+                console.print("[bold]Start Neo4j:[/bold]")
                 console.print(f"[dim]{commands['neo4j']}[/dim]\n")
-                console.print("[bold]To start Ollama:[/bold]")
+                console.print("[bold]Start Ollama:[/bold]")
                 console.print(f"[dim]{commands['ollama']}[/dim]\n")
+                console.print("[dim]Then download the LLM model:[/dim]")
+                console.print("[dim]docker exec orion-ollama ollama pull gemma3:4b[/dim]\n")
+            else:
+                console.print("[bold cyan]Option 1: Install Docker[/bold cyan]")
+                console.print("[dim][https://www.docker.com/products/docker-desktop][/dim]\n")
+            
+            console.print("[bold cyan]Option 2: Manual Installation[/bold cyan]\n")
+            console.print("[bold]Neo4j:[/bold] Install from [https://neo4j.com/download/][/dim]")
+            console.print("[bold]Ollama:[/bold] Install from [https://ollama.com][/dim]\n")
+            console.print("[bold]Then run:[/bold]")
+            console.print("[dim]ollama pull gemma3:4b[/dim]\n")
+            
+            console.print("[bold cyan]Once services are running, run `orion init` again![/bold cyan]\n")
+            sys.exit(1)
         
-        # Step 3: Download models and configure environment
-        console.print("[bold]Step 3: Preparing runtime and downloading models...[/bold]\n")
+        console.print("[green]✓ All prerequisites met![/green]\n")
+        
+        # Step 2: Download models and configure environment
+        console.print("[bold]Step 2: Preparing runtime and downloading models...[/bold]\n")
         try:
             backend, manager = _prepare_runtime(
                 args.runtime or settings.runtime_backend
             )
         except Exception:
-            return
+            sys.exit(1)
 
-        console.print(f"[green]Runtime '{backend}' assets are ready.[/green]")
+        console.print(f"[green]Runtime '{backend}' assets are ready.[/green]\n")
 
         # Print setup summary with correct model paths
         summary_table = Table(title="Model Assets", box=box.ROUNDED)
@@ -626,17 +640,24 @@ def main(argv: list[str] | None = None) -> None:
 
         console.print(summary_table)
 
-        # Step 4: Run interactive initialization script
+        # Step 3: Run interactive initialization script
+        console.print("\n[bold]Step 3: Running interactive configuration...[/bold]\n")
         init_script = Path(__file__).resolve().parents[1] / "scripts" / "init.py"
         if init_script.exists():
-            console.print("\n[bold]Step 4: Running interactive setup...[/bold]\n")
             console.print(f"[dim]python {init_script}[/dim]\n")
             import subprocess
 
-            subprocess.run([sys.executable, str(init_script)], check=False)
+            result = subprocess.run([sys.executable, str(init_script)], check=False)
+            if result.returncode == 0:
+                console.print("\n[green]✓ Orion initialization complete![/green]")
+                console.print("[cyan]You're ready to analyze videos with: orion analyze video.mp4[/cyan]\n")
+            else:
+                console.print("\n[yellow]⚠ Configuration script had issues. Review the output above.[/yellow]\n")
+                sys.exit(1)
         else:
             console.print("[red]Init script not found![red]")
-            console.print(f"Expected: {init_script}")
+            console.print(f"Expected: {init_script}\n")
+            sys.exit(1)
 
     else:
         print_banner()

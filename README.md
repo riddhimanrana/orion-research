@@ -104,28 +104,56 @@ pip install -e .
 orion init
 ```
 
-This comprehensive setup will:
+This runs a 3-step initialization:
 
-- **Detect your hardware** (Apple Silicon / NVIDIA GPU / CPU)
-- **Check for services** (Neo4j, Ollama, Docker)
-- **Auto-start services** (if Docker is available)
-- **Download models** (~5-15 minutes depending on internet speed)
-- **Prompt for configuration** (Neo4j credentials, Ollama URL)
-- **Test all connections** before finishing
+#### Step 1: Pre-flight Check
 
-**What if you don't have Docker?**
+- Verifies Neo4j and Ollama are running
+- If missing: Shows you exactly how to install and start them
+- Suggests Docker (easiest) or manual installation
+- Won't proceed until services are ready
 
-`orion init` will detect this and show you:
+#### Step 2: Download Models
 
-1. Manual commands to install Ollama ([ollama.com](https://ollama.com))
-2. Docker commands to run Neo4j and Ollama separately
-3. How to configure them (defaults often work fine locally)
+- Detects your hardware (Apple Silicon / NVIDIA GPU / CPU)
+- Downloads vision models (YOLO11x, FastVLM, CLIP)
+- Prepares runtime backend (~5-15 minutes depending on internet)
 
-You can follow the printed commands step-by-step, or run everything natively on your machine.
+#### Step 3: Interactive Setup
 
-**Total time:** 10-30 minutes (first time only)
+- Prompts for Neo4j credentials
+- Configures Ollama URL
+- Tests all connections
+- Saves configuration to `~/.orion/config.json`
 
-- 5-15 min: Model downloads (depends on internet)
+**What if services aren't running?**
+
+No problem! `orion init` will tell you exactly what to do:
+
+```bash
+⚠️  Missing Prerequisites
+Orion requires Neo4j and Ollama to be running.
+
+Option 1: Use Docker (Recommended)
+  docker run -d --name orion-neo4j ...
+  docker run -d --name orion-ollama ...
+
+Option 2: Manual Installation
+  Neo4j: https://neo4j.com/download/
+  Ollama: https://ollama.com
+
+Once services are running, run orion init again!
+```
+
+Then you:
+
+1. Follow the Docker commands or install manually
+2. Run `orion init` again
+3. Everything completes successfully
+
+**Total time:** 10-30 minutes first time
+
+- 5-15 min: Model downloads
 - 5-10 min: Service setup (Docker or manual)
 - 5 min: Configuration and testing
 
