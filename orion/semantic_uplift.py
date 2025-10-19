@@ -25,7 +25,7 @@ import time
 import warnings
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 import numpy as np
 import requests
@@ -74,6 +74,11 @@ except ImportError:
         "Warning: causal_inference not available. Using basic causal scoring."
     )
 
+try:
+    from .motion_tracker import MotionData
+except ImportError:
+    from motion_tracker import MotionData  # type: ignore[assignment]
+
 
 # ============================================================================
 # CONFIGURATION CONSTANTS
@@ -100,7 +105,10 @@ class Config:
     SCENE_LOCATION_TOP_OBJECTS = 3  # Number of dominant objects to describe a location
 
     # Temporal Windowing
-    TIME_WINDOW_SIZE = 30.0  # seconds
+    TIME_WINDOW_SIZE = 30.0  # Legacy maximum duration for backward compatibility
+    TIME_WINDOW_MAX_DURATION = 18.0  # seconds, hard ceiling per adaptive window
+    TIME_WINDOW_MAX_GAP = 4.0  # seconds, gap between consecutive changes before split
+    TIME_WINDOW_MAX_CHANGES = 12  # prevent bloated windows
     MIN_EVENTS_PER_WINDOW = 2  # Minimum state changes to trigger event composition
 
     # Causal Influence Scoring
@@ -112,6 +120,11 @@ class Config:
     CAUSAL_EMBEDDING_WEIGHT = 0.1
     CAUSAL_MIN_SCORE = 0.55
     CAUSAL_TOP_K_PER_WINDOW = 5
+
+    # Event Composition / LLM Guardrails
+    EVENT_COMPOSITION_MIN_STATE_CHANGES = 2
+    EVENT_COMPOSITION_MAX_WINDOWS = 80
+    EVENT_COMPOSITION_SKIP_NO_CAUSAL = True
 
     # LLM Event Composition (Ollama)
     USE_LLM_COMPOSITION = True  # Enable LLM composition with gemma3:4b
@@ -237,6 +250,13 @@ class Entity:
         """Get chronological timeline of appearances"""
         return sorted(self.appearances, key=lambda x: x["timestamp"])
 
+    def get_appearance_near(self, timestamp: float) -> Optional[Dict[str, Any]]:
+        """Return the appearance closest to a given timestamp."""
+        timeline = self.get_timeline()
+        if not timeline:
+            return None
+        return min(timeline, key=lambda app: abs(app.get("timestamp", 0.0) - timestamp))
+
 
 @dataclass
 class StateChange:
@@ -253,6 +273,16 @@ class StateChange:
     centroid_after: Optional[Tuple[float, float]] = None
     displacement: float = 0.0
     velocity: float = 0.0
+    frame_before: Optional[int] = None
+    frame_after: Optional[int] = None
+    bounding_box_before: Optional[List[int]] = None
+    bounding_box_after: Optional[List[int]] = None
+    scene_before: Optional[str] = None
+    scene_after: Optional[str] = None
+    location_before: Optional[str] = None
+    location_after: Optional[str] = None
+    embedding_before: Optional[List[float]] = None
+    embedding_after: Optional[List[float]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -267,6 +297,16 @@ class StateChange:
             "centroid_after": self.centroid_after,
             "displacement": self.displacement,
             "velocity": self.velocity,
+            "frame_before": self.frame_before,
+            "frame_after": self.frame_after,
+            "bounding_box_before": self.bounding_box_before,
+            "bounding_box_after": self.bounding_box_after,
+            "scene_before": self.scene_before,
+            "scene_after": self.scene_after,
+            "location_before": self.location_before,
+            "location_after": self.location_after,
+            "embedding_before": self.embedding_before,
+            "embedding_after": self.embedding_after,
         }
 
 
@@ -495,6 +535,9 @@ class SceneAssembler:
                     object_classes=dominant_classes,
                 )
             locations[location_id].scene_ids.append(scene_id)
+
+            for obj in frame_objects:
+                obj["location_id"] = location_id
 
             scene_segment = SceneSegment(
                 scene_id=scene_id,
@@ -825,6 +868,20 @@ class StateChangeDetector:
                 )
                 velocity = displacement / time_delta if time_delta > 0 else 0.0
 
+                bbox_before = curr.get("bounding_box")
+                bbox_after = next_app.get("bounding_box")
+                if bbox_before is not None:
+                    bbox_before = [int(v) for v in bbox_before]
+                if bbox_after is not None:
+                    bbox_after = [int(v) for v in bbox_after]
+
+                emb_before = curr.get("visual_embedding")
+                emb_after = next_app.get("visual_embedding")
+                if emb_before is not None:
+                    emb_before = [float(v) for v in emb_before]
+                if emb_after is not None:
+                    emb_after = [float(v) for v in emb_after]
+
                 change = StateChange(
                     entity_id=entity.entity_id,
                     timestamp_before=curr["timestamp"],
@@ -837,6 +894,16 @@ class StateChangeDetector:
                     centroid_after=centroid_after,
                     displacement=displacement,
                     velocity=velocity,
+                    frame_before=curr.get("frame_number"),
+                    frame_after=next_app.get("frame_number"),
+                    bounding_box_before=bbox_before,
+                    bounding_box_after=bbox_after,
+                    scene_before=curr.get("scene_id"),
+                    scene_after=next_app.get("scene_id"),
+                    location_before=curr.get("location_id"),
+                    location_after=next_app.get("location_id"),
+                    embedding_before=emb_before,
+                    embedding_after=emb_after,
                 )
                 changes.append(change)
 
@@ -892,11 +959,11 @@ def create_temporal_windows(
     state_changes: List[StateChange], window_size: float = Config.TIME_WINDOW_SIZE
 ) -> List[TemporalWindow]:
     """
-    Divide state changes into temporal windows
+    Divide state changes into adaptive temporal windows.
 
     Args:
         state_changes: List of state changes
-        window_size: Window size in seconds
+        window_size: Legacy window size hint (unused in adaptive mode)
 
     Returns:
         List of temporal windows
@@ -904,44 +971,48 @@ def create_temporal_windows(
     if not state_changes:
         return []
 
-    logger.info(f"Creating temporal windows (size: {window_size}s)...")
+    max_duration = max(Config.TIME_WINDOW_MAX_DURATION, 0.1)
+    max_gap = max(Config.TIME_WINDOW_MAX_GAP, 0.1)
+    max_changes = max(Config.TIME_WINDOW_MAX_CHANGES, 1)
 
-    # Find time range
-    all_timestamps = []
-    for change in state_changes:
-        all_timestamps.append(change.timestamp_before)
-        all_timestamps.append(change.timestamp_after)
+    ordered_changes = sorted(state_changes, key=lambda c: c.timestamp_after)
 
-    min_time = min(all_timestamps)
-    max_time = max(all_timestamps)
+    windows: List[TemporalWindow] = []
+    current_window = TemporalWindow(
+        start_time=ordered_changes[0].timestamp_before,
+        end_time=ordered_changes[0].timestamp_after,
+    )
+    current_window.add_state_change(ordered_changes[0])
 
-    # Create windows
-    windows = []
-    current_time = min_time
+    for change in ordered_changes[1:]:
+        gap = change.timestamp_before - current_window.end_time
+        projected_end = max(current_window.end_time, change.timestamp_after)
+        projected_duration = projected_end - current_window.start_time
+        overflow_gap = gap > max_gap
+        overflow_duration = projected_duration > max_duration
+        overflow_changes = len(current_window.state_changes) >= max_changes
 
-    while current_time < max_time:
-        window = TemporalWindow(
-            start_time=current_time, end_time=current_time + window_size
-        )
+        if overflow_gap or overflow_duration or overflow_changes:
+            if current_window.state_changes:
+                windows.append(current_window)
+            current_window = TemporalWindow(
+                start_time=change.timestamp_before,
+                end_time=change.timestamp_after,
+            )
+        else:
+            current_window.end_time = projected_end
 
-        # Add state changes that fall in this window
-        for change in state_changes:
-            if (
-                change.timestamp_before >= window.start_time
-                and change.timestamp_before < window.end_time
-            ):
-                window.add_state_change(change)
+        current_window.add_state_change(change)
 
-        if window.state_changes:
-            windows.append(window)
+    if current_window.state_changes:
+        windows.append(current_window)
 
-        current_time += window_size
-
-    # Filter to significant windows
     significant_windows = [w for w in windows if w.is_significant()]
 
     logger.info(
-        f"Created {len(windows)} windows, {len(significant_windows)} significant"
+        "Created %d adaptive windows, %d significant",
+        len(windows),
+        len(significant_windows),
     )
 
     return significant_windows
@@ -957,12 +1028,56 @@ class CausalInfluenceScorer:
 
     def __init__(self, tracker: EntityTracker):
         self.tracker = tracker
+        self.engine = None
+        self.causal_config = None
+        self._stats = {}
+
+        if (
+            CAUSAL_INFERENCE_AVAILABLE
+            and CausalInferenceEngine is not None
+            and CausalConfig is not None
+            and AgentCandidate is not None
+            and CISStateChange is not None
+        ):
+            self.causal_config = CausalConfig(
+                proximity_weight=Config.CAUSAL_PROXIMITY_WEIGHT,
+                motion_weight=Config.CAUSAL_MOTION_WEIGHT,
+                temporal_weight=Config.CAUSAL_TEMPORAL_WEIGHT,
+                embedding_weight=Config.CAUSAL_EMBEDDING_WEIGHT,
+                max_pixel_distance=Config.CAUSAL_MAX_PIXEL_DISTANCE,
+                temporal_decay=Config.CAUSAL_TEMPORAL_DECAY,
+                min_score=Config.CAUSAL_MIN_SCORE,
+                top_k_per_event=Config.CAUSAL_TOP_K_PER_WINDOW,
+            )
+            self.engine = CausalInferenceEngine(self.causal_config)
+            logger.info(
+                "Causal inference engine enabled (top_k=%d, min_score=%.2f)",
+                self.causal_config.top_k_per_event,
+                self.causal_config.min_score,
+            )
+        else:
+            logger.warning(
+                "Causal inference engine unavailable; falling back to heuristic scoring."
+            )
 
     def score_windows(self, windows: List[TemporalWindow]) -> Dict[str, int]:
         """Populate each window with high-confidence causal influence links."""
 
         if not windows:
-            return {"total_links": 0, "windows_with_links": 0}
+            return {
+                "total_links": 0,
+                "windows_with_links": 0,
+                "engine_calls": 0,
+                "candidate_pairs": 0,
+                "accepted_pairs": 0,
+            }
+
+        self._stats = {
+            "engine_calls": 0.0,
+            "candidate_pairs": 0.0,
+            "accepted_pairs": 0.0,
+            "fallback_used": 1.0 if self.engine is None else 0.0,
+        }
 
         logger.info("\n" + "=" * 80)
         logger.info("CAUSAL INFLUENCE SCORING")
@@ -989,9 +1104,111 @@ class CausalInfluenceScorer:
         return {
             "total_links": total_links,
             "windows_with_links": windows_with_links,
+            "engine_calls": int(self._stats.get("engine_calls", 0.0)),
+            "candidate_pairs": int(self._stats.get("candidate_pairs", 0.0)),
+            "accepted_pairs": int(self._stats.get("accepted_pairs", 0.0)),
         }
 
     def _score_window(self, window: TemporalWindow) -> List[CausalLink]:
+        if self.engine is None:
+            return self._score_window_fallback(window)
+        return self._score_window_cis(window)
+
+    def _score_window_cis(self, window: TemporalWindow) -> List[CausalLink]:
+        if len(window.state_changes) < 2:
+            return []
+
+        best_links: Dict[Tuple[str, str], CausalLink] = {}
+
+        for patient_change in window.state_changes:
+            patient_entity = self.tracker.get_entity(patient_change.entity_id)
+            if patient_entity is None:
+                continue
+
+            cis_patient = self._build_cis_state_change(patient_change, patient_entity)
+            if cis_patient is None:
+                continue
+
+            agent_candidates: List[Any] = []
+            agent_state_lookup: Dict[str, StateChange] = {}
+
+            for agent_change in window.state_changes:
+                if agent_change.entity_id == patient_change.entity_id:
+                    continue
+                agent_entity = self.tracker.get_entity(agent_change.entity_id)
+                if agent_entity is None:
+                    continue
+                candidate = self._build_agent_candidate(
+                    agent_change, agent_entity, patient_change.timestamp_after
+                )
+                if candidate is None:
+                    continue
+                agent_candidates.append(candidate)
+                agent_state_lookup[candidate.entity_id] = agent_change
+
+            if not agent_candidates:
+                continue
+
+            self._stats["engine_calls"] += 1
+            self._stats["candidate_pairs"] += len(agent_candidates)
+
+            cis_links = self.engine.score_all_agents(agent_candidates, cis_patient)
+            if not cis_links:
+                continue
+            self._stats["accepted_pairs"] += len(cis_links)
+
+            for cis_link in cis_links:
+                agent_state = agent_state_lookup.get(cis_link.agent.entity_id)
+                if agent_state is None:
+                    continue
+                features = {
+                    "proximity": cis_link.proximity_score,
+                    "motion": cis_link.motion_score,
+                    "temporal": cis_link.temporal_score,
+                    "embedding": cis_link.embedding_score,
+                }
+                agent_location = agent_state.location_after or agent_state.location_before
+                patient_location = (
+                    patient_change.location_after or patient_change.location_before
+                )
+                location_fragment = ""
+                if agent_location or patient_location:
+                    location_fragment = (
+                        f" | locations agent:{agent_location or '?'}"
+                        f" patient:{patient_location or '?'}"
+                    )
+                justification = (
+                    f"{cis_link.agent.entity_id} → {cis_link.patient.entity_id}"
+                    f" (CIS={cis_link.cis_score:.2f}, prox={cis_link.proximity_score:.2f},"
+                    f" motion={cis_link.motion_score:.2f}, dt={cis_link.temporal_score:.2f},"
+                    f" embed={cis_link.embedding_score:.2f}){location_fragment}"
+                )
+                semantic_link = CausalLink(
+                    agent_id=cis_link.agent.entity_id,
+                    patient_id=cis_link.patient.entity_id,
+                    agent_change=agent_state,
+                    patient_change=patient_change,
+                    influence_score=cis_link.cis_score,
+                    features=features,
+                    justification=justification,
+                )
+                key = (semantic_link.agent_id, semantic_link.patient_id)
+                stored = best_links.get(key)
+                if stored is None or semantic_link.influence_score > stored.influence_score:
+                    best_links[key] = semantic_link
+
+        if not best_links:
+            return []
+
+        sorted_links = sorted(
+            best_links.values(),
+            key=lambda item: item.influence_score,
+            reverse=True,
+        )
+
+        return sorted_links[: Config.CAUSAL_TOP_K_PER_WINDOW]
+
+    def _score_window_fallback(self, window: TemporalWindow) -> List[CausalLink]:
         if len(window.state_changes) < 2:
             return []
 
@@ -1003,6 +1220,11 @@ class CausalInfluenceScorer:
                 link = self._evaluate_pair(agent_change, patient_change)
                 if link is not None:
                     candidates.append(link)
+
+        self._stats["candidate_pairs"] += len(window.state_changes) * max(
+            len(window.state_changes) - 1, 0
+        )
+        self._stats["accepted_pairs"] += len(candidates)
 
         if not candidates:
             return []
@@ -1021,6 +1243,114 @@ class CausalInfluenceScorer:
         )
 
         return sorted_links[: Config.CAUSAL_TOP_K_PER_WINDOW]
+
+    def _build_cis_state_change(
+        self, change: StateChange, entity: Entity
+    ) -> Optional[Any]:
+        if CISStateChange is None:
+            return None
+
+        centroid = change.centroid_after or change.centroid_before
+        bounding_box = change.bounding_box_after or change.bounding_box_before
+        frame_number = change.frame_after or change.frame_before or 0
+
+        if centroid is None or bounding_box is None:
+            appearance = entity.get_appearance_near(change.timestamp_after)
+            if appearance:
+                centroid = centroid or _compute_centroid_from_bbox(
+                    appearance.get("bounding_box")
+                )
+                bbox_val = appearance.get("bounding_box")
+                if bounding_box is None and bbox_val is not None:
+                    bounding_box = [int(v) for v in bbox_val]
+
+        if centroid is None or bounding_box is None:
+            return None
+
+        return CISStateChange(
+            entity_id=change.entity_id,
+            timestamp=change.timestamp_after,
+            frame_number=int(frame_number),
+            old_description=change.description_before,
+            new_description=change.description_after,
+            centroid=(float(centroid[0]), float(centroid[1])),
+            bounding_box=[int(v) for v in bounding_box],
+        )
+
+    def _build_agent_candidate(
+        self,
+        change: StateChange,
+        entity: Entity,
+        reference_time: float,
+    ) -> Optional[Any]:
+        if AgentCandidate is None:
+            return None
+
+        centroid = change.centroid_after or change.centroid_before
+        bounding_box = change.bounding_box_after or change.bounding_box_before
+        embedding = change.embedding_after or change.embedding_before
+
+        appearance = entity.get_appearance_near(reference_time)
+        if appearance:
+            if centroid is None:
+                centroid = _compute_centroid_from_bbox(appearance.get("bounding_box"))
+            if bounding_box is None:
+                bbox_val = appearance.get("bounding_box")
+                if bbox_val is not None:
+                    bounding_box = [int(v) for v in bbox_val]
+            if embedding is None:
+                emb_val = appearance.get("visual_embedding")
+                if emb_val is not None:
+                    embedding = [float(v) for v in emb_val]
+
+        if embedding is None and entity.average_embedding is not None:
+            embedding = [float(v) for v in entity.average_embedding.tolist()]
+
+        if centroid is None or bounding_box is None or embedding is None:
+            return None
+
+        motion = self._estimate_motion(change)
+        description = (
+            change.description_after
+            or change.description_before
+            or entity.object_class
+        )
+        temp_id = appearance.get("temp_id") if appearance else None
+
+        return AgentCandidate(
+            entity_id=entity.entity_id,
+            temp_id=temp_id or entity.entity_id,
+            timestamp=change.timestamp_after,
+            centroid=(float(centroid[0]), float(centroid[1])),
+            bounding_box=[int(v) for v in bounding_box],
+            motion_data=motion,
+            visual_embedding=[float(v) for v in embedding],
+            object_class=entity.object_class,
+            description=description,
+        )
+
+    @staticmethod
+    def _estimate_motion(change: StateChange) -> Optional[MotionData]:
+        if MotionData is None:
+            return None
+        if change.centroid_before is None or change.centroid_after is None:
+            return None
+        time_delta = change.timestamp_after - change.timestamp_before
+        if time_delta <= 0:
+            return None
+        dx = float(change.centroid_after[0] - change.centroid_before[0])
+        dy = float(change.centroid_after[1] - change.centroid_before[1])
+        vx = dx / time_delta
+        vy = dy / time_delta
+        speed = math.hypot(vx, vy)
+        direction = math.atan2(vy, vx) if speed > 1e-6 else 0.0
+        return MotionData(
+            centroid=(float(change.centroid_after[0]), float(change.centroid_after[1])),
+            velocity=(vx, vy),
+            speed=speed,
+            direction=direction,
+            timestamp=change.timestamp_after,
+        )
 
     def _evaluate_pair(
         self,
@@ -1146,8 +1476,62 @@ class CausalInfluenceScorer:
 class EventComposer:
     """Composes events from state changes using LLM reasoning"""
 
-    def __init__(self):
+    def __init__(
+        self,
+        scene_lookup: Optional[Dict[str, SceneSegment]] = None,
+        location_lookup: Optional[Dict[str, LocationProfile]] = None,
+    ):
         self.generated_queries: List[str] = []
+        self.scene_lookup = scene_lookup or {}
+        self.location_lookup = location_lookup or {}
+        self.metrics: Dict[str, Any] = {
+            "windows_total": 0,
+            "windows_composed": 0,
+            "windows_skipped": 0,
+            "windows_capped": 0,
+            "llm_calls": 0,
+            "llm_latency": 0.0,
+        }
+
+    def _resolve_location_label(self, location_id: Optional[str]) -> Optional[str]:
+        if not location_id:
+            return None
+        profile = self.location_lookup.get(location_id)
+        if profile:
+            return f"{profile.label} ({location_id})"
+        return location_id
+
+    def _collect_window_locations(self, window: TemporalWindow) -> Dict[str, Dict[str, Any]]:
+        summary: Dict[str, Dict[str, Any]] = {}
+        for change in window.state_changes:
+            scene_id = change.scene_after or change.scene_before
+            if not scene_id:
+                continue
+            scene = self.scene_lookup.get(scene_id)
+            if scene is None:
+                continue
+            loc_id = scene.location_id
+            if not loc_id:
+                continue
+            if loc_id not in summary:
+                summary[loc_id] = {
+                    "label": self._resolve_location_label(loc_id) or loc_id,
+                    "scenes": set(),
+                }
+            summary[loc_id]["scenes"].add(scene_id)
+        return summary
+
+    def _should_skip_window(self, window: TemporalWindow) -> Optional[str]:
+        change_count = len(window.state_changes)
+        if change_count == 0:
+            return "no state changes"
+        if (
+            Config.EVENT_COMPOSITION_SKIP_NO_CAUSAL
+            and not window.causal_links
+            and change_count < Config.EVENT_COMPOSITION_MIN_STATE_CHANGES
+        ):
+            return "low activity without causal links"
+        return None
 
     def query_ollama(self, prompt: str) -> str:
         """
@@ -1221,6 +1605,16 @@ ACTIVE ENTITIES:
             if entity:
                 prompt += f"- {entity_id} ({entity.object_class}): {len(entity.appearances)} appearances\n"
 
+        spatial_summary = self._collect_window_locations(window)
+        if spatial_summary:
+            prompt += "\nSPATIAL CONTEXT:\n"
+            for loc_id, meta in spatial_summary.items():
+                scenes = meta.get("scenes", set())
+                scene_list = ", ".join(sorted(scenes)) if scenes else "n/a"
+                prompt += (
+                    f"- {meta.get('label', loc_id)} | id={loc_id} | scenes: {scene_list}\n"
+                )
+
         prompt += "\nSTATE CHANGES:\n"
 
         for i, change in enumerate(window.state_changes, 1):
@@ -1228,6 +1622,16 @@ ACTIVE ENTITIES:
             prompt += f"   Before: {change.description_before}\n"
             prompt += f"   After: {change.description_after}\n"
             prompt += f"   Change magnitude: {change.change_magnitude:.3f}\n\n"
+            prior_loc = self._resolve_location_label(change.location_before)
+            post_loc = self._resolve_location_label(change.location_after)
+            if prior_loc or post_loc:
+                if prior_loc and post_loc and prior_loc != post_loc:
+                    prompt += f"   Location change: {prior_loc} → {post_loc}\n"
+                else:
+                    prompt += f"   Location: {post_loc or prior_loc}\n"
+            scene_id = change.scene_after or change.scene_before
+            if scene_id:
+                prompt += f"   Scene: {scene_id}\n"
 
         if window.causal_links:
             prompt += "CAUSAL INFLUENCE CANDIDATES (Agent → Patient):\n"
@@ -1373,8 +1777,13 @@ Now generate Cypher queries for the state changes above:
         # Create prompt
         prompt = self.create_prompt_for_window(window, entity_tracker)
 
-        # Query LLM
-        llm_output = self.query_ollama(prompt)
+        llm_output = ""
+
+        if Config.USE_LLM_COMPOSITION:
+            call_started = time.time()
+            llm_output = self.query_ollama(prompt)
+            self.metrics["llm_calls"] += 1
+            self.metrics["llm_latency"] += max(time.time() - call_started, 0.0)
 
         if not llm_output:
             logger.warning("No output from LLM, generating basic queries")
@@ -1496,10 +1905,43 @@ Now generate Cypher queries for the state changes above:
         logger.info("EVENT COMPOSITION - LLM REASONING")
         logger.info("=" * 80)
 
+        self.metrics["llm_calls"] = 0
+        self.metrics["llm_latency"] = 0.0
+        self.metrics["windows_total"] = len(windows)
+        self.metrics["windows_composed"] = 0
+        self.metrics["windows_skipped"] = 0
+        self.metrics["windows_capped"] = 0
+
         all_queries = []
+        budget = Config.EVENT_COMPOSITION_MAX_WINDOWS or 0
 
         for i, window in enumerate(windows, 1):
-            logger.info(f"Processing window {i}/{len(windows)}...")
+            if budget and self.metrics["windows_composed"] >= budget:
+                remaining = len(windows) - (i - 1)
+                self.metrics["windows_capped"] += max(remaining, 0)
+                logger.info(
+                    "Reached LLM window budget (%d processed, %d remaining skipped)",
+                    Config.EVENT_COMPOSITION_MAX_WINDOWS,
+                    max(remaining, 0),
+                )
+                break
+
+            skip_reason = self._should_skip_window(window)
+            if skip_reason:
+                self.metrics["windows_skipped"] += 1
+                logger.info(
+                    "Skipping window %d/%d (%s)", i, len(windows), skip_reason
+                )
+                continue
+
+            self.metrics["windows_composed"] += 1
+            logger.info(
+                "Processing window %d/%d (state changes=%d, causal_links=%d)",
+                i,
+                len(windows),
+                len(window.state_changes),
+                len(window.causal_links),
+            )
             queries = self.compose_events_for_window(window, entity_tracker)
             all_queries.extend(queries)
 
@@ -2120,6 +2562,7 @@ def run_semantic_uplift(
     neo4j_uri: str = None,
     neo4j_user: str = None,
     neo4j_password: str = None,
+    progress_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """
     Main semantic uplift pipeline
@@ -2130,6 +2573,7 @@ def run_semantic_uplift(
         neo4j_uri: Neo4j URI (if driver not provided)
         neo4j_user: Neo4j username (if driver not provided)
         neo4j_password: Neo4j password (if driver not provided)
+        progress_callback: Optional callable to receive progress events
 
     Returns:
         Dictionary with uplift results and statistics
@@ -2138,6 +2582,55 @@ def run_semantic_uplift(
     logger.info("SEMANTIC UPLIFT ENGINE - PART 2")
     logger.info("=" * 80)
     logger.info(f"Processing {len(perception_log)} perception objects")
+
+    def emit(event: str, payload: Dict[str, Any]) -> None:
+        if progress_callback is None:
+            return
+        try:
+            progress_callback(event, payload)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("Progress callback error (%s): %s", event, exc)
+
+    total_steps = 15
+    emit(
+        "semantic.start",
+        {
+            "total": total_steps,
+            "message": f"Processing {len(perception_log)} perception objects",
+        },
+    )
+
+    step_index = 0
+    current_step_name: Optional[str] = None
+
+    def start_step(name: str, message: str) -> int:
+        nonlocal step_index, current_step_name
+        step_index += 1
+        current_step_name = name
+        emit(
+            "semantic.step.start",
+            {
+                "name": name,
+                "message": message,
+                "index": step_index,
+                "total": total_steps,
+            },
+        )
+        logger.info("\n[%d/%d] %s", step_index, total_steps, message)
+        return step_index
+
+    def complete_step(index: int, name: str, detail: Optional[str] = None) -> None:
+        nonlocal current_step_name
+        emit(
+            "semantic.step.complete",
+            {
+                "name": name,
+                "detail": detail,
+                "index": index,
+                "total": total_steps,
+            },
+        )
+        current_step_name = None
 
     start_time = time.time()
     results = {
@@ -2150,92 +2643,227 @@ def run_semantic_uplift(
         "num_windows": 0,
         "num_causal_links": 0,
         "windows_with_causal": 0,
+        "causal_engine_calls": 0,
+        "causal_candidate_pairs": 0,
+        "causal_pairs_retained": 0,
         "num_queries": 0,
+        "llm_windows_total": 0,
+        "llm_windows_composed": 0,
+        "llm_windows_skipped": 0,
+        "llm_windows_capped": 0,
+        "llm_calls": 0,
+        "llm_latency_seconds": 0.0,
         "graph_stats": {},
     }
 
-    # Step 1: Entity Tracking
-    tracker = EntityTracker()
-    tracker.track_entities(perception_log)
-    entities = tracker.get_all_entities()
-    results["num_entities"] = len(entities)
-
-    scene_assembler = SceneAssembler(tracker)
-    scenes, locations = scene_assembler.build_scenes(perception_log)
-    scene_similarities = SceneAssembler.compute_similarities(
-        scenes,
-        threshold=Config.SCENE_SIMILARITY_THRESHOLD,
-        top_k=Config.SCENE_SIMILARITY_TOP_K,
-    )
-    results["num_scenes"] = len(scenes)
-    results["num_locations"] = len(locations)
-    results["num_scene_similarity_links"] = len(scene_similarities)
-    scene_embedding_dim = scene_assembler.embedding_dim
-
-    # Step 2: State Change Detection
-    detector = StateChangeDetector()
-    state_changes = detector.detect_all_state_changes(entities)
-    results["num_state_changes"] = len(state_changes)
-
-    # Step 3: Temporal Windowing
-    windows = create_temporal_windows(state_changes)
-    results["num_windows"] = len(windows)
-
-    # Step 3B: Causal Influence Scoring
-    causal_scorer = CausalInfluenceScorer(tracker)
-    causal_stats = causal_scorer.score_windows(windows)
-    results["num_causal_links"] = causal_stats.get("total_links", 0)
-    results["windows_with_causal"] = causal_stats.get("windows_with_links", 0)
-
-    # Step 4: Event Composition
-    composer = EventComposer()
-    cypher_queries = composer.compose_all_events(windows, tracker)
-    results["num_queries"] = len(cypher_queries)
-
-    # Step 5: Neo4j Ingestion
-    logger.info("\n" + "=" * 80)
-    logger.info("KNOWLEDGE GRAPH INGESTION")
-    logger.info("=" * 80)
-
-    # Use provided driver or create new one
-    if neo4j_driver:
-        graph_builder = KnowledgeGraphBuilder()
-        graph_builder.driver = neo4j_driver
-    else:
-        graph_builder = KnowledgeGraphBuilder(neo4j_uri, neo4j_user, neo4j_password)
-        if not graph_builder.connect():
-            logger.error("Failed to connect to Neo4j")
-            return results
+    graph_builder: Optional[KnowledgeGraphBuilder] = None
+    close_builder = False
+    scene_embedding_dim: Optional[int] = None
+    cypher_queries: List[str] = []
+    scene_lookup: Dict[str, SceneSegment] = {}
 
     try:
-        # Initialize schema
+        step_id = start_step("entity_tracking", "Tracking entities across time")
+        tracker = EntityTracker()
+        tracker.track_entities(perception_log)
+        entities = tracker.get_all_entities()
+        results["num_entities"] = len(entities)
+        detail_msg = f"Tracked {results['num_entities']} entities"
+        logger.info(detail_msg)
+        complete_step(step_id, "entity_tracking", detail_msg)
+
+        step_id = start_step("scene_assembly", "Assembling scenes and locations")
+        scene_assembler = SceneAssembler(tracker)
+        scenes, locations = scene_assembler.build_scenes(perception_log)
+        results["num_scenes"] = len(scenes)
+        results["num_locations"] = len(locations)
+        scene_embedding_dim = scene_assembler.embedding_dim
+        scene_lookup = {scene.scene_id: scene for scene in scenes}
+        detail_msg = (
+            f"Assembled {results['num_scenes']} scenes and {results['num_locations']} locations"
+        )
+        logger.info(detail_msg)
+        complete_step(step_id, "scene_assembly", detail_msg)
+
+        step_id = start_step("scene_similarity", "Computing scene similarity links")
+        scene_similarities = SceneAssembler.compute_similarities(
+            scenes,
+            threshold=Config.SCENE_SIMILARITY_THRESHOLD,
+            top_k=Config.SCENE_SIMILARITY_TOP_K,
+        )
+        results["num_scene_similarity_links"] = len(scene_similarities)
+        detail_msg = (
+            f"Computed {results['num_scene_similarity_links']} scene similarity links"
+        )
+        logger.info(detail_msg)
+        complete_step(step_id, "scene_similarity", detail_msg)
+
+        step_id = start_step("state_changes", "Detecting entity state changes")
+        detector = StateChangeDetector()
+        state_changes = detector.detect_all_state_changes(entities)
+        results["num_state_changes"] = len(state_changes)
+        detail_msg = f"Detected {results['num_state_changes']} state changes"
+        logger.info(detail_msg)
+        complete_step(step_id, "state_changes", detail_msg)
+
+        step_id = start_step("temporal_windows", "Grouping activity into temporal windows")
+        windows = create_temporal_windows(state_changes)
+        results["num_windows"] = len(windows)
+        detail_msg = f"Windowed activity into {results['num_windows']} intervals"
+        logger.info(detail_msg)
+        complete_step(step_id, "temporal_windows", detail_msg)
+
+        step_id = start_step("causal_scoring", "Scoring causal links")
+        causal_scorer = CausalInfluenceScorer(tracker)
+        causal_stats = causal_scorer.score_windows(windows)
+        results["num_causal_links"] = causal_stats.get("total_links", 0)
+        results["windows_with_causal"] = causal_stats.get("windows_with_links", 0)
+        results["causal_engine_calls"] = causal_stats.get("engine_calls", 0)
+        results["causal_candidate_pairs"] = causal_stats.get("candidate_pairs", 0)
+        results["causal_pairs_retained"] = causal_stats.get("accepted_pairs", 0)
+        detail_msg = (
+            f"Scored {results['num_causal_links']} causal links across "
+            f"{results['windows_with_causal']} windows"
+        )
+        logger.info(detail_msg)
+        complete_step(step_id, "causal_scoring", detail_msg)
+
+        step_id = start_step(
+            "event_composition", "Composing events and Cypher queries"
+        )
+        composer = EventComposer(scene_lookup=scene_lookup, location_lookup=locations)
+        cypher_queries = composer.compose_all_events(windows, tracker)
+        results["num_queries"] = len(cypher_queries)
+        results["llm_windows_total"] = composer.metrics.get("windows_total", 0)
+        results["llm_windows_composed"] = composer.metrics.get("windows_composed", 0)
+        results["llm_windows_skipped"] = composer.metrics.get("windows_skipped", 0)
+        results["llm_windows_capped"] = composer.metrics.get("windows_capped", 0)
+        results["llm_calls"] = composer.metrics.get("llm_calls", 0)
+        results["llm_latency_seconds"] = round(
+            composer.metrics.get("llm_latency", 0.0), 2
+        )
+        detail_msg = f"Prepared {results['num_queries']} Cypher queries"
+        detail_msg += (
+            f" (windows composed: {results['llm_windows_composed']}, "
+            f"skipped: {results['llm_windows_skipped']}, "
+            f"budgeted: {results['llm_windows_capped']})"
+        )
+        logger.info(detail_msg)
+        complete_step(step_id, "event_composition", detail_msg)
+
+        step_id = start_step("neo4j_connection", "Connecting to Neo4j")
+        if neo4j_driver:
+            graph_builder = KnowledgeGraphBuilder()
+            graph_builder.driver = neo4j_driver
+            connection_detail = "Using provided Neo4j driver"
+        else:
+            graph_builder = KnowledgeGraphBuilder(
+                neo4j_uri or Config.NEO4J_URI,
+                neo4j_user or Config.NEO4J_USER,
+                neo4j_password or Config.NEO4J_PASSWORD,
+            )
+            if not graph_builder.connect():
+                message = "Failed to connect to Neo4j"
+                emit("semantic.error", {"message": message, "step": "neo4j_connection"})
+                raise RuntimeError(message)
+            close_builder = True
+            connection_detail = f"Connected to Neo4j at {graph_builder.uri}"
+        logger.info(connection_detail)
+        complete_step(step_id, "neo4j_connection", connection_detail)
+
+        step_id = start_step("neo4j_schema", "Initializing Neo4j schema")
+        if graph_builder is None:
+            raise RuntimeError("KnowledgeGraphBuilder not initialized")
         graph_builder.initialize_schema(scene_embedding_dim=scene_embedding_dim)
+        if scene_embedding_dim:
+            detail_msg = f"Schema initialized (embedding dim {scene_embedding_dim})"
+        else:
+            detail_msg = "Schema initialized"
+        logger.info(detail_msg)
+        complete_step(step_id, "neo4j_schema", detail_msg)
 
-        # Ingest entities
+        step_id = start_step("neo4j_ingest_entities", "Ingesting entity profiles")
+        emit(
+            "semantic.progress",
+            {"message": f"Ingesting {results['num_entities']} entities into Neo4j"},
+        )
         graph_builder.ingest_entities(entities)
+        detail_msg = f"Ingested {results['num_entities']} entities"
+        logger.info(detail_msg)
+        complete_step(step_id, "neo4j_ingest_entities", detail_msg)
 
-        # Ingest scenes and inferred locations
+        step_id = start_step("neo4j_ingest_locations", "Ingesting inferred locations")
+        emit(
+            "semantic.progress",
+            {"message": f"Ingesting {results['num_locations']} locations"},
+        )
         graph_builder.ingest_locations(locations.values())
+        detail_msg = f"Ingested {results['num_locations']} locations"
+        logger.info(detail_msg)
+        complete_step(step_id, "neo4j_ingest_locations", detail_msg)
+
+        step_id = start_step("neo4j_ingest_scenes", "Ingesting scene segments")
+        emit(
+            "semantic.progress",
+            {"message": f"Ingesting {results['num_scenes']} scenes"},
+        )
         graph_builder.ingest_scenes(scenes)
+        detail_msg = f"Ingested {results['num_scenes']} scenes"
+        logger.info(detail_msg)
+        complete_step(step_id, "neo4j_ingest_scenes", detail_msg)
+
+        step_id = start_step(
+            "neo4j_link_relationships", "Linking scenes, entities, and transitions"
+        )
+        emit("semantic.progress", {"message": "Linking scenes to inferred locations"})
         graph_builder.link_scenes_to_locations(scenes)
+        emit("semantic.progress", {"message": "Linking entities to scenes"})
         graph_builder.link_entities_to_scenes(perception_log)
+        emit(
+            "semantic.progress", {"message": "Linking scene transitions and similarities"}
+        )
         graph_builder.link_scene_transitions(scenes)
         graph_builder.link_scene_similarities(scene_similarities)
+        detail_msg = "Scene relationships linked"
+        logger.info(detail_msg)
+        complete_step(step_id, "neo4j_link_relationships", detail_msg)
 
-        # Execute generated queries
+        step_id = start_step("neo4j_execute_queries", "Executing generated Cypher queries")
         if cypher_queries:
+            emit(
+                "semantic.progress",
+                {"message": f"Executing {len(cypher_queries)} Cypher queries"},
+            )
             graph_builder.execute_queries_batch(cypher_queries)
+        else:
+            emit("semantic.progress", {"message": "No Cypher queries to execute"})
+        detail_msg = f"Executed {len(cypher_queries)} generated queries"
+        logger.info(detail_msg)
+        complete_step(step_id, "neo4j_execute_queries", detail_msg)
 
-        # Get final statistics
-        results["graph_stats"] = graph_builder.get_graph_statistics()
+        step_id = start_step("neo4j_graph_stats", "Collecting graph statistics")
+        graph_stats = graph_builder.get_graph_statistics()
+        results["graph_stats"] = graph_stats
+        detail_msg = "Graph statistics collected"
+        logger.info(detail_msg)
+        if graph_stats:
+            for key, value in graph_stats.items():
+                logger.info("  %s: %s", key, value)
+        complete_step(step_id, "neo4j_graph_stats", detail_msg)
+
         results["success"] = True
 
-        logger.info("\nGraph Statistics:")
-        for key, value in results["graph_stats"].items():
-            logger.info(f"  {key}: {value}")
-
+    except Exception as exc:
+        emit(
+            "semantic.error",
+            {
+                "message": str(exc),
+                "step": current_step_name or "semantic",
+            },
+        )
+        raise
     finally:
-        if not neo4j_driver:  # Only close if we created the connection
+        if graph_builder is not None and close_builder:
             graph_builder.close()
 
     elapsed_time = time.time() - start_time
@@ -2253,9 +2881,47 @@ def run_semantic_uplift(
         f"Causal links scored: {results['num_causal_links']} "
         f"across {results['windows_with_causal']} windows"
     )
+    logger.info(
+        "Causal engine calls: %s (pairs considered: %s, retained: %s)",
+        results["causal_engine_calls"],
+        results["causal_candidate_pairs"],
+        results["causal_pairs_retained"],
+    )
+    logger.info(
+        "Event windows composed: %s/%s (skipped: %s, capped: %s)",
+        results["llm_windows_composed"],
+        results["llm_windows_total"],
+        results["llm_windows_skipped"],
+        results["llm_windows_capped"],
+    )
+    logger.info(
+        "LLM calls: %s (latency %.2fs)",
+        results["llm_calls"],
+        results["llm_latency_seconds"],
+    )
     logger.info(f"Cypher queries generated: {results['num_queries']}")
     logger.info(f"Total time: {elapsed_time:.2f}s")
     logger.info("=" * 80 + "\n")
+
+    emit(
+        "semantic.complete",
+        {
+            "message": f"Semantic uplift complete ({results['num_entities']} entities)",
+            "duration": elapsed_time,
+            "statistics": {
+                "entities": results["num_entities"],
+                "scenes": results["num_scenes"],
+                "locations": results["num_locations"],
+                "similarities": results["num_scene_similarity_links"],
+                "state_changes": results["num_state_changes"],
+                "causal_links": results["num_causal_links"],
+                "causal_engine_calls": results["causal_engine_calls"],
+                "queries": results["num_queries"],
+                "llm_calls": results["llm_calls"],
+                "llm_windows_composed": results["llm_windows_composed"],
+            },
+        },
+    )
 
     return results
 

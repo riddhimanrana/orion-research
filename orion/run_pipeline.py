@@ -526,6 +526,7 @@ def run_pipeline(
                         "perception",
                         f"Smart Perception ({part1_config} mode)",
                         style="cyan",
+                        total=3,
                     )
                     ui.start_stage(
                         "perception",
@@ -559,16 +560,17 @@ def run_pipeline(
                     elif event == "smart_perception.phase1.start":
                         ui.start_stage("perception.phase1", "Detecting objects with YOLO11x")
                         ui.set_stage_status("perception", "Phase 1: Detection")
-                    
                     elif event == "smart_perception.phase1.complete":
                         observations = payload.get("observations", 0)
                         msg = payload.get("message", f"{observations} observations")
                         ui.complete_stage("perception.phase1", msg)
+                        ui.advance_stage("perception", increment=1)
                         ui.set_stage_status("perception", "Phase 1 complete")
                         ui.start_stage("perception.phase2", "Clustering with HDBSCAN")
                         ui.set_stage_status("perception", "Phase 2: Clustering")
                     
                     elif event == "smart_perception.phase2.complete":
+                        ui.advance_stage("perception", increment=1)
                         entities = payload.get("entities", 0)
                         observations = payload.get("observations", 0)
                         efficiency = payload.get("efficiency", "N/A")
@@ -582,6 +584,7 @@ def run_pipeline(
                         entities = payload.get("entities", 0)
                         msg = payload.get("message", f"{entities} descriptions")
                         ui.complete_stage("perception.phase3", msg)
+                        ui.advance_stage("perception", increment=1)
                         ui.set_stage_status("perception", "Phase 3 complete")
                     
                     elif event == "smart_perception.complete":
@@ -773,10 +776,16 @@ def run_pipeline(
 
                 # Apply contextual understanding before semantic uplift
                 if ui.enabled:
-                    ui.add_stage("contextual", "Contextual Understanding", style="magenta")
+                    ui.add_stage(
+                        "contextual",
+                        "Contextual Understanding",
+                        style="magenta",
+                        total=3,
+                    )
                     ui.start_stage("contextual", "Analyzing spatial context & correcting classes")
                 
                 contextual_start = time.time()
+                contextual_progress_tracker = {"heuristics": False, "llm": False}
                 
                 def handle_contextual_progress(event: str, payload: Dict[str, Any]) -> None:
                     if not ui.enabled:
@@ -786,10 +795,16 @@ def run_pipeline(
                         ui.set_stage_status("contextual", f"Processing {total} observations")
                     elif event == "contextual.heuristics":
                         msg = payload.get("message", "Computing spatial context")
+                        if not contextual_progress_tracker["heuristics"]:
+                            ui.advance_stage("contextual", current=1)
+                            contextual_progress_tracker["heuristics"] = True
                         ui.set_stage_status("contextual", msg)
                     elif event == "contextual.llm":
                         total = payload.get("total", 0)
                         msg = payload.get("message", f"Correcting {total} classifications")
+                        if not contextual_progress_tracker["llm"]:
+                            ui.advance_stage("contextual", current=2)
+                            contextual_progress_tracker["llm"] = True
                         ui.set_stage_status("contextual", msg)
                     elif event == "contextual.complete":
                         msg = payload.get("message", "Complete")
@@ -823,12 +838,71 @@ def run_pipeline(
                     if ui.enabled:
                         ui.warn_stage("contextual", "Contextual analysis failed (continuing)")
 
+                semantic_progress_state = {"last_index": 0, "total": None}
+
+                def handle_semantic_progress(event: str, payload: Dict[str, Any]) -> None:
+                    if not ui.enabled:
+                        return
+
+                    if event == "semantic.start":
+                        total = payload.get("total")
+                        if total:
+                            semantic_progress_state["total"] = total
+                            ui.set_stage_total("semantic", total)
+                        ui.set_stage_status(
+                            "semantic",
+                            payload.get(
+                                "message",
+                                f"Initializing semantic uplift ({part2_config} mode)",
+                            ),
+                        )
+                    elif event == "semantic.step.start":
+                        index = payload.get("index")
+                        total = payload.get("total") or semantic_progress_state.get("total")
+                        message = payload.get("message") or payload.get("name", "Semantic step")
+                        if index and total:
+                            ui.set_stage_status("semantic", f"Step {index}/{total}: {message}")
+                        else:
+                            ui.set_stage_status("semantic", message)
+                    elif event == "semantic.progress":
+                        message = payload.get("message")
+                        if message:
+                            ui.set_stage_status("semantic", message)
+                    elif event == "semantic.step.complete":
+                        index = payload.get("index")
+                        total = payload.get("total") or semantic_progress_state.get("total")
+                        detail = payload.get("detail")
+                        name = payload.get("name", "Semantic step")
+                        message = detail or f"{name} complete"
+                        last_index = semantic_progress_state.get("last_index", 0)
+                        if index is not None and index > last_index:
+                            semantic_progress_state["last_index"] = index
+                            ui.advance_stage("semantic", current=index, message=message)
+                        else:
+                            ui.set_stage_status("semantic", message)
+                        if total and semantic_progress_state.get("total") is None:
+                            semantic_progress_state["total"] = total
+                            ui.set_stage_total("semantic", total)
+                    elif event == "semantic.warning":
+                        message = payload.get("message")
+                        if message:
+                            ui.set_stage_status("semantic", f"⚠ {message}")
+                    elif event == "semantic.error":
+                        message = payload.get("message", "Semantic uplift error")
+                        ui.fail_stage("semantic", message)
+                    elif event == "semantic.complete":
+                        message = payload.get("message")
+                        if message:
+                            ui.set_stage_status("semantic", message)
+
                 start_time = time.time()
                 try:
                     uplift_results = run_semantic_uplift(
                         perception_log,
                         neo4j_uri=neo4j_uri,
+                        neo4j_user=neo4j_user,
                         neo4j_password=neo4j_password,
+                        progress_callback=handle_semantic_progress,
                     )
                 except Exception as exc:
                     if ui.enabled:

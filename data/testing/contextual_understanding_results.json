@@ -2,8 +2,8 @@
   "extended_objects": [
     {
       "object_id": "entity_0010",
-      "object_type": "laptop",
-      "confidence": 0.8,
+      "object_type": "tv",
+      "confidence": 0.6,
       "spatial_zone": "unknown",
       "reasoning": [
         "Description: The image depicts a computer monitor displaying a software interface. The monito..."
@@ -11,8 +11,8 @@
     },
     {
       "object_id": "entity_0002",
-      "object_type": "laptop",
-      "confidence": 0.8,
+      "object_type": "keyboard",
+      "confidence": 0.6,
       "spatial_zone": "unknown",
       "reasoning": [
         "Description: The image depicts a close-up view of a computer keyboard. The keyboard is predom..."
@@ -47,11 +47,10 @@
     },
     {
       "object_id": "entity_0004",
-      "object_type": "bag",
-      "confidence": 0.8,
+      "object_type": "backpack",
+      "confidence": 0.6,
       "spatial_zone": "unknown",
       "reasoning": [
-        "Canonical label inferred from description: bag",
         "Description: The image depicts a black backpack placed on a white surface, which appears to b..."
       ]
     },
@@ -84,11 +83,10 @@
     },
     {
       "object_id": "entity_0000",
-      "object_type": "knob",
-      "confidence": 0.8,
+      "object_type": "hair drier",
+      "confidence": 0.6,
       "spatial_zone": "unknown",
       "reasoning": [
-        "Canonical label inferred from description: knob",
         "Description: The image depicts a close-up view of a metallic object, which appears to be a kn..."
       ]
     },
@@ -130,11 +128,10 @@
     },
     {
       "object_id": "unique_00003",
-      "object_type": "star",
+      "object_type": "potted plant",
       "confidence": 0.6,
       "spatial_zone": "unknown",
       "reasoning": [
-        "Canonical label inferred from description: star",
         "Description: The image appears to be a photograph of a white, star-shaped object with a centr..."
       ]
     },
@@ -149,8 +146,8 @@
     },
     {
       "object_id": "unique_00005",
-      "object_type": "book",
-      "confidence": 0.8,
+      "object_type": "person",
+      "confidence": 0.6,
       "spatial_zone": "unknown",
       "reasoning": [
         "Description: The image depicts a scene with a dog lying on a bed. The dog appears to be sleep..."
@@ -176,11 +173,10 @@
     },
     {
       "object_id": "unique_00008",
-      "object_type": "tire",
-      "confidence": 0.7,
+      "object_type": "suitcase",
+      "confidence": 0.6,
       "spatial_zone": "unknown",
       "reasoning": [
-        "Canonical label inferred from description: tire",
         "Description: The image depicts a close-up view of a car tire. The tire is black and appears t..."
       ]
     },
@@ -194,21 +190,7 @@
       ]
     }
   ],
-  "detected_actions": [
-    {
-      "action_type": "OPENS_DOOR",
-      "confidence": 0.6,
-      "frame_range": [
-        0,
-        0
-      ],
-      "reasoning": [
-        "Person present",
-        "Knob/handle detected (canonical)",
-        "Door-like object present (refrigerator/oven/door)"
-      ]
-    }
-  ],
-  "narrative_text": "The scene contains: bed, bench, bird, book, bottle, car, cat, cell phone. Fine-grained items detected: bag, knob, star, tire. Possible actions: OPENS_DOOR.",
-  "summary": "Objects: 21; Actions: 1; Canonical terms: bag, knob, star, tire."
+  "detected_actions": [],
+  "narrative_text": "The scene contains: backpack, bed, bird, bottle, cat, cell phone, chair, hair drier.",
+  "summary": "Objects: 21; Actions: 0; Canonical terms: none."
 }
