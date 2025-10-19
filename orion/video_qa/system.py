@@ -12,6 +12,7 @@ from neo4j.exceptions import Neo4jError
 from ..embedding_model import EmbeddingModel, create_embedding_model
 from ..model_manager import ModelManager
 from ..vector_indexing import query_similar_entities, query_similar_scenes
+from ..settings import OrionSettings
 from .config import VideoQAConfig
 
 logger = logging.getLogger("orion.video_qa")
@@ -23,18 +24,21 @@ class VideoQASystem:
     def __init__(
         self,
         config: Optional[VideoQAConfig] = None,
-        neo4j_uri: str = "neo4j://127.0.0.1:7687",
-        neo4j_user: str = "neo4j",
-        neo4j_password: str = "orion123",
-        llm_model: str = "gemma3:4b",
+        neo4j_uri: Optional[str] = None,
+        neo4j_user: Optional[str] = None,
+        neo4j_password: Optional[str] = None,
+        llm_model: Optional[str] = None,
         embedding_backend: str = "auto",
         embedding_model: Optional[str] = None,
     ) -> None:
         self.config = config or VideoQAConfig()
-        self.neo4j_uri = neo4j_uri
-        self.neo4j_user = neo4j_user
-        self.neo4j_password = neo4j_password
-        self.llm_model = llm_model
+
+        # Use centralized settings as defaults, but allow overrides
+        settings = OrionSettings.load()
+        self.neo4j_uri = neo4j_uri or settings.neo4j_uri
+        self.neo4j_user = neo4j_user or settings.neo4j_user
+        self.neo4j_password = neo4j_password or settings.neo4j_password
+        self.llm_model = llm_model or settings.qa_model
         self.embedding_backend_choice = embedding_backend
         self.embedding_model_name = (
             embedding_model or "openai/clip-vit-base-patch32"
@@ -669,4 +673,3 @@ class VideoQASystem:
                     event["participants"] = participants
                 if locations:
                     event["locations"] = locations
-

@@ -162,10 +162,10 @@ def show_models() -> None:
     table.add_column("Size", style="green")
     table.add_column("Speed", style="magenta")
 
-    table.add_row("YOLO11m", "Object Detection", "20MB", "⚡⚡⚡ Very Fast")
+    table.add_row("YOLO11x", "Object Detection", "50MB", "⚡⚡ Very Accurate")
     table.add_row("FastVLM", "Description", "600MB", "⚡⚡ Fast")
     table.add_row("ResNet50", "Visual ID", "100MB", "⚡⚡⚡ Very Fast")
-    table.add_row("EmbeddingGemma", "Text Meaning", "622MB", "⚡⚡ Fast")
+    table.add_row("CLIP (OpenAI)", "Text Meaning", "512MB", "⚡⚡ Fast")
     table.add_row("Gemma3:4b", "Q&A", "1.6GB", "⚡ Medium")
 
     console.print(table)
@@ -400,7 +400,7 @@ def main(argv: list[str] | None = None) -> None:
 
         neo4j_uri = args.neo4j_uri or settings.neo4j_uri
         neo4j_user = args.neo4j_user or settings.neo4j_user
-        neo4j_password = args.neo4j_password or settings.neo4j_password
+        neo4j_password = args.neo4j_password or settings.get_neo4j_password()
         qa_model = args.qa_model or settings.qa_model
         embedding_backend = args.embedding_backend or settings.embedding_backend
         embedding_model = args.embedding_model or settings.embedding_model
@@ -461,7 +461,7 @@ def main(argv: list[str] | None = None) -> None:
             qa = VideoQASystem(
                 neo4j_uri=args.neo4j_uri or settings.neo4j_uri,
                 neo4j_user=args.neo4j_user or settings.neo4j_user,
-                neo4j_password=args.neo4j_password or settings.neo4j_password,
+                neo4j_password=args.neo4j_password or settings.get_neo4j_password(),
                 llm_model=args.model or settings.qa_model,
                 embedding_backend=args.embedding_backend or settings.embedding_backend,
                 embedding_model=args.embedding_model or settings.embedding_model,
@@ -479,7 +479,7 @@ def main(argv: list[str] | None = None) -> None:
         from .vector_indexing import ENTITY_INDEX, SCENE_INDEX
 
         mgr = Neo4jManager(
-            settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password
+            settings.neo4j_uri, settings.neo4j_user, settings.get_neo4j_password()
         )
         if not mgr.connect():
             console.print("[red]Cannot connect to Neo4j.[/red]")
@@ -521,7 +521,7 @@ def main(argv: list[str] | None = None) -> None:
             e_total, e_done, s_total, s_done = backfill_embeddings(
                 settings.neo4j_uri,
                 settings.neo4j_user,
-                settings.neo4j_password,
+                settings.get_neo4j_password(),
                 prefer_ollama=prefer_ollama,
                 backend=embedding_backend,
                 model_name=model_id,
@@ -545,7 +545,7 @@ def main(argv: list[str] | None = None) -> None:
             output_dir=PathLib(args.output_dir),
             neo4j_uri=settings.neo4j_uri,
             neo4j_user=settings.neo4j_user,
-            neo4j_password=settings.neo4j_password,
+            neo4j_password=settings.get_neo4j_password(),
             iou_threshold=args.iou_threshold,
             tiou_threshold=args.tiou_threshold,
         )
@@ -580,9 +580,9 @@ def main(argv: list[str] | None = None) -> None:
         summary_table.add_column("Status", style="green", justify="center")
         summary_table.add_column("Details", style="magenta")
 
-        # Show YOLO11m
-        yolo_path = manager.get_asset_path("yolo11m") if "yolo11m" in manager._manifest else "Not found"
-        summary_table.add_row("YOLO11m", "✓" if Path(yolo_path).exists() else "✗", str(yolo_path))
+        # Show YOLO11x
+        yolo_path = manager.get_asset_path("yolo11x") if "yolo11x" in manager._manifest else "Not found"
+        summary_table.add_row("YOLO11x", "✓" if Path(yolo_path).exists() else "✗", str(yolo_path))
 
         # Show FastVLM (MLX or Torch)
         fastvlm_asset_name = "fastvlm-0.5b-mlx" if backend == "mlx" else "fastvlm-0.5b"
@@ -591,7 +591,7 @@ def main(argv: list[str] | None = None) -> None:
 
         # Show Gemma3:4b
         summary_table.add_row("gemma3:4b", "✓", "Installed")
-        summary_table.add_row("embeddinggemma", "✓", "Installed")
+        summary_table.add_row("CLIP (OpenAI)", "✓", "Installed")
 
         console.print(summary_table)
 

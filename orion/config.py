@@ -188,6 +188,18 @@ class CorrectionConfig:
     infer_events: bool = True
     """Infer simple events like OPENS_DOOR and ENTERS_ROOM from cues"""
 
+    enable_llm_cache: bool = True
+    """Reuse LLM corrections when the same object description reappears."""
+
+    llm_cache_size: int = 256
+    """Maximum cached correction entries to retain in memory."""
+
+    llm_confidence_floor: float = 0.45
+    """Below this detection confidence, route objects to LLM review."""
+
+    llm_confidence_ceiling: float = 0.65
+    """Above this confidence (and matching description), skip LLM calls."""
+
 
 @dataclass
 class OrionConfig:
@@ -278,7 +290,7 @@ def get_balanced_config() -> OrionConfig:
     - Default clustering
     """
     return OrionConfig(
-        detection=DetectionConfig(model="yolo11m"),
+    detection=DetectionConfig(model="yolo11m"),
         clustering=ClusteringConfig(cluster_selection_epsilon=0.35),
         correction=CorrectionConfig(
             use_llm=False,

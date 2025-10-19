@@ -11,13 +11,9 @@ import os
 readme_file = Path(__file__).parent / "README.md"
 long_description = readme_file.read_text(encoding="utf-8") if readme_file.exists() else ""
 
-# Check if we're doing an editable install and mlx-vlm exists locally
-mlx_vlm_path = Path(__file__).parent / "mlx-vlm"
-local_mlx_vlm = ""
-if mlx_vlm_path.exists() and os.path.isfile(mlx_vlm_path / "setup.py"):
-    local_mlx_vlm = f"-e {mlx_vlm_path}"
+# Note: mlx-vlm is managed as a local submodule but not included in install_requires
+# setuptools doesn't support editable installs (-e) in install_requires dependencies
 
-# Prepare install_requires with conditional local dependency
 install_requires = [
     # Core dependencies
     "torch>=2.6.0",
@@ -53,10 +49,6 @@ install_requires = [
     "tqdm>=4.67.0",
     "huggingface-hub>=0.35.0",
 ]
-
-# Add local mlx-vlm if available
-if local_mlx_vlm:
-    install_requires.append(local_mlx_vlm)
 
 setup(
     name="orion-research",

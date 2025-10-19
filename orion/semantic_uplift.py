@@ -23,12 +23,13 @@ import os
 import sys
 import time
 import warnings
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 import numpy as np
 import requests
+from difflib import SequenceMatcher
 from neo4j import GraphDatabase
 from neo4j.exceptions import ServiceUnavailable
 
@@ -98,7 +99,7 @@ class Config:
     # State Change Detection
     STATE_CHANGE_THRESHOLD = 0.85  # Cosine similarity threshold
     EMBEDDING_MODEL_TYPE = (
-        "embeddinggemma"  # 'embeddinggemma' (Ollama) or 'sentence-transformer'
+        "openai/clip-vit-base-patch32"  # 'openai/clip-vit-base-patch32' (Ollama) or 'sentence-transformer'
     )
     SCENE_SIMILARITY_THRESHOLD = 0.82  # Cosine threshold for scene similarity links
     SCENE_SIMILARITY_TOP_K = 3  # Max similar scenes per scene
@@ -130,6 +131,15 @@ class Config:
     EVENT_COMPOSITION_MIN_STATE_CHANGES = 2
     EVENT_COMPOSITION_MAX_WINDOWS = 80
     EVENT_COMPOSITION_SKIP_NO_CAUSAL = True
+    EVENT_COMPOSITION_MAX_WINDOWS_PER_SCENE = 3
+    EVENT_COMPOSITION_MIN_CAUSAL_SCORE = 0.45
+    EVENT_COMPOSITION_MIN_TOTAL_CAUSAL = 0.8
+    EVENT_COMPOSITION_MIN_CHANGE_MAGNITUDE = 0.6
+    EVENT_COMPOSITION_BATCH_SIZE = 3
+    EVENT_COMPOSITION_CACHE_SIZE = 128
+    EVENT_COMPOSITION_MAX_WINDOW_LENGTH = 6
+    EVENT_COMPOSITION_SUMMARY_SIMILARITY = 0.9
+    EVENT_COMPOSITION_TEMPLATE_SCORE = 0.25
 
     # LLM Event Composition (Ollama)
     USE_LLM_COMPOSITION = True  # Enable LLM composition with gemma3:4b
@@ -977,7 +987,7 @@ class StateChangeDetector:
             if create_embedding_model is None:  # type: ignore[truthy-function]
                 raise RuntimeError("Embedding model factory unavailable")
             self.model = create_embedding_model(
-                prefer_ollama=(Config.EMBEDDING_MODEL_TYPE == "embeddinggemma")
+                prefer_ollama=(Config.EMBEDDING_MODEL_TYPE == "openai/clip-vit-base-patch32")
             )
             model_info = self.model.get_model_info()
             logger.info(
@@ -1676,7 +1686,19 @@ class EventComposer:
             "windows_capped": 0,
             "llm_calls": 0,
             "llm_latency": 0.0,
+            "windows_pruned_scene": 0,
+            "windows_deduped": 0,
+            "windows_template": 0,
+            "windows_cached": 0,
+            "windows_summary_skipped": 0,
+            "windows_prepared": 0,
+            "batch_groups": 0,
+            "windows_pruned_signal": 0,
+            "duration_seconds": 0.0,
         }
+        self._narrative_cache: OrderedDict[str, List[str]] = OrderedDict()
+        self._recent_summaries: Dict[str, str] = {}
+        self.query_batches: List[List[str]] = []
 
     def _resolve_location_label(self, location_id: Optional[str]) -> Optional[str]:
         if not location_id:
@@ -1706,16 +1728,32 @@ class EventComposer:
             summary[loc_id]["scenes"].add(scene_id)
         return summary
 
-    def _should_skip_window(self, window: TemporalWindow) -> Optional[str]:
+    def _should_skip_window(self, window: TemporalWindow) -> Optional[Tuple[str, str]]:
         change_count = len(window.state_changes)
         if change_count == 0:
-            return "no state changes"
+            return ("empty", "no state changes")
+
         if (
             Config.EVENT_COMPOSITION_SKIP_NO_CAUSAL
             and not window.causal_links
             and change_count < Config.EVENT_COMPOSITION_MIN_STATE_CHANGES
         ):
-            return "low activity without causal links"
+            return ("low_activity", "low activity without causal links")
+
+        total_causal = self._window_total_causal(window)
+        max_causal = max((link.influence_score for link in window.causal_links), default=0.0)
+        change_magnitude = self._window_change_magnitude(window)
+
+        min_total = Config.EVENT_COMPOSITION_MIN_TOTAL_CAUSAL
+        min_change = Config.EVENT_COMPOSITION_MIN_CHANGE_MAGNITUDE
+        min_link = Config.EVENT_COMPOSITION_MIN_CAUSAL_SCORE
+
+        if min_total and min_change and total_causal < min_total and change_magnitude < min_change:
+            return ("low_signal", "insufficient causal or state-change signal")
+
+        if window.causal_links and min_link and max_causal < min_link and change_magnitude < min_change:
+            return ("low_signal", "causal influence below threshold")
+
         return None
 
     def query_ollama(self, prompt: str) -> str:
@@ -1937,6 +1975,195 @@ Now generate Cypher queries for the state changes above:
 
         return valid_queries
 
+    def _window_priority(self, window: TemporalWindow) -> float:
+        if window.causal_links:
+            return max((link.influence_score for link in window.causal_links), default=0.0)
+        if window.state_changes:
+            return sum(change.change_magnitude for change in window.state_changes) / max(
+                len(window.state_changes), 1
+            )
+        return 0.0
+
+    def _window_signature(self, window: TemporalWindow) -> str:
+        if window.causal_links:
+            parts = [
+                f"{link.agent_id}->{link.patient_id}:{round(link.influence_score, 2)}"
+                for link in sorted(
+                    window.causal_links,
+                    key=lambda link: (link.agent_id, link.patient_id),
+                )
+            ]
+        else:
+            parts = sorted(window.active_entities)
+        return "|".join(parts) or f"window_{round(window.start_time, 2)}"
+
+    def _dominant_location(self, window: TemporalWindow) -> str:
+        summary = self._collect_window_locations(window)
+        if not summary:
+            return "location_unknown"
+        ranked = sorted(summary.items(), key=lambda item: len(item[1]["scenes"]), reverse=True)
+        return ranked[0][0] if ranked else "location_unknown"
+
+    def _window_total_causal(self, window: TemporalWindow) -> float:
+        return sum(link.influence_score for link in window.causal_links)
+
+    def _window_change_magnitude(self, window: TemporalWindow) -> float:
+        if not window.state_changes:
+            return 0.0
+        return sum(change.change_magnitude for change in window.state_changes)
+
+    def _trim_window(self, window: TemporalWindow) -> TemporalWindow:
+        trimmed = TemporalWindow(
+            start_time=window.start_time,
+            end_time=window.end_time,
+            active_entities=set(window.active_entities),
+            state_changes=list(window.state_changes),
+            causal_links=list(window.causal_links),
+        )
+
+        max_changes = Config.EVENT_COMPOSITION_MAX_WINDOW_LENGTH
+        if max_changes and len(trimmed.state_changes) > max_changes:
+            trimmed.state_changes = sorted(
+                trimmed.state_changes,
+                key=lambda change: change.change_magnitude,
+                reverse=True,
+            )[:max_changes]
+
+        if Config.CAUSAL_TOP_K_PER_WINDOW and len(trimmed.causal_links) > Config.CAUSAL_TOP_K_PER_WINDOW:
+            trimmed.causal_links = sorted(
+                trimmed.causal_links,
+                key=lambda link: link.influence_score,
+                reverse=True,
+            )[: Config.CAUSAL_TOP_K_PER_WINDOW]
+
+        return trimmed
+
+    def _window_summary(self, window: TemporalWindow) -> str:
+        summaries = []
+        for change in window.state_changes:
+            summaries.append(
+                f"{change.entity_id}:{change.description_before}->{change.description_after}"
+            )
+        for link in window.causal_links:
+            summaries.append(
+                f"{link.agent_id}>{link.patient_id}:{round(link.influence_score,2)}"
+            )
+        return "|".join(summaries)
+
+    def _should_use_template(self, window: TemporalWindow, total_causal: float, summary_key: str, summary_text: str) -> bool:
+        if total_causal <= Config.EVENT_COMPOSITION_TEMPLATE_SCORE:
+            return True
+
+        prior_summary = self._recent_summaries.get(summary_key)
+        if prior_summary:
+            similarity = SequenceMatcher(None, prior_summary, summary_text).ratio()
+            if similarity >= Config.EVENT_COMPOSITION_SUMMARY_SIMILARITY:
+                self.metrics["windows_summary_skipped"] += 1
+                return True
+
+        return False
+
+    def _compute_cache_key(self, window: TemporalWindow) -> str:
+        signature = self._window_signature(window)
+        location = self._dominant_location(window)
+        time_bucket = int(window.start_time // 5)
+        return f"{location}|{signature}|{time_bucket}"
+
+    def _get_cached_queries(self, cache_key: str) -> Optional[List[str]]:
+        if cache_key not in self._narrative_cache:
+            return None
+        queries = list(self._narrative_cache[cache_key])
+        # Move to end (LRU)
+        self._narrative_cache.move_to_end(cache_key)
+        return queries
+
+    def _update_cache(self, cache_key: str, queries: List[str]) -> None:
+        if not cache_key or not queries:
+            return
+        if cache_key in self._narrative_cache:
+            self._narrative_cache.move_to_end(cache_key)
+        self._narrative_cache[cache_key] = list(queries)
+        while len(self._narrative_cache) > Config.EVENT_COMPOSITION_CACHE_SIZE:
+            self._narrative_cache.popitem(last=False)
+
+    @staticmethod
+    def _chunked(items: List[Any], size: int) -> Iterable[List[Any]]:
+        if size <= 0:
+            yield items
+            return
+        for index in range(0, len(items), size):
+            yield items[index : index + size]
+
+    def _serialize_window(self, window: TemporalWindow, entity_tracker: EntityTracker, index: int) -> Dict[str, Any]:
+        entities = []
+        for entity_id in sorted(window.active_entities):
+            entity = entity_tracker.get_entity(entity_id)
+            if not entity:
+                continue
+            entities.append(
+                {
+                    "id": entity_id,
+                    "class": entity.object_class,
+                    "appearance_count": len(entity.appearances) if entity.appearances else 0,
+                }
+            )
+
+        state_changes = [change.to_dict() for change in window.state_changes]
+        for change in state_changes:
+            change.pop("embedding_before", None)
+            change.pop("embedding_after", None)
+
+        causal_links = [
+            {
+                "agent_id": link.agent_id,
+                "patient_id": link.patient_id,
+                "score": link.influence_score,
+                "features": link.features,
+                "justification": link.justification,
+            }
+            for link in window.causal_links
+        ]
+
+        locations = self._collect_window_locations(window)
+
+        return {
+            "index": index,
+            "time": {"start": window.start_time, "end": window.end_time},
+            "entities": entities,
+            "state_changes": state_changes,
+            "causal_links": causal_links,
+            "locations": {loc_id: {"label": data["label"], "scene_count": len(data["scenes"]) } for loc_id, data in locations.items()},
+        }
+
+    def _create_batch_prompt(self, batch_payload: List[Dict[str, Any]]) -> str:
+        instructions = """You are an expert Neo4j knowledge graph builder. For each window you receive, generate Cypher queries that capture the described state changes and causal influences. Return STRICT JSON with this schema:\n{\n  \"windows\": [\n    {\"index\": <int>, \"queries\": [<string Cypher>; ...]}\n  ]\n}\nNo commentary, markdown, or extra text. Ensure each query ends with a semicolon. Use MERGE for nodes and relationships. Preserve the order of windows.\n"""
+
+        payload = {"windows": batch_payload}
+        prompt = instructions + "\nWINDOW_DATA:\n" + json.dumps(payload, indent=2)
+        return prompt
+
+    def _parse_batch_response(self, response: str) -> Optional[Dict[str, List[str]]]:
+        try:
+            if "```" in response:
+                start = response.index("```json") + 7 if "```json" in response else response.index("```") + 3
+                end = response.index("```", start)
+                response = response[start:end].strip()
+            parsed = json.loads(response)
+            result: Dict[str, List[str]] = {}
+            for item in parsed.get("windows", []):
+                index = item.get("index")
+                queries = item.get("queries", [])
+                if index is None:
+                    continue
+                if not isinstance(queries, list):
+                    continue
+                normalized = [q if q.endswith(";") else f"{q};" for q in queries]
+                result[str(index)] = normalized
+            return result
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to parse batched LLM response: %s", exc)
+            return None
+
     def compose_events_for_window(
         self, window: TemporalWindow, entity_tracker: EntityTracker
     ) -> List[str]:
@@ -2074,7 +2301,10 @@ Now generate Cypher queries for the state changes above:
         return queries
 
     def compose_all_events(
-        self, windows: List[TemporalWindow], entity_tracker: EntityTracker
+        self,
+        windows: List[TemporalWindow],
+        entity_tracker: EntityTracker,
+        progress_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
     ) -> List[str]:
         """
         Compose events for all windows
@@ -2090,50 +2320,299 @@ Now generate Cypher queries for the state changes above:
         logger.info("EVENT COMPOSITION - LLM REASONING")
         logger.info("=" * 80)
 
-        self.metrics["llm_calls"] = 0
-        self.metrics["llm_latency"] = 0.0
-        self.metrics["windows_total"] = len(windows)
-        self.metrics["windows_composed"] = 0
-        self.metrics["windows_skipped"] = 0
-        self.metrics["windows_capped"] = 0
+        def notify(event: str, payload: Dict[str, Any]) -> None:
+            if progress_callback is None:
+                return
+            try:
+                progress_callback(event, payload)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("EventComposer progress callback error (%s): %s", event, exc)
 
-        all_queries = []
+        start_time = time.time()
+        self.metrics.update(
+            {
+                "llm_calls": 0,
+                "llm_latency": 0.0,
+                "windows_total": len(windows),
+                "windows_composed": 0,
+                "windows_skipped": 0,
+                "windows_capped": 0,
+                "windows_pruned_scene": 0,
+                "windows_deduped": 0,
+                "windows_template": 0,
+                "windows_cached": 0,
+                "windows_summary_skipped": 0,
+                "batch_groups": 0,
+                "windows_pruned_signal": 0,
+            }
+        )
+        self.query_batches = []
+
+        notify("start", {"total_windows": len(windows)})
+
+        if not windows:
+            logger.info("No temporal windows available for composition")
+            self.metrics["duration_seconds"] = 0.0
+            notify("complete", {"queries": 0, "metrics": dict(self.metrics)})
+            return []
+
         budget = Config.EVENT_COMPOSITION_MAX_WINDOWS or 0
+        prioritized_windows = sorted(
+            windows,
+            key=self._window_priority,
+            reverse=True,
+        )
 
-        for i, window in enumerate(windows, 1):
-            if budget and self.metrics["windows_composed"] >= budget:
-                remaining = len(windows) - (i - 1)
-                self.metrics["windows_capped"] += max(remaining, 0)
-                logger.info(
-                    "Reached LLM window budget (%d processed, %d remaining skipped)",
-                    Config.EVENT_COMPOSITION_MAX_WINDOWS,
-                    max(remaining, 0),
-                )
-                break
+        notify("queue.initialized", {"total": len(prioritized_windows)})
 
-            skip_reason = self._should_skip_window(window)
-            if skip_reason:
+        processed: List[Dict[str, Any]] = []
+        seen_signatures: Set[str] = set()
+        per_location: Dict[str, int] = defaultdict(int)
+
+        for idx, window in enumerate(prioritized_windows, 1):
+            notify(
+                "window.considered",
+                {
+                    "index": idx,
+                    "total": len(prioritized_windows),
+                    "changes": len(window.state_changes),
+                    "causal_links": len(window.causal_links),
+                },
+            )
+            skip_info = self._should_skip_window(window)
+            if skip_info:
+                reason_code, reason_text = skip_info
                 self.metrics["windows_skipped"] += 1
+                if reason_code == "low_signal":
+                    self.metrics["windows_pruned_signal"] += 1
                 logger.info(
-                    "Skipping window %d/%d (%s)", i, len(windows), skip_reason
+                    "Skipping window %d/%d (%s)", idx, len(prioritized_windows), reason_text
+                )
+                notify(
+                    "window.skipped",
+                    {
+                        "index": idx,
+                        "total": len(prioritized_windows),
+                        "reason": reason_text,
+                        "reason_code": reason_code,
+                        "skipped": self.metrics["windows_skipped"],
+                    },
                 )
                 continue
 
-            self.metrics["windows_composed"] += 1
-            logger.info(
-                "Processing window %d/%d (state changes=%d, causal_links=%d)",
-                i,
-                len(windows),
-                len(window.state_changes),
-                len(window.causal_links),
+            signature = self._window_signature(window)
+            if signature in seen_signatures:
+                self.metrics["windows_deduped"] += 1
+                notify(
+                    "window.deduped",
+                    {
+                        "index": idx,
+                        "total": len(prioritized_windows),
+                        "deduped": self.metrics["windows_deduped"],
+                    },
+                )
+                continue
+
+            location_key = self._dominant_location(window)
+            if (
+                Config.EVENT_COMPOSITION_MAX_WINDOWS_PER_SCENE
+                and per_location[location_key] >= Config.EVENT_COMPOSITION_MAX_WINDOWS_PER_SCENE
+            ):
+                self.metrics["windows_pruned_scene"] += 1
+                notify(
+                    "window.pruned",
+                    {
+                        "index": idx,
+                        "total": len(prioritized_windows),
+                        "location": location_key,
+                        "pruned": self.metrics["windows_pruned_scene"],
+                    },
+                )
+                continue
+
+            trimmed = self._trim_window(window)
+            total_causal = self._window_total_causal(trimmed)
+            summary_text = self._window_summary(trimmed)
+            template_only = self._should_use_template(
+                trimmed, total_causal, location_key, summary_text
             )
-            queries = self.compose_events_for_window(window, entity_tracker)
-            all_queries.extend(queries)
+
+            processed.append(
+                {
+                    "window": trimmed,
+                    "signature": signature,
+                    "location": location_key,
+                    "total_causal": total_causal,
+                    "template_only": template_only,
+                    "summary_text": summary_text,
+                    "source_index": idx,
+                }
+            )
+            seen_signatures.add(signature)
+            per_location[location_key] += 1
+
+            notify(
+                "window.prepared",
+                {
+                    "prepared": len(processed),
+                    "total": len(prioritized_windows),
+                    "location": location_key,
+                    "template_only": template_only,
+                },
+            )
+
+            if budget and len(processed) >= budget:
+                remaining = len(prioritized_windows) - idx
+                self.metrics["windows_capped"] += max(remaining, 0)
+                logger.info(
+                    "Reached LLM window budget (%d prepared, %d remaining skipped)",
+                    Config.EVENT_COMPOSITION_MAX_WINDOWS,
+                    max(remaining, 0),
+                )
+                notify(
+                    "budget.exhausted",
+                    {
+                        "limit": Config.EVENT_COMPOSITION_MAX_WINDOWS,
+                        "prepared": len(processed),
+                        "skipped": max(remaining, 0),
+                    },
+                )
+                break
+
+        all_queries: List[str] = []
+        llm_queue: List[Tuple[TemporalWindow, str, str, str]] = []
+
+        self.metrics["windows_prepared"] = len(processed)
+
+        for item in processed:
+            window = item["window"]
+            location_key = item["location"]
+            summary_text = item["summary_text"]
+            cache_key = self._compute_cache_key(window)
+
+            cached = self._get_cached_queries(cache_key)
+            if cached:
+                self.metrics["windows_cached"] += 1
+                self.metrics["windows_composed"] += 1
+                self.query_batches.append(cached)
+                all_queries.extend(cached)
+                self._recent_summaries[location_key] = summary_text
+                notify(
+                    "window.cached",
+                    {
+                        "cache_hits": self.metrics["windows_cached"],
+                        "composed": self.metrics["windows_composed"],
+                        "location": location_key,
+                    },
+                )
+                continue
+
+            if item["template_only"]:
+                queries = self.generate_fallback_queries(window, entity_tracker)
+                self.metrics["windows_template"] += 1
+                self.metrics["windows_composed"] += 1
+                self.query_batches.append(queries)
+                all_queries.extend(queries)
+                self._update_cache(cache_key, queries)
+                self._recent_summaries[location_key] = summary_text
+                notify(
+                    "window.template",
+                    {
+                        "templates": self.metrics["windows_template"],
+                        "composed": self.metrics["windows_composed"],
+                        "location": location_key,
+                    },
+                )
+                continue
+
+            llm_queue.append((window, cache_key, location_key, summary_text))
+
+        notify(
+            "queue.llm_ready",
+            {
+                "queued": len(llm_queue),
+                "batch_size": Config.EVENT_COMPOSITION_BATCH_SIZE,
+                "prepared": self.metrics.get("windows_prepared", 0),
+            },
+        )
+
+        batch_size = Config.EVENT_COMPOSITION_BATCH_SIZE
+
+        for batch_index, batch in enumerate(self._chunked(llm_queue, batch_size), 1):
+            if not batch:
+                continue
+
+            notify(
+                "batch.start",
+                {
+                    "batch_index": batch_index,
+                    "batch_size": len(batch),
+                    "queued_remaining": max(len(llm_queue) - (batch_index - 1) * batch_size, 0),
+                },
+            )
+
+            payload = [
+                self._serialize_window(window, entity_tracker, index)
+                for index, (window, _, _, _) in enumerate(batch)
+            ]
+
+            prompt = self._create_batch_prompt(payload)
+            call_started = time.time()
+            response = self.query_ollama(prompt)
+            self.metrics["llm_calls"] += 1
+            self.metrics["batch_groups"] += 1
+            self.metrics["llm_latency"] += max(time.time() - call_started, 0.0)
+
+            batch_result = self._parse_batch_response(response)
+
+            for local_index, (window, cache_key, location_key, summary_text) in enumerate(batch):
+                key = str(local_index)
+                queries: List[str]
+                if batch_result and key in batch_result:
+                    queries = self.validate_cypher_queries(batch_result[key])
+                    if not queries:
+                        queries = self.generate_fallback_queries(window, entity_tracker)
+                else:
+                    queries = self.compose_events_for_window(window, entity_tracker)
+
+                self.metrics["windows_composed"] += 1
+                self.query_batches.append(queries)
+                all_queries.extend(queries)
+                self._update_cache(cache_key, queries)
+                self._recent_summaries[location_key] = summary_text
+
+                notify(
+                    "window.composed",
+                    {
+                        "composed": self.metrics["windows_composed"],
+                        "queries": len(queries),
+                        "total_queries": len(all_queries),
+                        "location": location_key,
+                    },
+                )
+
+            notify(
+                "batch.complete",
+                {
+                    "batch_index": batch_index,
+                    "llm_calls": self.metrics["llm_calls"],
+                    "composed": self.metrics["windows_composed"],
+                },
+            )
 
         self.generated_queries = all_queries
+        self.metrics["duration_seconds"] = max(time.time() - start_time, 0.0)
 
-        logger.info(f"Generated {len(all_queries)} total Cypher queries")
+        logger.info(
+            "Generated %d total Cypher queries (windows composed=%d, template=%d, cached=%d)",
+            len(all_queries),
+            self.metrics["windows_composed"],
+            self.metrics["windows_template"],
+            self.metrics["windows_cached"],
+        )
         logger.info("=" * 80 + "\n")
+
+        notify("complete", {"queries": len(all_queries), "metrics": dict(self.metrics)})
 
         return all_queries
 
@@ -2859,7 +3338,31 @@ def run_semantic_uplift(
 
         step_id = start_step("scene_assembly", "Assembling scenes and locations")
         scene_assembler = SceneAssembler(tracker)
-        scenes, locations = scene_assembler.build_scenes(perception_log)
+
+        scene_progress_cb: Optional[Callable[[int, int], None]] = None
+        if Config.PROGRESS_LOGGING and progress_callback is not None:
+
+            def scene_progress(processed: int, total: int) -> None:
+                if total:
+                    message = f"[Scene assembly] {processed}/{total} frames processed"
+                else:
+                    message = f"[Scene assembly] Processed {processed} frames"
+                emit(
+                    "semantic.progress",
+                    {
+                        "stage": "scene_assembly",
+                        "current": processed,
+                        "total": total,
+                        "message": message,
+                    },
+                )
+
+            scene_progress_cb = scene_progress
+
+        scenes, locations = scene_assembler.build_scenes(
+            perception_log,
+            progress_callback=scene_progress_cb,
+        )
         results["num_scenes"] = len(scenes)
         results["num_locations"] = len(locations)
         scene_embedding_dim = scene_assembler.embedding_dim
@@ -2917,7 +3420,86 @@ def run_semantic_uplift(
             "event_composition", "Composing events and Cypher queries"
         )
         composer = EventComposer(scene_lookup=scene_lookup, location_lookup=locations)
-        cypher_queries = composer.compose_all_events(windows, tracker)
+
+        composer_progress_cb: Optional[Callable[[str, Dict[str, Any]], None]] = None
+        if Config.PROGRESS_LOGGING and progress_callback is not None:
+
+            def composer_progress(event_name: str, payload: Dict[str, Any]) -> None:
+                stage_payload: Dict[str, Any] = {"stage": "event_composition"}
+                message: Optional[str] = None
+
+                if event_name == "start":
+                    total = payload.get("total_windows")
+                    if total is not None:
+                        message = f"[Event composition] Evaluating {total} windows"
+                elif event_name == "queue.initialized":
+                    total = payload.get("total")
+                    if total is not None:
+                        message = f"[Event composition] Prioritized {total} windows"
+                elif event_name == "window.prepared":
+                    prepared = payload.get("prepared")
+                    total = payload.get("total")
+                    if prepared is not None and total:
+                        stage_payload.update({"current": prepared, "total": total})
+                        message = f"[Event composition] Prepared {prepared}/{total} windows"
+                elif event_name == "window.cached":
+                    cache_hits = payload.get("cache_hits")
+                    if cache_hits is not None:
+                        message = f"[Event composition] Cache hit (total {cache_hits})"
+                elif event_name == "window.template":
+                    templates = payload.get("templates")
+                    if templates is not None:
+                        message = f"[Event composition] Template fallback used ({templates})"
+                elif event_name == "window.skipped":
+                    reason = payload.get("reason", "skipped")
+                    message = f"[Event composition] Skipped window: {reason}"
+                elif event_name == "window.pruned":
+                    location = payload.get("location", "scene")
+                    message = f"[Event composition] Pruned extra window for {location}"
+                elif event_name == "window.deduped":
+                    message = "[Event composition] Deduped similar window"
+                elif event_name == "budget.exhausted":
+                    limit = payload.get("limit")
+                    if limit is not None:
+                        message = f"[Event composition] Window budget reached ({limit})"
+                elif event_name == "queue.llm_ready":
+                    queued = payload.get("queued")
+                    if queued is not None:
+                        message = f"[Event composition] {queued} windows queued for LLM"
+                elif event_name == "batch.start":
+                    batch_index = payload.get("batch_index")
+                    batch_size = payload.get("batch_size")
+                    if batch_index is not None and batch_size is not None:
+                        message = (
+                            f"[Event composition] Batch {batch_index}: sending {batch_size} windows to LLM"
+                        )
+                elif event_name == "batch.complete":
+                    composed = payload.get("composed")
+                    if composed is not None:
+                        message = f"[Event composition] Completed batch ({composed} windows composed)"
+                elif event_name == "window.composed":
+                    composed = payload.get("composed")
+                    if composed is not None:
+                        stage_payload["current"] = composed
+                        message = f"[Event composition] Composed {composed} windows"
+                elif event_name == "complete":
+                    queries = payload.get("queries")
+                    if queries is not None:
+                        message = f"[Event composition] Prepared {queries} Cypher queries"
+
+                if not message:
+                    return
+
+                stage_payload["message"] = message
+                emit("semantic.progress", stage_payload)
+
+            composer_progress_cb = composer_progress
+
+        cypher_queries = composer.compose_all_events(
+            windows,
+            tracker,
+            progress_callback=composer_progress_cb,
+        )
         results["num_queries"] = len(cypher_queries)
         results["llm_windows_total"] = composer.metrics.get("windows_total", 0)
         results["llm_windows_composed"] = composer.metrics.get("windows_composed", 0)
@@ -2927,12 +3509,35 @@ def run_semantic_uplift(
         results["llm_latency_seconds"] = round(
             composer.metrics.get("llm_latency", 0.0), 2
         )
+        results["llm_windows_prepared"] = composer.metrics.get("windows_prepared", 0)
+        results["llm_windows_template"] = composer.metrics.get("windows_template", 0)
+        results["llm_windows_cached"] = composer.metrics.get("windows_cached", 0)
+        results["llm_windows_summary_skipped"] = composer.metrics.get(
+            "windows_summary_skipped", 0
+        )
+        results["llm_batches"] = composer.metrics.get("batch_groups", 0)
+        results["llm_windows_pruned_scene"] = composer.metrics.get(
+            "windows_pruned_scene", 0
+        )
+        results["llm_windows_deduped"] = composer.metrics.get("windows_deduped", 0)
+        results["llm_windows_pruned_signal"] = composer.metrics.get(
+            "windows_pruned_signal", 0
+        )
+        results["llm_stage_duration_seconds"] = round(
+            composer.metrics.get("duration_seconds", 0.0), 2
+        )
         detail_msg = f"Prepared {results['num_queries']} Cypher queries"
         detail_msg += (
             f" (windows composed: {results['llm_windows_composed']}, "
             f"skipped: {results['llm_windows_skipped']}, "
             f"budgeted: {results['llm_windows_capped']})"
         )
+        detail_msg += (
+            f"; template-generated: {results['llm_windows_template']}, "
+            f"cache hits: {results['llm_windows_cached']}, batches: {results['llm_batches']}"
+        )
+        if results.get("llm_windows_pruned_signal"):
+            detail_msg += f"; low-signal pruned: {results['llm_windows_pruned_signal']}"
         logger.info(detail_msg)
         complete_step(step_id, "event_composition", detail_msg)
 
@@ -3019,7 +3624,13 @@ def run_semantic_uplift(
                 "semantic.progress",
                 {"message": f"Executing {len(cypher_queries)} Cypher queries"},
             )
-            graph_builder.execute_queries_batch(cypher_queries)
+            if composer.query_batches:
+                for batch in composer.query_batches:
+                    if not batch:
+                        continue
+                    graph_builder.execute_queries_batch(batch)
+            else:
+                graph_builder.execute_queries_batch(cypher_queries)
         else:
             emit("semantic.progress", {"message": "No Cypher queries to execute"})
         detail_msg = f"Executed {len(cypher_queries)} generated queries"

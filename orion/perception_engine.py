@@ -125,9 +125,9 @@ class Config:
     MIN_OBJECT_SIZE = 32  # Minimum width/height in pixels
     BBOX_PADDING_PERCENT = 0.10  # 10% padding around bounding box
 
-    # Visual Embedding (ResNet50 - better for re-identification)
-    EMBEDDING_MODEL = 'resnet50'  # Use ResNet50 instead of OSNet
-    EMBEDDING_DIM = 2048  # ResNet50 feature dimension
+    # Visual Embedding (CLIP - better for semantic understanding and re-identification)
+    EMBEDDING_MODEL = 'openai/clip-vit-base-patch32'  # Use CLIP for consistency
+    EMBEDDING_DIM = 512  # CLIP feature dimension
     EMBEDDING_POOLING = 'avg'  # Average pooling for global features
 
     # Multiprocessing
@@ -336,32 +336,31 @@ class PerceptionModelManager:
         return result
 
     def get_embedding_model(self) -> Dict[str, Any]:
-        """Load ResNet50 model for visual embeddings"""
+        """Load CLIP model for visual embeddings"""
         if "embedding_model" not in self._models:
             try:
-                import timm
-                from timm.data.config import resolve_model_data_config
-                from timm.data.transforms_factory import create_transform
+                from transformers import CLIPModel, CLIPProcessor
 
-                logger.info("Loading ResNet50 for visual embeddings...")
+                logger.info("Loading CLIP model for visual embeddings...")
 
-                # Load ResNet50 in feature extraction mode (no classification head)
-                model = timm.create_model('resnet50', pretrained=True, num_classes=0)
-                model = model.to(self.device)
+                # Load CLIP model
+                model = CLIPModel.from_pretrained(
+                    Config.EMBEDDING_MODEL,
+                    torch_dtype=torch.float16 if self.device != "cpu" else torch.float32
+                ).to(self.device)
                 model.eval()
 
-                # Create preprocessing transforms
-                data_config = resolve_model_data_config(model)
-                transforms = create_transform(**data_config, is_training=False)
+                # Load CLIP processor
+                processor = CLIPProcessor.from_pretrained(Config.EMBEDDING_MODEL)
 
                 self._models["embedding_model"] = {
                     "model": model,
-                    "transforms": transforms,
-                    "model_name": "ResNet50",
+                    "processor": processor,
+                    "model_name": "CLIP",
                 }
-                logger.info("✓ ResNet50 embedding model loaded (2048-dim features)")
+                logger.info(f"✓ CLIP embedding model loaded ({Config.EMBEDDING_DIM}-dim features)")
             except Exception as e:
-                logger.error(f"Failed to load ResNet50 model: {e}")
+                logger.error(f"Failed to load CLIP model: {e}")
                 raise RuntimeError("Embedding model is required for perception engine")
 
         result = self._models.get("embedding_model")
@@ -678,7 +677,7 @@ class RealTimeObjectProcessor:
 
     def generate_visual_embedding(self, crop: np.ndarray) -> np.ndarray:
         """
-        Generate visual embedding using embedding model
+        Generate visual embedding using CLIP model
 
         Args:
             crop: Cropped object image (BGR)
@@ -691,19 +690,22 @@ class RealTimeObjectProcessor:
             rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
             pil_image = Image.fromarray(rgb_crop)
 
-            # Apply transforms
-            input_tensor = self.embedding_model["transforms"](pil_image).unsqueeze(0)
-            input_tensor = input_tensor.to(self.model_manager.device)
+            # Use CLIP processor to prepare image
+            inputs = self.embedding_model["processor"](
+                images=pil_image,
+                return_tensors="pt"
+            )
+            inputs = {k: v.to(self.model_manager.device) for k, v in inputs.items()}
 
-            # Generate embedding
+            # Generate embedding using CLIP vision encoder
             with torch.no_grad():
-                embedding = self.embedding_model["model"](input_tensor)
-                embedding = F.normalize(embedding, p=2, dim=1)  # L2 normalize
+                image_features = self.embedding_model["model"].get_image_features(**inputs)
+                embedding = F.normalize(image_features, p=2, dim=1)  # L2 normalize
 
             return embedding.cpu().numpy()[0]
 
         except Exception as e:
-            logger.error(f"Embedding generation failed: {e}")
+            logger.error(f"CLIP embedding generation failed: {e}")
             # Return zero vector as fallback
             return np.zeros(Config.EMBEDDING_DIM, dtype=np.float32)
 

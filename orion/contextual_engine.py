@@ -17,7 +17,7 @@ Date: October 2025
 
 import logging
 from typing import Dict, List, Optional, Tuple, Any
-from collections import defaultdict
+from collections import OrderedDict
 import json
 
 from .config import OrionConfig
@@ -40,9 +40,11 @@ class ContextualEngine:
         self.config = config or OrionConfig()
         self.model_manager = model_manager
         self.corrector = ClassCorrector(config=self.config, model_manager=model_manager)
-        self.scene_cache = {}  # Cache scene analysis
+        self.scene_cache = {}  # Cache scene analysis per frame
+        self._correction_cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self.stats = {
-            'objects_processed': 0,
+            'raw_observations': 0,
+            'unique_entities': 0,
             'llm_calls': 0,
             'cache_hits': 0,
             'corrections': 0,
@@ -60,13 +62,12 @@ class ContextualEngine:
         Returns:
             Enhanced perception log with spatial zones, corrections, etc.
         """
-        logger.info(f"Processing {len(perception_log)} objects...")
-        
-        if progress_callback:
-            progress_callback("contextual.start", {"total": len(perception_log)})
-        
+        raw_count = len(perception_log)
+        logger.info("Processing %d observations...", raw_count)
+
         self.stats = {
-            'objects_processed': 0,
+            'raw_observations': raw_count,
+            'unique_entities': 0,
             'llm_calls': 0,
             'cache_hits': 0,
             'corrections': 0,
@@ -78,58 +79,255 @@ class ContextualEngine:
         
         # Convert to entity format
         entities = self._convert_to_entities(perception_log)
+        unique_count = len(entities)
+        self.stats['unique_entities'] = unique_count
+
+        logger.info("Consolidated to %d unique entities from %d observations", unique_count, raw_count)
+
+        if progress_callback:
+            progress_callback(
+                "contextual.start",
+                {
+                    "total": raw_count,
+                    "unique": unique_count,
+                    "raw": raw_count,
+                    "message": f"Processing {unique_count} unique entities ({raw_count} observations)",
+                },
+            )
         
         # Fast heuristic processing (no LLM)
         if progress_callback:
-            progress_callback("contextual.heuristics", {
-                "message": "Computing spatial zones & scene type"
-            })
+            progress_callback(
+                "contextual.heuristics",
+                {
+                    "message": f"Computing spatial zones & scene type for {unique_count} unique entities",
+                    "unique": unique_count,
+                },
+            )
         entities = self._apply_heuristics(entities)
         
         # Batch LLM analysis for ambiguous cases
         entities_needing_llm = [e for e in entities if e.get('needs_llm')]
         if entities_needing_llm:
             if progress_callback:
-                progress_callback("contextual.llm", {
-                    "total": len(entities_needing_llm),
-                    "message": f"Correcting {len(entities_needing_llm)} classifications"
-                })
-            self._batch_llm_analysis(entities_needing_llm)
+                progress_callback(
+                    "contextual.llm",
+                    {
+                        "total": len(entities_needing_llm),
+                        "unique": unique_count,
+                        "raw": raw_count,
+                        "message": (
+                            f"LLM review for {len(entities_needing_llm)}/{unique_count} unique entities"
+                        ),
+                    },
+                )
+            self._batch_llm_analysis(entities_needing_llm, progress_callback=progress_callback)
+        elif progress_callback:
+            progress_callback(
+                "contextual.llm",
+                {
+                    "total": 0,
+                    "unique": unique_count,
+                    "raw": raw_count,
+                    "message": "LLM review not required",
+                },
+            )
         
         # Convert back to perception log format
         enhanced_log = self._convert_to_perception_log(entities, perception_log)
         
         if progress_callback:
-            progress_callback("contextual.complete", {
-                "total": len(enhanced_log),
-                "spatial_zones": self.stats['spatial_zones_detected'],
-                "corrections": self.stats['corrections'],
-                "llm_calls": self.stats['llm_calls'],
-                "message": f"✓ {self.stats['spatial_zones_detected']}/{len(entities)} spatial zones, {self.stats['corrections']} corrections"
-            })
+            progress_callback(
+                "contextual.complete",
+                {
+                    "total": len(enhanced_log),
+                    "unique": unique_count,
+                    "raw": raw_count,
+                    "spatial_zones": self.stats['spatial_zones_detected'],
+                    "corrections": self.stats['corrections'],
+                    "llm_calls": self.stats['llm_calls'],
+                    "message": (
+                        f"✓ {self.stats['spatial_zones_detected']}/{unique_count} spatial zones, "
+                        f"{self.stats['corrections']} corrections"
+                    ),
+                },
+            )
         
-        logger.info(f"✓ {self.stats['spatial_zones_detected']}/{len(entities)} spatial zones detected")
-        logger.info(f"✓ {self.stats['corrections']} classifications corrected")
-        logger.info(f"✓ {self.stats['llm_calls']} LLM calls (vs {len(entities)} objects)")
+        logger.info(
+            "✓ %d/%d spatial zones detected",
+            self.stats['spatial_zones_detected'],
+            unique_count,
+        )
+        logger.info("✓ %d classifications corrected", self.stats['corrections'])
+        logger.info(
+            "✓ %d LLM calls (reviewed %d unique entities)",
+            self.stats['llm_calls'],
+            len(entities_needing_llm),
+        )
+        logger.info("✓ %d contextual cache hits", self.stats['cache_hits'])
         
         return enhanced_log
     
     def _convert_to_entities(self, perception_log: List[Dict]) -> List[Dict]:
-        """Convert perception objects to entity format"""
-        entities = []
-        for i, obj in enumerate(perception_log):
-            entity = {
-                'entity_id': obj.get('temp_id') or f"entity_{i:06d}",
-                'class': obj.get('object_class', 'unknown'),
-                'description': obj.get('rich_description', ''),
-                'confidence': obj.get('detection_confidence', 0.0),
-                'bbox': self._normalize_bbox(obj.get('bounding_box', [])),
-                'frame': obj.get('frame_number', 0),
-                'timestamp': obj.get('timestamp', 0.0),
-                '_original': obj,
-            }
-            entities.append(entity)
+        """Aggregate perception observations into unique entity profiles."""
+        entity_map: Dict[str, Dict[str, Any]] = {}
+
+        for index, obj in enumerate(perception_log):
+            raw_id = (
+                obj.get('entity_id')
+                or obj.get('track_id')
+                or obj.get('temp_id')
+                or obj.get('object_id')
+                or f"entity_{index:06d}"
+            )
+            entity_id = str(raw_id)
+
+            normalized_bbox = self._normalize_bbox(obj.get('bounding_box', []))
+            description = obj.get('rich_description') or ''
+            confidence = float(obj.get('detection_confidence', 0.0))
+            frame = int(obj.get('frame_number', 0))
+            timestamp = float(obj.get('timestamp', 0.0))
+
+            entry = entity_map.get(entity_id)
+            if entry is None:
+                entry = {
+                    'entity_id': entity_id,
+                    'class': obj.get('object_class', 'unknown'),
+                    'description': description,
+                    'description_samples': [description] if description else [],
+                    'confidence': confidence,
+                    'bbox': normalized_bbox,
+                    'frame': frame,
+                    'timestamp': timestamp,
+                    'first_timestamp': timestamp,
+                    'first_frame': frame,
+                    'observations': [obj],
+                    'observation_count': 1,
+                    'frames': {frame},
+                    'timestamps': [timestamp],
+                    '_original': obj,
+                    'needs_llm': False,
+                    'scene_type': obj.get('scene_type', 'unknown') or 'unknown',
+                    'spatial_zone': obj.get('spatial_zone', 'unknown') or 'unknown',
+                    'spatial_zone_confidence': float(obj.get('spatial_zone_confidence', 0.0)),
+                    'spatial_reasoning': obj.get('spatial_reasoning', []) or [],
+                    'x_position': obj.get('x_position', 'unknown') or 'unknown',
+                    'y_position': obj.get('y_position', 'unknown') or 'unknown',
+                }
+                entity_map[entity_id] = entry
+            else:
+                entry['observations'].append(obj)
+                entry['observation_count'] += 1
+                entry['frames'].add(frame)
+                entry['timestamps'].append(timestamp)
+                if description:
+                    entry['description_samples'].append(description)
+                    if not entry.get('description'):
+                        entry['description'] = description
+                # Prefer the highest confidence observation as canonical
+                if confidence > entry['confidence']:
+                    entry['confidence'] = confidence
+                    entry['description'] = description or entry.get('description', '')
+                    entry['bbox'] = normalized_bbox
+                    if obj.get('object_class'):
+                        entry['class'] = obj.get('object_class')
+                    entry['frame'] = frame
+                    entry['timestamp'] = timestamp
+                    entry['_original'] = obj
+                    entry['scene_type'] = obj.get('scene_type', entry.get('scene_type', 'unknown')) or entry.get('scene_type', 'unknown')
+                    entry['spatial_zone'] = obj.get('spatial_zone', entry.get('spatial_zone', 'unknown')) or entry.get('spatial_zone', 'unknown')
+                    entry['spatial_zone_confidence'] = float(obj.get('spatial_zone_confidence', entry.get('spatial_zone_confidence', 0.0)))
+                    entry['spatial_reasoning'] = obj.get('spatial_reasoning', entry.get('spatial_reasoning', [])) or entry.get('spatial_reasoning', [])
+                    entry['x_position'] = obj.get('x_position', entry.get('x_position', 'unknown')) or entry.get('x_position', 'unknown')
+                    entry['y_position'] = obj.get('y_position', entry.get('y_position', 'unknown')) or entry.get('y_position', 'unknown')
+                if timestamp < entry.get('first_timestamp', timestamp):
+                    entry['first_timestamp'] = timestamp
+                    entry['first_frame'] = frame
+
+            entry['_cache_key'] = self._build_cache_key(entry)
+
+        entities = sorted(
+            entity_map.values(),
+            key=lambda e: (e.get('first_timestamp', e.get('timestamp', 0.0)), e['entity_id']),
+        )
         return entities
+
+    def _build_cache_key(self, entity: Dict) -> str:
+        """Create a stable cache key for an entity description."""
+        parts = [
+            (entity.get('class') or '').strip().lower(),
+            (entity.get('description') or '').strip().lower(),
+            (entity.get('scene_type') or '').strip().lower(),
+            (entity.get('spatial_zone') or '').strip().lower(),
+        ]
+        return "|".join(parts)
+
+    def _maybe_apply_cache(self, entity: Dict) -> bool:
+        """Apply cached LLM correction if available."""
+        if not getattr(self.config.correction, 'enable_llm_cache', True):
+            return False
+
+        cache_key = entity.get('_cache_key') or self._build_cache_key(entity)
+        if not cache_key:
+            return False
+
+        cached = self._correction_cache.get(cache_key)
+        if cached is None:
+            return False
+
+        # move to the end (LRU)
+        self._correction_cache.move_to_end(cache_key)
+        entity['needs_llm'] = False
+
+        corrected_class = cached.get('corrected_class')
+        if corrected_class:
+            entity['corrected_class'] = corrected_class
+            entity['correction_confidence'] = cached.get('correction_confidence', 0.5)
+            entity['correction_reason'] = cached.get('correction_reason', 'cached')
+            self.stats['corrections'] += 1
+
+        self.stats['cache_hits'] += 1
+        return True
+
+    def _store_cache_entry(self, entity: Dict, result: Dict[str, Any]) -> None:
+        if not getattr(self.config.correction, 'enable_llm_cache', True):
+            return
+
+        cache_key = entity.get('_cache_key') or self._build_cache_key(entity)
+        if not cache_key:
+            return
+
+        payload = {
+            'corrected_class': result.get('corrected_class'),
+            'correction_confidence': result.get('confidence', 0.5),
+            'correction_reason': result.get('reason', 'llm'),
+        }
+
+        self._correction_cache[cache_key] = payload
+        self._correction_cache.move_to_end(cache_key)
+
+        max_cache = getattr(self.config.correction, 'llm_cache_size', 256)
+        while len(self._correction_cache) > max_cache > 0:
+            self._correction_cache.popitem(last=False)
+
+    def _apply_object_result(self, entity: Dict, obj_result: Dict[str, Any], source: str) -> None:
+        corrected_class = obj_result.get('corrected_class')
+        if corrected_class:
+            entity['corrected_class'] = corrected_class
+            entity['correction_confidence'] = obj_result.get('confidence', 0.5)
+            entity['correction_reason'] = obj_result.get('reason', source)
+            entity['needs_llm'] = False
+            self.stats['corrections'] += 1
+        else:
+            entity['needs_llm'] = False
+
+        self._store_cache_entry(entity, obj_result)
+
+    def _apply_batch_result(self, frame_entities: List[Dict], result: Dict[str, Any], source: str) -> None:
+        objects = result.get('objects', []) if isinstance(result, dict) else []
+        for index, entity in enumerate(frame_entities):
+            obj_result = objects[index] if index < len(objects) else {}
+            self._apply_object_result(entity, obj_result, source=source)
     
     def _normalize_bbox(self, bbox: Any) -> Dict:
         """Normalize bbox to dict format"""
@@ -145,13 +343,13 @@ class ContextualEngine:
     
     def _apply_heuristics(self, entities: List[Dict]) -> List[Dict]:
         """Apply fast heuristics without LLM"""
-        self.stats['objects_processed'] = len(entities)
-        
+        self.stats['unique_entities'] = len(entities)
+
         # Infer scene type using shared heuristics
         scene_type = infer_scene_type(
             entity.get('class', '') for entity in entities if entity.get('class')
         )
-        
+
         for entity in entities:
             # Calculate spatial zone
             zone = calculate_spatial_zone_from_bbox(entity['bbox'])
@@ -161,19 +359,32 @@ class ContextualEngine:
             entity['x_position'] = zone.x_position
             entity['y_position'] = zone.y_position
             entity['scene_type'] = scene_type
-            
+
             if zone.zone_type != 'unknown':
                 self.stats['spatial_zones_detected'] += 1
-            
+
+            # Update cache key with enriched context
+            entity['_cache_key'] = self._build_cache_key(entity)
+
         self._apply_class_corrections(entities)
 
         for entity in entities:
+            entity['_cache_key'] = self._build_cache_key(entity)
+
+            if self._maybe_apply_cache(entity):
+                continue
+
             force_llm = bool(entity.pop('_force_llm', False))
             if entity.get('corrected_class'):
                 entity['needs_llm'] = False
-            else:
-                entity['needs_llm'] = force_llm or self._needs_llm_analysis(entity)
-        
+                continue
+
+            if force_llm:
+                entity['needs_llm'] = True
+                continue
+
+            entity['needs_llm'] = self._needs_llm_analysis(entity)
+
         return entities
 
     def _apply_class_corrections(self, entities: List[Dict]) -> None:
@@ -238,6 +449,10 @@ class ContextualEngine:
         description = (entity.get('description') or '').lower()
         confidence = float(entity.get('confidence', 0.0))
 
+        conf_floor = getattr(self.config.correction, 'llm_confidence_floor', 0.45)
+        conf_ceiling = getattr(self.config.correction, 'llm_confidence_ceiling', 0.65)
+        high_confidence_threshold = getattr(self.config.detection, 'high_confidence_threshold', conf_ceiling)
+
         if not yolo_class:
             return False
 
@@ -245,11 +460,11 @@ class ContextualEngine:
             return False
         
         # High confidence + matching description = skip
-        if confidence > 0.7 and yolo_class in description:
+        if confidence >= conf_ceiling and yolo_class and yolo_class in description:
             return False
 
         # High confidence with synonym mention
-        if confidence > 0.7 and self.corrector:
+        if confidence >= conf_ceiling and self.corrector:
             synonym_map = {
                 'tv': ['monitor', 'screen', 'display'],
                 'laptop': ['computer', 'notebook'],
@@ -264,7 +479,7 @@ class ContextualEngine:
             'person', 'chair', 'laptop', 'book', 'cup', 'bottle',
             'bed', 'couch', 'keyboard', 'clock'
         }
-        if yolo_class in clear_objects and confidence > 0.6:
+        if yolo_class in clear_objects and confidence >= high_confidence_threshold:
             return False
         
         # Known problematic YOLO classes
@@ -275,61 +490,118 @@ class ContextualEngine:
             return True
         
         # Low confidence or mismatch
-        if confidence < 0.5 or (yolo_class not in description and confidence < 0.7):
+        if confidence <= conf_floor:
+            return True
+
+        if yolo_class not in description and confidence < conf_ceiling:
             return True
         
         return False
     
-    def _batch_llm_analysis(self, entities: List[Dict]):
+    def _batch_llm_analysis(self, entities: List[Dict], progress_callback=None):
         """Batch LLM analysis by frame"""
-        if not self.model_manager:
+        if not self.model_manager or not entities:
             return
         
         # Group by frame
-        frame_groups = defaultdict(list)
+        frame_groups: Dict[int, List[Dict]] = {}
         for entity in entities:
-            frame_groups[entity['frame']].append(entity)
+            frame_groups.setdefault(entity['frame'], []).append(entity)
         
         logger.info(f"Batching {len(entities)} entities into {len(frame_groups)} frames")
         
+        total_entities = len(entities)
+        processed_entities = 0
+        total_batches = len(frame_groups)
+
         # Process each frame
-        for frame_num, frame_entities in frame_groups.items():
+        for batch_index, (frame_num, frame_entities) in enumerate(sorted(frame_groups.items()), start=1):
             cache_key = f"frame_{frame_num}"
             
             if cache_key in self.scene_cache:
+                cached_result = self.scene_cache[cache_key]
                 self.stats['cache_hits'] += 1
+                self._apply_batch_result(frame_entities, cached_result, source='cache_frame')
+                processed_entities += len(frame_entities)
+                if progress_callback:
+                    progress_callback(
+                        "contextual.llm.cache_hit",
+                        {
+                            "frame": frame_num,
+                            "processed": processed_entities,
+                            "total": total_entities,
+                            "batch": batch_index,
+                            "batches": total_batches,
+                            "message": (
+                                f"Frame {frame_num} served from cache "
+                                f"({processed_entities}/{total_entities} unique entities)"
+                            ),
+                        },
+                    )
                 continue
             
             try:
+                if progress_callback:
+                    progress_callback(
+                        "contextual.llm.batch",
+                        {
+                            "frame": frame_num,
+                            "processed": processed_entities,
+                            "total": total_entities,
+                            "batch": batch_index,
+                            "batches": total_batches,
+                            "message": (
+                                f"Batch {batch_index}/{total_batches}: "
+                                f"sending {len(frame_entities)} unique entities to LLM"
+                            ),
+                        },
+                    )
+
                 result = self._call_llm_batch(frame_entities)
                 self.stats['llm_calls'] += 1
                 
                 # Apply results
-                for i, entity in enumerate(frame_entities):
-                    if i < len(result.get('objects', [])):
-                        obj_result = result['objects'][i]
-                        if obj_result.get('corrected_class'):
-                            entity['corrected_class'] = obj_result['corrected_class']
-                            entity['correction_confidence'] = obj_result.get('confidence', 0.5)
-                            entity['correction_reason'] = obj_result.get('reason', '')
-                            self.stats['corrections'] += 1
+                self._apply_batch_result(frame_entities, result, source='llm')
                 
                 self.scene_cache[cache_key] = result
+                processed_entities += len(frame_entities)
+
+                if progress_callback:
+                    progress_callback(
+                        "contextual.llm.batch",
+                        {
+                            "frame": frame_num,
+                            "processed": processed_entities,
+                            "total": total_entities,
+                            "batch": batch_index,
+                            "batches": total_batches,
+                            "message": (
+                                f"Batch {batch_index}/{total_batches}: "
+                                f"resolved {processed_entities}/{total_entities} unique entities"
+                            ),
+                        },
+                    )
             except Exception as e:
                 logger.error(f"Batch LLM failed for frame {frame_num}: {e}")
     
     def _call_llm_batch(self, entities: List[Dict]) -> Dict:
         """Call LLM for batch of objects"""
-        objects_summary = [
-            {
-                'index': i,
-                'yolo_class': e['class'],
-                'description': e['description'][:200],
-                'confidence': e['confidence'],
-                'spatial_zone': e.get('spatial_zone', 'unknown'),
-            }
-            for i, e in enumerate(entities)
-        ]
+        objects_summary = []
+        for i, entity in enumerate(entities):
+            description = entity.get('description') or next(
+                (sample for sample in entity.get('description_samples', []) if sample),
+                '',
+            )
+            objects_summary.append(
+                {
+                    'index': i,
+                    'yolo_class': entity.get('class', 'unknown'),
+                    'description': description[:200],
+                    'confidence': entity.get('confidence', 0.0),
+                    'spatial_zone': entity.get('spatial_zone', 'unknown'),
+                    'observations': entity.get('observation_count', 1),
+                }
+            )
         
         model_manager = self.model_manager
         if model_manager is None:

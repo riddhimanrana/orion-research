@@ -788,27 +788,61 @@ def run_pipeline(
                 contextual_progress_tracker = {"heuristics": False, "llm": False}
                 
                 def handle_contextual_progress(event: str, payload: Dict[str, Any]) -> None:
-                    if not ui.enabled:
-                        return
+                    message: Optional[str] = None
+
                     if event == "contextual.start":
                         total = payload.get("total", 0)
-                        ui.set_stage_status("contextual", f"Processing {total} observations")
+                        display_message = (
+                            f"Processing {total} observations"
+                            if total
+                            else "Processing contextual corrections"
+                        )
+                        message = display_message
+                        if ui.enabled:
+                            ui.set_stage_status("contextual", display_message)
                     elif event == "contextual.heuristics":
-                        msg = payload.get("message", "Computing spatial context")
-                        if not contextual_progress_tracker["heuristics"]:
-                            ui.advance_stage("contextual", current=1)
-                            contextual_progress_tracker["heuristics"] = True
-                        ui.set_stage_status("contextual", msg)
+                        display_message = payload.get("message") or "Computing spatial context"
+                        message = display_message
+                        if ui.enabled:
+                            if not contextual_progress_tracker["heuristics"]:
+                                ui.advance_stage("contextual", current=1)
+                                contextual_progress_tracker["heuristics"] = True
+                            ui.set_stage_status("contextual", display_message)
                     elif event == "contextual.llm":
                         total = payload.get("total", 0)
-                        msg = payload.get("message", f"Correcting {total} classifications")
-                        if not contextual_progress_tracker["llm"]:
-                            ui.advance_stage("contextual", current=2)
-                            contextual_progress_tracker["llm"] = True
-                        ui.set_stage_status("contextual", msg)
+                        default_message = (
+                            f"Correcting {total} classifications"
+                            if total
+                            else "Running LLM corrections"
+                        )
+                        display_message = payload.get("message") or default_message
+                        message = display_message
+                        if ui.enabled:
+                            if not contextual_progress_tracker["llm"]:
+                                ui.advance_stage("contextual", current=2)
+                                contextual_progress_tracker["llm"] = True
+                            ui.set_stage_status("contextual", display_message)
+                    elif event == "contextual.llm.batch":
+                        display_message = payload.get("message") or "Processing LLM batch"
+                        message = display_message
+                        if ui.enabled:
+                            ui.set_stage_status("contextual", display_message)
+                    elif event == "contextual.llm.cache_hit":
+                        display_message = payload.get("message") or "Served contextual batch from cache"
+                        message = display_message
+                        if ui.enabled:
+                            ui.set_stage_status("contextual", display_message)
                     elif event == "contextual.complete":
-                        msg = payload.get("message", "Complete")
-                        ui.set_stage_status("contextual", msg)
+                        display_message = payload.get("message") or "Contextual analysis complete"
+                        message = display_message
+                        if ui.enabled:
+                            ui.set_stage_status("contextual", display_message)
+
+                    if message and not ui.enabled:
+                        display_message = message
+                        if not display_message.startswith("["):
+                            display_message = f"[contextual] {display_message}"
+                        console.log(display_message)
                 
                 try:
                     model_manager = RuntimeModelManager.get_instance()
@@ -841,59 +875,72 @@ def run_pipeline(
                 semantic_progress_state = {"last_index": 0, "total": None}
 
                 def handle_semantic_progress(event: str, payload: Dict[str, Any]) -> None:
-                    if not ui.enabled:
-                        return
+                    message: Optional[str] = None
 
                     if event == "semantic.start":
                         total = payload.get("total")
                         if total:
                             semantic_progress_state["total"] = total
-                            ui.set_stage_total("semantic", total)
-                        ui.set_stage_status(
-                            "semantic",
-                            payload.get(
-                                "message",
-                                f"Initializing semantic uplift ({part2_config} mode)",
-                            ),
-                        )
+                            if ui.enabled:
+                                ui.set_stage_total("semantic", total)
+                        display_message = payload.get("message") or f"Initializing semantic uplift ({part2_config} mode)"
+                        message = display_message
+                        if ui.enabled:
+                            ui.set_stage_status("semantic", display_message)
                     elif event == "semantic.step.start":
                         index = payload.get("index")
                         total = payload.get("total") or semantic_progress_state.get("total")
-                        message = payload.get("message") or payload.get("name", "Semantic step")
+                        base_message = payload.get("message") or payload.get("name", "Semantic step")
                         if index and total:
-                            ui.set_stage_status("semantic", f"Step {index}/{total}: {message}")
+                            display_message = f"Step {index}/{total}: {base_message}"
                         else:
-                            ui.set_stage_status("semantic", message)
+                            display_message = base_message
+                        message = display_message
+                        if ui.enabled:
+                            ui.set_stage_status("semantic", display_message)
                     elif event == "semantic.progress":
                         message = payload.get("message")
-                        if message:
+                        if ui.enabled and message:
                             ui.set_stage_status("semantic", message)
                     elif event == "semantic.step.complete":
                         index = payload.get("index")
                         total = payload.get("total") or semantic_progress_state.get("total")
                         detail = payload.get("detail")
                         name = payload.get("name", "Semantic step")
-                        message = detail or f"{name} complete"
+                        display_message = detail if detail is not None else f"{name} complete"
+                        message = display_message
                         last_index = semantic_progress_state.get("last_index", 0)
                         if index is not None and index > last_index:
                             semantic_progress_state["last_index"] = index
-                            ui.advance_stage("semantic", current=index, message=message)
-                        else:
-                            ui.set_stage_status("semantic", message)
+                            if ui.enabled:
+                                ui.advance_stage("semantic", current=index, message=display_message)
+                        elif ui.enabled:
+                            ui.set_stage_status("semantic", display_message)
                         if total and semantic_progress_state.get("total") is None:
                             semantic_progress_state["total"] = total
-                            ui.set_stage_total("semantic", total)
+                            if ui.enabled:
+                                ui.set_stage_total("semantic", total)
                     elif event == "semantic.warning":
-                        message = payload.get("message")
-                        if message:
-                            ui.set_stage_status("semantic", f"⚠ {message}")
+                        warning_message = payload.get("message")
+                        if warning_message:
+                            message = f"⚠ {warning_message}"
+                            if ui.enabled:
+                                ui.set_stage_status("semantic", message)
                     elif event == "semantic.error":
-                        message = payload.get("message", "Semantic uplift error")
-                        ui.fail_stage("semantic", message)
+                        error_message = payload.get("message") or "Semantic uplift error"
+                        message = error_message
+                        if ui.enabled:
+                            ui.fail_stage("semantic", error_message)
                     elif event == "semantic.complete":
                         message = payload.get("message")
-                        if message:
+                        if ui.enabled and message:
                             ui.set_stage_status("semantic", message)
+
+                    if message and not ui.enabled:
+                        display_message = message
+                        if not display_message.startswith("["):
+                            display_message = f"[semantic] {display_message}"
+                        console.log(display_message)
 
                 start_time = time.time()
                 try:
@@ -970,6 +1017,90 @@ def run_pipeline(
 
         console.print()
         console.print(summary)
+
+        if uplift_results.get("success"):
+            metrics_tables: List[Table] = []
+
+            composer_rows: List[Tuple[str, str]] = []
+            windows_total = uplift_results.get("llm_windows_total", 0)
+            windows_composed = uplift_results.get("llm_windows_composed", 0)
+            windows_skipped = uplift_results.get("llm_windows_skipped", 0)
+            windows_capped = uplift_results.get("llm_windows_capped", 0)
+            template_windows = uplift_results.get("llm_windows_template", 0)
+            cached_windows = uplift_results.get("llm_windows_cached", 0)
+            pruned_signal = uplift_results.get("llm_windows_pruned_signal", 0)
+            llm_batches = uplift_results.get("llm_batches", 0)
+            llm_calls = uplift_results.get("llm_calls", 0)
+            llm_latency = uplift_results.get("llm_latency_seconds", 0.0)
+
+            if windows_total:
+                composed_display = f"{windows_composed}/{windows_total}"
+                if windows_skipped:
+                    composed_display += f" (skipped {windows_skipped})"
+                composer_rows.append(("Windows composed", composed_display))
+            if windows_capped:
+                composer_rows.append(("Windows capped", str(windows_capped)))
+            if template_windows:
+                composer_rows.append(("Template fallbacks", str(template_windows)))
+            if cached_windows:
+                composer_rows.append(("Cache hits", str(cached_windows)))
+            if pruned_signal:
+                composer_rows.append(("Pruned low-signal", str(pruned_signal)))
+            if llm_batches:
+                composer_rows.append(("LLM batches", str(llm_batches)))
+            if llm_calls:
+                composer_rows.append(("LLM calls", str(llm_calls)))
+            if llm_latency:
+                composer_rows.append(("LLM latency (s)", f"{llm_latency:.2f}"))
+
+            if composer_rows:
+                composer_table = Table(title="Event Composition", box=box.ROUNDED, expand=False)
+                composer_table.add_column("Metric", style="cyan", no_wrap=True)
+                composer_table.add_column("Value", style="green")
+                for label, value in composer_rows:
+                    composer_table.add_row(label, value)
+                metrics_tables.append(composer_table)
+
+            causal_rows: List[Tuple[str, str]] = []
+            causal_windows = uplift_results.get("windows_with_causal", 0)
+            causal_links = uplift_results.get("num_causal_links", 0)
+            causal_calls = uplift_results.get("causal_engine_calls", 0)
+            causal_pairs = uplift_results.get("causal_candidate_pairs", 0)
+            causal_retained = uplift_results.get("causal_pairs_retained", 0)
+
+            if causal_links:
+                causal_rows.append(("Causal links", str(causal_links)))
+            if causal_windows:
+                causal_rows.append(("Windows with causal signals", str(causal_windows)))
+            if causal_calls:
+                causal_rows.append(("Causal engine calls", str(causal_calls)))
+            if causal_pairs:
+                retained_display = str(causal_retained)
+                causal_rows.append(("Candidate pairs", f"{causal_pairs} (retained {retained_display})"))
+
+            if causal_rows:
+                causal_table = Table(title="Causal Scoring", box=box.ROUNDED, expand=False)
+                causal_table.add_column("Metric", style="cyan", no_wrap=True)
+                causal_table.add_column("Value", style="green")
+                for label, value in causal_rows:
+                    causal_table.add_row(label, value)
+                metrics_tables.append(causal_table)
+
+            graph_stats = uplift_results.get("graph_stats") or {}
+            if graph_stats:
+                graph_table = Table(title="Graph Writes", box=box.ROUNDED, expand=False)
+                graph_table.add_column("Metric", style="cyan", no_wrap=True)
+                graph_table.add_column("Value", style="green")
+                for key, value in sorted(graph_stats.items()):
+                    label = key.replace("_", " ").title()
+                    graph_table.add_row(label, str(value))
+                metrics_tables.append(graph_table)
+
+            if metrics_tables:
+                console.print()
+                for table in metrics_tables:
+                    console.print(table)
+
         console.print(
             Panel(
                 f"Pipeline complete\n[bold]{output_file}[/bold]",

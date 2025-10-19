@@ -21,11 +21,11 @@ class OrionSettings:
 
     neo4j_uri: str = "neo4j://127.0.0.1:7687"
     neo4j_user: str = "neo4j"
-    neo4j_password: str = "orion123"
+    neo4j_password: str = ""  # Must be set via ORION_NEO4J_PASSWORD env var
     runtime_backend: str = "auto"
     qa_model: str = "gemma3:4b"
     embedding_backend: str = "auto"
-    embedding_model: str = "embeddinggemma"
+    embedding_model: str = "openai/clip-vit-base-patch32"
     config_version: int = CURRENT_VERSION
 
     _KEY_ALIASES: ClassVar[Dict[str, str]] = {
@@ -221,9 +221,33 @@ class OrionSettings:
             raise SettingsError("Neo4j URI cannot be empty.")
         if not self.neo4j_user:
             raise SettingsError("Neo4j user cannot be empty.")
-        if not self.neo4j_password:
-            raise SettingsError("Neo4j password cannot be empty.")
+
+        # Check for password from environment variable or stored value
+        password = self._get_neo4j_password()
+        if not password:
+            raise SettingsError(
+                "Neo4j password must be set via ORION_NEO4J_PASSWORD environment variable "
+                "or stored in config file."
+            )
+
         if not self.qa_model:
             raise SettingsError("QA model cannot be empty.")
         if not self.embedding_model:
             raise SettingsError("Embedding model cannot be empty.")
+
+    def _get_neo4j_password(self) -> str:
+        """Get Neo4j password from environment variable or stored value."""
+        # Priority: environment variable > stored value
+        env_password = os.getenv("ORION_NEO4J_PASSWORD")
+        if env_password:
+            return env_password
+        return self.neo4j_password
+
+    def get_neo4j_password(self) -> str:
+        """Get the actual Neo4j password for use in connections."""
+        password = self._get_neo4j_password()
+        if not password:
+            raise SettingsError(
+                "Neo4j password not configured. Set ORION_NEO4J_PASSWORD environment variable."
+            )
+        return password

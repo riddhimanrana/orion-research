@@ -15,7 +15,7 @@ except ImportError:  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_OLLAMA_MODEL = "embeddinggemma"
+DEFAULT_OLLAMA_MODEL = "openai/clip-vit-base-patch32"
 DEFAULT_SENTENCE_MODEL = "all-MiniLM-L6-v2"
 
 _ASSET_MANAGER: Optional[AssetManager] = None
@@ -229,5 +229,5 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n✗ Error: {e}")
         print("\nTo use EmbeddingGemma:")
-        print("  1. ollama pull embeddinggemma")
+        print("  1. ollama pull openai/clip-vit-base-patch32")
         print("  2. pip install ollama")
