@@ -3,7 +3,7 @@
 Knowledge Graph Visualization and Exploration
 ==============================================
 
-Interactive tool to visualize and explore the enhanced knowledge graph.
+Interactive tool to visualize and explore the knowledge graph.
 
 Features:
 - View graph statistics

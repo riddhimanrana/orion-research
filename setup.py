@@ -17,10 +17,9 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="Riddhiman Rana",
-    author_email="riddhimanrana@example.com",
+    author_email="riddhiman.rana@gmail.com",
     url="https://github.com/riddhimanrana/orion-research",
-    packages=find_packages(where="src"),
-    package_dir={"": "src"},
+    packages=find_packages(exclude=["tests", "scripts", "docs"]),
     python_requires=">=3.10",
     install_requires=[
         # Core dependencies

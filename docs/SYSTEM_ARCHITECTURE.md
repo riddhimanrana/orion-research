@@ -1,4 +1,4 @@
-# Orion Enhanced System Architecture
+# Orion System Architecture
 
 ## Complete Pipeline Overview
 
@@ -27,7 +27,7 @@
                                       │
                                       ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  PHASE 2: ENHANCED KNOWLEDGE GRAPH (enhanced_knowledge_graph.py)            │
+│  PHASE 2: KNOWLEDGE GRAPH (orion/knowledge_graph.py)                        │
 │  ────────────────────────────────────────────────────────────────────────   │
 │                                                                               │
 │  ┌────────────────────┐  ┌─────────────────┐  ┌──────────────────────┐    │
@@ -48,7 +48,7 @@
                                       │
                                       ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  PHASE 3: ENHANCED VIDEO QA (enhanced_video_qa.py)                          │
+│  PHASE 3: VIDEO QA (orion/video_qa/)                                       │
 │  ────────────────────────────────────────────────────────────────────────   │
 │                                                                               │
 │  User Question: "What type of room is this?"                                 │
@@ -367,7 +367,7 @@ Accuracy:                High (grounded in graph)
 │                 │                                           │
 │                 ▼                                           │
 │  ┌──────────────────────────────────────────────┐          │
-│  │  EnhancedKnowledgeGraphBuilder               │          │
+│  │  KnowledgeGraphBuilder                      │          │
 │  │   ├── SceneClassifier                        │          │
 │  │   ├── SpatialAnalyzer                        │          │
 │  │   ├── ContextualEmbeddingGenerator           │          │
@@ -376,7 +376,7 @@ Accuracy:                High (grounded in graph)
 │                 │                                           │
 │                 ▼                                           │
 │  ┌──────────────────────────────────────────────┐          │
-│  │  EnhancedVideoQASystem                       │          │
+│  │  VideoQASystem (unified)                     │          │
 │  │   ├── Question Classifier                    │          │
 │  │   ├── Context Retriever                      │          │
 │  │   └── LLM Answer Generator                   │          │

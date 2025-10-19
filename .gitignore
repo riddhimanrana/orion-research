@@ -1,6 +1,7 @@
 # orion research
 /ml-fastvlm
 /models
+src/
 yolo11m.pt
 *.pt
 pipeline.log

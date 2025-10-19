@@ -211,7 +211,8 @@
         1883
       ],
       "original_yolo_class": "backpack",
-      "correction_confidence": 0.8
+      "correction_confidence": 0.8,
+      "canonical_label": "bag"
     },
     {
       "id": "unique_00000",
@@ -502,7 +503,8 @@
         1792
       ],
       "original_yolo_class": "hair drier",
-      "correction_confidence": 0.8
+      "correction_confidence": 0.8,
+      "canonical_label": "knob"
     },
     {
       "id": "unique_00001",
@@ -640,7 +642,8 @@
       "state_changes": 0,
       "frame_numbers": [
         588
-      ]
+      ],
+      "canonical_label": "star"
     },
     {
       "id": "unique_00004",
@@ -714,7 +717,8 @@
         1211
       ],
       "original_yolo_class": "suitcase",
-      "correction_confidence": 0.7
+      "correction_confidence": 0.7,
+      "canonical_label": "tire"
     },
     {
       "id": "entity_0008",
@@ -736,12 +740,36 @@
     }
   ],
   "class_corrections": {
-    "entity_0010": "tv \u2192 laptop",
-    "entity_0002": "keyboard \u2192 laptop",
-    "entity_0004": "backpack \u2192 bench",
-    "entity_0000": "hair drier \u2192 bottle",
-    "unique_00005": "person \u2192 book",
-    "unique_00008": "suitcase \u2192 car"
+    "entity_0010": [
+      "tv",
+      "laptop",
+      0.8
+    ],
+    "entity_0002": [
+      "keyboard",
+      "laptop",
+      0.8
+    ],
+    "entity_0004": [
+      "backpack",
+      "bench",
+      0.8
+    ],
+    "entity_0000": [
+      "hair drier",
+      "bottle",
+      0.8
+    ],
+    "unique_00005": [
+      "person",
+      "book",
+      0.8
+    ],
+    "unique_00008": [
+      "suitcase",
+      "car",
+      0.7
+    ]
   },
   "num_corrections": 6
 }

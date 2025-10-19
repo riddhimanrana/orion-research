@@ -5,7 +5,7 @@ Test script for LLM-enhanced contextual understanding.
 This demonstrates how the system now:
 1. Correctly identifies "hair drier" as "door_knob" using full context
 2. Detects actions like "opening door", "entering room"
-3. Generates rich narratives with spatial awareness
+3. Generates rich narratives with spatial awarenesson how that
 4. Uses LLM reasoning to explain its decisions
 
 Usage:
@@ -62,7 +62,7 @@ def main():
     
     # Initialize model manager
     logger.info("🔧 Initializing model manager...")
-    model_manager = ModelManager(config)
+    model_manager = ModelManager.get_instance()
     
     # Load tracking results
     logger.info(f"📂 Loading tracking results from {args.results}...")
@@ -88,7 +88,7 @@ def main():
         corrector = ClassCorrector(config, model_manager)
         corrected_entities, correction_map = corrector.apply_corrections(
             entities,
-            use_llm=False,  # Fast mode
+            use_llm=config.correction.use_llm,  # default False
         )
         
         if correction_map:

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Test Enhanced Knowledge Graph and QA System
-============================================
+Test Knowledge Graph and QA System
+==================================
 
 This script:
 1. Loads tracking results
-2. Builds enhanced knowledge graph with scene/spatial/causal reasoning
-3. Tests the enhanced QA system
+2. Builds the knowledge graph with scene/spatial/causal reasoning
+3. Tests the QA system
 
 Usage:
     python scripts/test_enhanced_kg.py [tracking_results.json]
@@ -21,8 +21,8 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.orion.enhanced_knowledge_graph import EnhancedKnowledgeGraphBuilder
-from src.orion.enhanced_video_qa import EnhancedVideoQASystem
+from orion.knowledge_graph import KnowledgeGraphBuilder
+from orion.video_qa import VideoQASystem
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,9 +32,9 @@ logger = logging.getLogger(__name__)
 
 
 def test_knowledge_graph(results_path: Path):
-    """Build enhanced knowledge graph from tracking results"""
+    """Build the knowledge graph from tracking results"""
     logger.info("="*80)
-    logger.info("TESTING ENHANCED KNOWLEDGE GRAPH")
+    logger.info("TESTING KNOWLEDGE GRAPH")
     logger.info("="*80)
     
     # Load tracking results
@@ -52,9 +52,9 @@ def test_knowledge_graph(results_path: Path):
     logger.info(f"Total observations: {tracking_results['total_observations']}")
     logger.info(f"Efficiency ratio: {tracking_results['efficiency_ratio']:.2f}x")
     
-    # Build enhanced knowledge graph
-    logger.info("\nBuilding enhanced knowledge graph...")
-    builder = EnhancedKnowledgeGraphBuilder()
+    # Build knowledge graph
+    logger.info("\nBuilding knowledge graph...")
+    builder = KnowledgeGraphBuilder()
     
     try:
         stats = builder.build_from_tracking_results(tracking_results)
@@ -77,12 +77,12 @@ def test_knowledge_graph(results_path: Path):
 
 
 def test_qa_system():
-    """Test the enhanced QA system with sample questions"""
+    """Test the QA system with sample questions"""
     logger.info("\n" + "="*80)
-    logger.info("TESTING ENHANCED QA SYSTEM")
+    logger.info("TESTING QA SYSTEM")
     logger.info("="*80)
     
-    qa = EnhancedVideoQASystem()
+    qa = VideoQASystem()
     
     if not qa.connect():
         logger.error("✗ Cannot connect to Neo4j")
@@ -116,7 +116,7 @@ def test_qa_system():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Test enhanced knowledge graph and QA system"
+    description="Test knowledge graph and QA system"
     )
     parser.add_argument(
         "results_file",
@@ -158,8 +158,7 @@ def main():
         logger.info("\n" + "="*80)
         logger.info("Starting interactive QA session...")
         logger.info("="*80 + "\n")
-        
-        qa = EnhancedVideoQASystem()
+        qa = VideoQASystem()
         qa.start_interactive_session()
     
     logger.info("\n✓ All tests completed successfully!")

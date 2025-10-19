@@ -6,7 +6,7 @@ Complete Enhanced Pipeline Test
 Full pipeline with:
 1. Load tracking results
 2. Apply class corrections
-3. Build enhanced knowledge graph
+3. Build knowledge graph
 4. Test QA system with corrected classes
 
 Usage:
@@ -22,9 +22,9 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.orion.class_correction import correct_tracking_results
-from src.orion.enhanced_knowledge_graph import EnhancedKnowledgeGraphBuilder
-from src.orion.enhanced_video_qa import EnhancedVideoQASystem
+from orion.class_correction import correct_tracking_results
+from orion.knowledge_graph import KnowledgeGraphBuilder
+from orion.video_qa import VideoQASystem
 
 logging.basicConfig(
     level=logging.INFO,
@@ -105,8 +105,8 @@ def main():
     
     # Step 2: Build Knowledge Graph
     if not args.skip_kg:
-        logger.info("\n[STEP 2/3] Building Enhanced Knowledge Graph...")
-        builder = EnhancedKnowledgeGraphBuilder()
+        logger.info("\n[STEP 2/3] Building Knowledge Graph...")
+        builder = KnowledgeGraphBuilder()
         
         try:
             stats = builder.build_from_tracking_results(tracking_results)
@@ -130,7 +130,7 @@ def main():
     # Step 3: Test QA
     logger.info("\n[STEP 3/3] Testing QA System...")
     
-    qa = EnhancedVideoQASystem()
+    qa = VideoQASystem()
     if not qa.connect():
         logger.error("✗ Cannot connect to Neo4j")
         return 1
@@ -158,8 +158,7 @@ def main():
         logger.info("\n" + "="*80)
         logger.info("Starting Interactive QA Session...")
         logger.info("="*80 + "\n")
-        
-        qa = EnhancedVideoQASystem()
+        qa = VideoQASystem()
         qa.start_interactive_session()
     
     logger.info("\n" + "="*80)

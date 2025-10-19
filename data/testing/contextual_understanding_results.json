@@ -1,298 +1,214 @@
 {
   "extended_objects": [
     {
-      "object_id": "",
-      "object_type": "light_switch",
-      "confidence": 0.9,
+      "object_id": "entity_0010",
+      "object_type": "laptop",
+      "confidence": 0.8,
       "spatial_zone": "unknown",
       "reasoning": [
-        "The visual description mentions 'knob,' which is a common term for light switches.",
-        "The scene context includes a kitchen, where light switches are frequently found near walls.",
-        "The temporal context (frames 0, 0) suggests a static image, consistent with a typical scene featuring a light switch.",
-        "The YOLO class 'tv' is irrelevant to the description of a light switch.",
-        "The scene context includes 'cabinet_door', 'drawer_handle', 'stove_knob', suggesting a variety of hardware, but 'light_switch' is a more specific and relevant description given the overall context."
+        "Description: The image depicts a computer monitor displaying a software interface. The monito..."
       ]
     },
     {
-      "object_id": "",
-      "object_type": "keyboard",
-      "confidence": 0.95,
+      "object_id": "entity_0002",
+      "object_type": "laptop",
+      "confidence": 0.8,
       "spatial_zone": "unknown",
       "reasoning": [
-        "The visual description explicitly states 'computer keyboard', indicating the primary object is a keyboard.",
-        "The temporal context indicates the object appears in frame (0, 0), suggesting it's the main subject of the scene.",
-        "The scene context includes 'keyboard' and 'mouse', further supporting the identification as a keyboard.",
-        "The YOLO class 'keyboard' aligns perfectly with the detailed visual description."
+        "Description: The image depicts a close-up view of a computer keyboard. The keyboard is predom..."
       ]
     },
     {
-      "object_id": "",
+      "object_id": "entity_0005",
       "object_type": "mouse",
-      "confidence": 0.95,
+      "confidence": 0.6,
       "spatial_zone": "unknown",
       "reasoning": [
-        "The YOLO class is 'mouse', which is the most direct and relevant identification.",
-        "The visual description explicitly states 'mouse' and describes its key features: 'black, elongated object with a smooth, curved surface' and a 'small, white, flower-like object'.",
-        "The scene context includes 'keyboard, mouse, cell phone', strongly suggesting a common office or computer accessory.",
-        "The temporal context of 'appears in frames (0, 0)' and 'static' indicates a still image, consistent with a typical computer peripheral.",
-        "The scene context of a 'kitchen' is unusual for a mouse, but the object's description and the YOLO class strongly suggest it's a computer mouse."
+        "Description: The image depicts a black, elongated object with a smooth, curved surface. The o..."
       ]
     },
     {
-      "object_id": "",
-      "object_type": "door_knob",
-      "confidence": 0.75,
+      "object_id": "entity_0003",
+      "object_type": "cell phone",
+      "confidence": 0.6,
       "spatial_zone": "unknown",
       "reasoning": [
-        "The description identifies the object as a 'knob', which strongly suggests a door handle or similar hardware.",
-        "The YOLO detection is a low confidence (0.31) and flagged as a likely false positive, implying the system is struggling to accurately identify this object.",
-        "The scene context includes a kitchen, which often contains doors and door hardware.",
-        "Given the 'knob' descriptor and the kitchen environment, a door knob is the most plausible interpretation.",
-        "The static position and lack of interaction further reduce the likelihood of it being a functional appliance control."
+        "Description: Low confidence detection (conf=0.31). Likely false positive - skipped descriptio..."
       ]
     },
     {
-      "object_id": "",
+      "object_id": "entity_0006",
       "object_type": "bottle",
-      "confidence": 0.95,
+      "confidence": 0.6,
       "spatial_zone": "unknown",
       "reasoning": [
-        "The visual description explicitly states 'bottle', indicating the primary object is a bottle.",
-        "The scene context includes 'bottle' as a typical object, further supporting this interpretation.",
-        "The YOLO detection of 'bottle' aligns with the visual description and scene context.",
-        "Temporal context of appearing in frames (0, 0) suggests a static object, consistent with a bottle.",
-        "Spatial context is unknown, but the object's appearance (cylindrical, dark) is consistent with a common household item."
+        "Description: The image appears to be a close-up of a dark, possibly black, cylindrical object..."
       ]
     },
     {
-      "object_id": "",
-      "object_type": "backpack",
-      "confidence": 0.95,
+      "object_id": "entity_0004",
+      "object_type": "bag",
+      "confidence": 0.8,
       "spatial_zone": "unknown",
       "reasoning": [
-        "The visual description explicitly states 'backpack', confirming the object's identity.",
-        "The scene context includes 'backpack' and 'suitcase', indicating a likely travel or storage scenario.",
-        "The temporal context of 'appears in frames (0, 0)' suggests a static scene where the backpack is the primary subject.",
-        "The YOLO class 'backpack' aligns perfectly with the provided visual description and contextual information."
+        "Canonical label inferred from description: bag",
+        "Description: The image depicts a black backpack placed on a white surface, which appears to b..."
       ]
     },
     {
-      "object_id": "",
-      "object_type": "door_knob",
-      "confidence": 0.85,
+      "object_id": "unique_00000",
+      "object_type": "cat",
+      "confidence": 0.6,
       "spatial_zone": "unknown",
       "reasoning": [
-        "The description mentions 'knob', which is a primary characteristic of door hardware.",
-        "The object appears in frame (0, 0), suggesting a wall-mounted object, consistent with a door knob.",
-        "The scene is a kitchen, and door knobs are frequently found in kitchen doorways.",
-        "The low confidence YOLO detection (0.37) suggests a potential false positive, but the 'knob' descriptor strongly points towards a door hardware element.",
-        "Considering the lack of nearby objects and static position, it's less likely to be a component of an appliance."
+        "Description: Low confidence detection (conf=0.37). Likely false positive - skipped descriptio..."
       ]
     },
     {
-      "object_id": "",
-      "object_type": "door_knob",
-      "confidence": 0.75,
+      "object_id": "entity_0001",
+      "object_type": "refrigerator",
+      "confidence": 0.6,
       "spatial_zone": "unknown",
       "reasoning": [
-        "The description identifies the object as a 'knob', which is a common characteristic of door hardware.",
-        "Given the 'refrigerator' YOLO detection has low confidence and is skipped, the scene context of a kitchen suggests a likely presence of doors and knobs.",
-        "The temporal context of appearing in frames (0, 0) and static position indicates a stationary object, consistent with a door knob.",
-        "The scene context of a kitchen includes many doors and associated hardware.",
-        "Considering the low confidence YOLO detection and the absence of other appliances, a door knob is the most plausible interpretation."
+        "Description: Low confidence detection (conf=0.34). Likely false positive - skipped descriptio..."
       ]
     },
     {
-      "object_id": "",
-      "object_type": "cabinet_door",
-      "confidence": 0.9,
+      "object_id": "entity_0011",
+      "object_type": "person",
+      "confidence": 0.6,
       "spatial_zone": "unknown",
       "reasoning": [
-        "The visual description explicitly mentions a 'spiral-bound book', which is typically found within a 'cabinet' or 'drawer' for storage.",
-        "The scene context includes a 'kitchen' with typical objects like 'refrigerator' and 'cabinet', strongly suggesting the book is stored in a cabinet.",
-        "The book's placement (held open by a hand) is a common interaction with objects stored in cabinets.",
-        "While the YOLO class is 'person', this is irrelevant to the object's identity.",
-        "The 'blurred background' doesn't provide information about other object types."
+        "Description: The image depicts a spiral-bound book with a light blue cover. The book is held ..."
       ]
     },
     {
-      "object_id": "",
-      "object_type": "door_knob",
-      "confidence": 0.9,
+      "object_id": "entity_0000",
+      "object_type": "knob",
+      "confidence": 0.8,
       "spatial_zone": "unknown",
       "reasoning": [
-        "The visual description explicitly mentions 'knob' and describes features consistent with a door knob \u2013 a circular shape, a slightly curved top, and visible screws.",
-        "The scene context is a kitchen, which is a common location for doors and door hardware.",
-        "The blurry image doesn't provide enough information to confidently classify it as a stove knob or other appliance component.",
-        "The YOLO detection of 'hair drier' is irrelevant to the description and context, indicating a misclassification.",
-        "The 'screws or fasteners' strongly suggest it's a mechanical component attached to a surface, consistent with a door knob."
+        "Canonical label inferred from description: knob",
+        "Description: The image depicts a close-up view of a metallic object, which appears to be a kn..."
       ]
     },
     {
-      "object_id": "",
-      "object_type": "door_knob",
-      "confidence": 0.75,
+      "object_id": "unique_00001",
+      "object_type": "truck",
+      "confidence": 0.6,
       "spatial_zone": "unknown",
       "reasoning": [
-        "The detection is low confidence (0.26) and likely a false positive, but the description includes 'knob', which strongly suggests a handle.",
-        "The scene is a kitchen, and kitchen doors typically have knobs.",
-        "Given the static position and lack of nearby objects, it's unlikely to be a component of an appliance.",
-        "The YOLO class 'truck' is irrelevant and a strong indicator of a misdetection."
+        "Description: Low confidence detection (conf=0.26). Likely false positive - skipped descriptio..."
       ]
     },
     {
-      "object_id": "",
-      "object_type": "cabinet_door",
-      "confidence": 0.75,
+      "object_id": "entity_0009",
+      "object_type": "bed",
+      "confidence": 0.6,
       "spatial_zone": "unknown",
       "reasoning": [
-        "The image depicts a hand holding a notebook, suggesting a workspace or study area (scene context).",
-        "The visual description includes a 'light blue cover with a spiral binding,' which is consistent with the design of a cabinet door.",
-        "The 'textured, metallic surface' could represent the material of a cabinet door.",
-        "The presence of a notebook and the described setting strongly suggest an environment where a cabinet would be present for storage."
+        "Description: The image depicts a close-up view of a person's hand holding a spiral-bound note..."
       ]
     },
     {
-      "object_id": "",
+      "object_id": "entity_0007",
       "object_type": "chair",
-      "confidence": 0.95,
+      "confidence": 0.6,
       "spatial_zone": "unknown",
       "reasoning": [
-        "The visual description explicitly identifies the object as a 'chair' (red leather armchair).",
-        "The scene context includes 'chair' multiple times, indicating a common object in the kitchen.",
-        "The temporal context (appears in frames (0, 0)) suggests a static observation, consistent with a typical chair in a room.",
-        "The YOLO class 'chair' aligns directly with the visual description and overall context."
+        "Description: The image depicts a red leather armchair with a curved backrest and armrests. Th..."
       ]
     },
     {
-      "object_id": "",
+      "object_id": "unique_00002",
       "object_type": "potted plant",
-      "confidence": 0.75,
+      "confidence": 0.6,
       "spatial_zone": "unknown",
       "reasoning": [
-        "The YOLO detection is for a 'potted plant', and the description indicates low confidence, suggesting a potential false positive.",
-        "The scene context includes 'potted plant' multiple times, indicating a common element in the kitchen.",
-        "Given the low confidence, it\u2019s likely a genuine potted plant, although the detection is unreliable.",
-        "The appearance in frames (0, 0) and static movement suggest it\u2019s a stationary object within the scene."
+        "Description: Low confidence detection (conf=0.40). Likely false positive - skipped descriptio..."
       ]
     },
     {
-      "object_id": "",
-      "object_type": "potted plant",
-      "confidence": 0.95,
+      "object_id": "unique_00003",
+      "object_type": "star",
+      "confidence": 0.6,
       "spatial_zone": "unknown",
       "reasoning": [
-        "The YOLO detection is 'potted plant', and the visual description explicitly details a 'white, star-shaped object'. This aligns perfectly.",
-        "The scene context includes multiple 'potted plant' objects, suggesting a common decorative element within the kitchen environment.",
-        "The description's emphasis on a 'white, star-shaped object' strongly suggests a decorative plant pot or a stylized plant within a pot.",
-        "The static nature and temporal context (appearing in frame 0) don't provide conflicting information."
+        "Canonical label inferred from description: star",
+        "Description: The image appears to be a photograph of a white, star-shaped object with a centr..."
       ]
     },
     {
-      "object_id": "",
-      "object_type": "door_knob",
-      "confidence": 0.75,
+      "object_id": "unique_00004",
+      "object_type": "handbag",
+      "confidence": 0.6,
       "spatial_zone": "unknown",
       "reasoning": [
-        "The description identifies the object as a 'knob', which strongly suggests a door handle or knob.",
-        "The object appears in frame (0, 0), which is a common location for a wall-mounted object in a scene.",
-        "The scene is a kitchen, and door knobs are frequently found in kitchens as access points.",
-        "The low confidence YOLO detection (0.28) suggests a potential false positive. However, given the 'knob' descriptor and the kitchen context, a door knob remains the most plausible interpretation.",
-        "Considering the other objects in the scene (tv, refrigerator, person), a door knob is a reasonable object to find in a typical room."
+        "Description: Low confidence detection (conf=0.28). Likely false positive - skipped descriptio..."
       ]
     },
     {
-      "object_id": "",
-      "object_type": "door_knob",
-      "confidence": 0.95,
+      "object_id": "unique_00005",
+      "object_type": "book",
+      "confidence": 0.8,
       "spatial_zone": "unknown",
       "reasoning": [
-        "The description includes the term 'knob,' which is a standard descriptor for a door handle.",
-        "The scene is described as a 'bedroom,' and door knobs are frequently found on bedroom doors.",
-        "The 'knob' is located at an unknown position, which is consistent with a door knob's placement on a wall.",
-        "Considering the 'bed' and 'room type' (bedroom), a door knob is the most plausible object based on the scene context.",
-        "The YOLO class 'person' is irrelevant to the identification of a door knob."
+        "Description: The image depicts a scene with a dog lying on a bed. The dog appears to be sleep..."
       ]
     },
     {
-      "object_id": "",
-      "object_type": "door_knob",
-      "confidence": 0.75,
+      "object_id": "unique_00006",
+      "object_type": "bird",
+      "confidence": 0.6,
       "spatial_zone": "unknown",
       "reasoning": [
-        "The description identifies the object as a 'knob', which strongly suggests a door hardware component.",
-        "The object appears in the first frame (0, 0) of the video, and the scene is a kitchen, a common location for doors and door knobs.",
-        "Given the low confidence YOLO detection (0.25), it\u2019s likely a false positive. However, the presence of 'knob' is a strong indicator.",
-        "The scene contains other objects like a refrigerator and a person, suggesting a domestic environment where doors are prevalent."
+        "Description: Low confidence detection (conf=0.25). Likely false positive - skipped descriptio..."
       ]
     },
     {
-      "object_id": "",
-      "object_type": "door_knob",
-      "confidence": 0.75,
-      "spatial_zone": "unknown",
-      "reasoning": [
-        "The detection is low confidence (0.35), suggesting a high probability of a false positive.",
-        "The description identifies the object as a 'knob', which strongly suggests a door hardware component.",
-        "The scene is a kitchen, and kitchen doors are common. Door knobs are typical elements in this environment.",
-        "Given the low confidence, it's more likely a standard door knob rather than a suitcase, considering the other objects present (tv, refrigerator, person).",
-        "The static position and lack of interaction further reduce the likelihood of it being a moving object like a suitcase."
-      ]
-    },
-    {
-      "object_id": "",
+      "object_id": "unique_00007",
       "object_type": "suitcase",
-      "confidence": 0.75,
+      "confidence": 0.6,
       "spatial_zone": "unknown",
       "reasoning": [
-        "The visual description explicitly states 'suitcase'.",
-        "The scene context includes multiple suitcases, indicating a common object within the environment.",
-        "The YOLO detection of 'suitcase' aligns with the visual description.",
-        "Temporal context (static) doesn't contradict the presence of a suitcase.",
-        "Spatial context (unknown location) doesn't provide information to rule out a suitcase."
+        "Description: Low confidence detection (conf=0.35). Likely false positive - skipped descriptio..."
       ]
     },
     {
-      "object_id": "",
-      "object_type": "toilet",
-      "confidence": 0.95,
+      "object_id": "unique_00008",
+      "object_type": "tire",
+      "confidence": 0.7,
       "spatial_zone": "unknown",
       "reasoning": [
-        "The visual description explicitly states 'toilet', describing a white rectangular object with a smooth surface.",
-        "The scene context lists 'toilet' as a typical object in a kitchen.",
-        "The YOLO detection of 'toilet' provides strong initial evidence.",
-        "The spatial context, while unknown, doesn't contradict the visual description of a toilet."
+        "Canonical label inferred from description: tire",
+        "Description: The image depicts a close-up view of a car tire. The tire is black and appears t..."
+      ]
+    },
+    {
+      "object_id": "entity_0008",
+      "object_type": "toilet",
+      "confidence": 0.6,
+      "spatial_zone": "unknown",
+      "reasoning": [
+        "Description: The image appears to be a close-up of a white rectangular object with a smooth s..."
       ]
     }
   ],
   "detected_actions": [
     {
-      "action_type": "opening_door",
+      "action_type": "OPENS_DOOR",
       "confidence": 0.6,
       "frame_range": [
         0,
         0
       ],
       "reasoning": [
-        "Required objects present: {'door_knob', 'person'}",
-        "Spatial configuration matches pattern",
-        "TODO: Full temporal analysis"
-      ]
-    },
-    {
-      "action_type": "turning_on_light",
-      "confidence": 0.6,
-      "frame_range": [
-        0,
-        0
-      ],
-      "reasoning": [
-        "Required objects present: {'light_switch', 'person'}",
-        "Spatial configuration matches pattern",
-        "TODO: Full temporal analysis"
+        "Person present",
+        "Knob/handle detected (canonical)",
+        "Door-like object present (refrigerator/oven/door)"
       ]
     }
   ],
-  "narrative_text": "\u201cThe video depicts a person entering a room, evidenced by the action of opening a door with a door knob. Immediately following, the individual activates a light switch, illuminating the space which includes a laptop and a black backpack resting on a table. The scene suggests a workspace, with the keyboard and mouse positioned for use alongside the computer monitor, indicating a focused activity is underway.\u201d",
-  "summary": "Scene contains 21 identified objects. 2 actions detected. 2 narrative events."
+  "narrative_text": "The scene contains: bed, bench, bird, book, bottle, car, cat, cell phone. Fine-grained items detected: bag, knob, star, tire. Possible actions: OPENS_DOOR.",
+  "summary": "Objects: 21; Actions: 1; Canonical terms: bag, knob, star, tire."
 }

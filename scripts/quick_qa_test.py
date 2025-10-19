@@ -8,14 +8,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.orion.enhanced_video_qa import EnhancedVideoQASystem
+from orion.video_qa import VideoQASystem
 
 def main():
     print("="*80)
-    print("ENHANCED VIDEO QA - QUICK TEST")
+    print("VIDEO QA - QUICK TEST")
     print("="*80)
     
-    qa = EnhancedVideoQASystem()
+    qa = VideoQASystem()
     
     if not qa.connect():
         print("❌ Cannot connect to Neo4j")

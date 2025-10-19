@@ -2,11 +2,8 @@
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-package-dir = {"" = "src"}
-
 [tool.setuptools.packages.find]
-where = ["src"]
+exclude = ["tests*", "scripts*", "docs*", "src*"]
 
 [project]
 name = "orion"
@@ -16,10 +13,9 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
 authors = [
-    {name = "Riddhiman Rana", email = "contact@riddhimanrana.com"},
+    {name = "Riddhiman Rana", email = "riddhiman.rana@gmail.com"},
     {name = "Aryav Semwal", email = "aryavsemwal17@gmail.com"},
     {name = "Yogesh Atluru", email = "yatluru@gmail.com"},
-    {name = "Jason Zhang", email = "jason081031@gmail.com"}
 ]
 keywords = ["research", "orion", "computer-vision", "transformers"]
 dependencies = [
@@ -65,15 +61,28 @@ exclude = [
     "__pycache__",
     "build",
     "dist",
-    "src/orion/llava",
-    "src/orion/llava.egg-info",
+    "src",
+    "src/**",
+    "docs/_archive",
+    "docs/_archive/**",
 ]
 
 [tool.isort]
 profile = "black"
 skip = [
-    "src/orion/llava",
-    "src/orion/llava.egg-info",
+    "src",
+    "src/**",
+    "docs/_archive",
+    "docs/_archive/**",
     "build",
     "dist",
+]
+
+[tool.ruff]
+line-length = 120
+extend-exclude = [
+    "src",
+    "src/**",
+    "docs/_archive",
+    "docs/_archive/**",
 ]
