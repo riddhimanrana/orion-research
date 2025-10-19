@@ -103,6 +103,11 @@ class Config:
     SCENE_SIMILARITY_THRESHOLD = 0.82  # Cosine threshold for scene similarity links
     SCENE_SIMILARITY_TOP_K = 3  # Max similar scenes per scene
     SCENE_LOCATION_TOP_OBJECTS = 3  # Number of dominant objects to describe a location
+    SCENE_ENABLE_EMBEDDINGS = False  # Disable expensive scene text embeddings by default
+    SCENE_FRAME_STRIDE = 4  # Aggregate frames into ~stride-sized scene segments
+    SCENE_PROGRESS_EVERY = 25  # How often to report scene assembly progress
+    SCENE_LOCATION_GRID_ROWS = 3  # Vertical buckets for spatial signature
+    SCENE_LOCATION_GRID_COLS = 4  # Horizontal buckets for spatial signature
 
     # Temporal Windowing
     TIME_WINDOW_SIZE = 30.0  # Legacy maximum duration for backward compatibility
@@ -423,11 +428,18 @@ class SceneAssembler:
         self._init_embedding_model()
 
     def _init_embedding_model(self) -> None:
+        if not Config.SCENE_ENABLE_EMBEDDINGS:
+            logger.info(
+                "Scene embeddings disabled; skipping embedding model initialization"
+            )
+            return
+
         if not EMBEDDING_MODEL_AVAILABLE or create_embedding_model is None:
             logger.warning(
                 "Scene embeddings unavailable; install embedding backends for richer links."
             )
             return
+
         try:
             self.embedding_model = create_embedding_model(prefer_ollama=True)
             self.embedding_dim = self.embedding_model.get_embedding_dimension()
@@ -455,9 +467,117 @@ class SceneAssembler:
             logger.warning("Scene embedding generation failed: %s", exc)
             return None
 
+    def _compute_location_signature(
+        self, objects: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Compute a stable spatial signature for a collection of objects."""
+
+        if not objects:
+            return {
+                "zone": "unknown",
+                "row": 0,
+                "col": 0,
+                "grid_key": "r0c0",
+                "signature": "unknown|r0c0",
+                "label_hint": "Uncategorized Space",
+                "location_id": "location_unknown_r0c0",
+                "scene_type": None,
+            }
+
+        zones: Counter[str] = Counter()
+        scene_types: Counter[str] = Counter()
+        xs: List[float] = []
+        ys: List[float] = []
+        frame_width: Optional[float] = None
+        frame_height: Optional[float] = None
+
+        for obj in objects:
+            zone = (obj.get("spatial_zone") or "unknown").strip() or "unknown"
+            zones[zone] += 1
+
+            scene_type = obj.get("scene_type")
+            if scene_type:
+                scene_types[scene_type] += 1
+
+            bbox = obj.get("bounding_box") or obj.get("bbox")
+            centroid = obj.get("centroid")
+
+            if bbox and len(bbox) >= 4:
+                x1, y1, x2, y2 = [float(v) for v in bbox[:4]]
+                xs.append((x1 + x2) / 2.0)
+                ys.append((y1 + y2) / 2.0)
+                frame_width = max(frame_width or 0.0, float(obj.get("frame_width", x2)))
+                frame_height = max(frame_height or 0.0, float(obj.get("frame_height", y2)))
+            elif centroid and len(centroid) >= 2:
+                xs.append(float(centroid[0]))
+                ys.append(float(centroid[1]))
+
+        if not xs or not ys:
+            # Fallback to coarse positional hints if centroids missing
+            x_hint = {
+                "left": 0.17,
+                "center": 0.5,
+                "right": 0.83,
+            }
+            y_hint = {
+                "top": 0.17,
+                "middle": 0.5,
+                "bottom": 0.83,
+            }
+            for obj in objects:
+                x_key = str(obj.get("x_position") or "")
+                y_key = str(obj.get("y_position") or "")
+                x_pos = x_hint.get(x_key, 0.5)
+                y_pos = y_hint.get(y_key, 0.5)
+                xs.append(x_pos)
+                ys.append(y_pos)
+            frame_width = frame_width or 1.0
+            frame_height = frame_height or 1.0
+
+        avg_x = sum(xs) / len(xs)
+        avg_y = sum(ys) / len(ys)
+
+        fw = frame_width or 1920.0
+        fh = frame_height or 1080.0
+
+        grid_cols = max(1, Config.SCENE_LOCATION_GRID_COLS)
+        grid_rows = max(1, Config.SCENE_LOCATION_GRID_ROWS)
+
+        col = min(int((avg_x / fw) * grid_cols), grid_cols - 1)
+        row = min(int((avg_y / fh) * grid_rows), grid_rows - 1)
+
+        zone = zones.most_common(1)[0][0] if zones else "unknown"
+        scene_type = scene_types.most_common(1)[0][0] if scene_types else None
+
+        grid_key = f"r{row}c{col}"
+        zone_slug = zone.replace(" ", "_") if zone else "unknown"
+        signature = f"{zone_slug}|{grid_key}"
+        if scene_type and scene_type != "general":
+            signature = f"{signature}|{scene_type}"
+        location_id = f"location_{zone_slug}_{grid_key}"
+
+        label_parts: List[str] = []
+        if zone and zone != "unknown":
+            label_parts.append(zone.replace("_", " ").title())
+        if scene_type and scene_type != "general":
+            label_parts.append(scene_type.replace("_", " ").title())
+        label_hint = " – ".join(label_parts) if label_parts else "Area " + grid_key.upper()
+
+        return {
+            "zone": zone,
+            "row": row,
+            "col": col,
+            "grid_key": grid_key,
+            "signature": signature,
+            "location_id": location_id,
+            "label_hint": label_hint,
+            "scene_type": scene_type,
+        }
+
     def build_scenes(
         self,
         perception_log: List[Dict[str, Any]],
+        progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> Tuple[List[SceneSegment], Dict[str, LocationProfile]]:
         """Aggregate perception objects into scene segments and locations."""
 
@@ -468,15 +588,59 @@ class SceneAssembler:
                 continue
             frames[int(frame_number)].append(obj)
 
+        sorted_frames = sorted(frames.keys())
+        total_frames = len(sorted_frames)
+        if total_frames == 0:
+            return [], {}
+
         scenes: List[SceneSegment] = []
         locations: Dict[str, LocationProfile] = {}
+        chunk: List[Tuple[int, List[Dict[str, Any]]]] = []
+        processed_frames = 0
+        last_progress_emit = 0
 
-        for frame_number in sorted(frames.keys()):
+        def _emit_progress() -> None:
+            nonlocal last_progress_emit
+            if (
+                progress_callback is None
+                or total_frames == 0
+                or processed_frames <= last_progress_emit
+            ):
+                return
+            if (
+                processed_frames - last_progress_emit >= Config.SCENE_PROGRESS_EVERY
+                or processed_frames == total_frames
+            ):
+                progress_callback(processed_frames, total_frames)
+                last_progress_emit = processed_frames
+
+        for frame_number in sorted_frames:
             frame_objects = frames[frame_number]
-            if not frame_objects:
+            processed_frames += 1
+            if frame_objects:
+                chunk.append((frame_number, frame_objects))
+
+            chunk_ready = True
+            if Config.SCENE_FRAME_STRIDE > 1 and chunk:
+                chunk_start = chunk[0][0]
+                chunk_end = chunk[-1][0]
+                chunk_ready = (chunk_end - chunk_start + 1) >= Config.SCENE_FRAME_STRIDE
+
+            is_last_frame = processed_frames == total_frames
+            if not chunk_ready and not is_last_frame:
+                _emit_progress()
                 continue
 
-            timestamps = [float(obj.get("timestamp", 0.0)) for obj in frame_objects]
+            aggregated_objects: List[Dict[str, Any]] = []
+            for _, objs in chunk:
+                aggregated_objects.extend(objs)
+
+            if not aggregated_objects:
+                chunk = []
+                _emit_progress()
+                continue
+
+            timestamps = [float(obj.get("timestamp", 0.0)) for obj in aggregated_objects]
             start_time = min(timestamps) if timestamps else 0.0
             end_time = max(timestamps) if timestamps else start_time
 
@@ -484,7 +648,7 @@ class SceneAssembler:
             raw_classes: List[str] = []
             description_parts: List[str] = []
 
-            for obj in frame_objects:
+            for obj in aggregated_objects:
                 entity_id = obj.get("entity_id")
                 if entity_id:
                     entity_ids.append(entity_id)
@@ -495,18 +659,16 @@ class SceneAssembler:
                     description_parts.append(desc)
                 else:
                     description_parts.append(
-                        f"Observed {obj_class} in frame {frame_number}."
+                        f"Observed {obj_class} near frame {obj.get('frame_number', 'unknown')}"
                     )
 
             description = (
                 " ".join(description_parts).strip()
-                or f"Scene captured at frame {frame_number}."
+                or f"Scene captured near frames {chunk[0][0]}-{chunk[-1][0]}"
             )
-            embedding = self._encode(description)
-            scene_id = f"scene_{frame_number:06d}"
-
-            for obj in frame_objects:
-                obj["scene_id"] = scene_id
+            embedding = (
+                self._encode(description) if Config.SCENE_ENABLE_EMBEDDINGS else None
+            )
 
             unique_entities = sorted(set(entity_ids))
             class_counts = Counter(raw_classes)
@@ -516,32 +678,52 @@ class SceneAssembler:
                     Config.SCENE_LOCATION_TOP_OBJECTS
                 )
             ]
-            signature = (
-                "|".join(dominant_classes) if dominant_classes else "unspecified"
-            )
-            label = (
-                ", ".join(dominant_classes)
-                if dominant_classes
-                else "Uncategorized Space"
-            )
-            signature_hash = hashlib.sha1(signature.encode("utf-8")).hexdigest()[:12]
-            location_id = f"location_{signature_hash}"
+            location_info = self._compute_location_signature(aggregated_objects)
+            location_id = location_info["location_id"]
+            location_signature = location_info["signature"]
+            location_label_hint = location_info["label_hint"]
 
             if location_id not in locations:
+                label_parts: List[str] = []
+                if location_label_hint:
+                    label_parts.append(location_label_hint)
+                if dominant_classes:
+                    label_parts.append(", ".join(dominant_classes))
+                location_label = (
+                    " – ".join(label_parts) if label_parts else "Uncategorized Space"
+                )
                 locations[location_id] = LocationProfile(
                     location_id=location_id,
-                    signature=signature,
-                    label=label,
-                    object_classes=dominant_classes,
+                    signature=location_signature,
+                    label=location_label,
+                    object_classes=list(dominant_classes),
                 )
+            else:
+                existing_profile = locations[location_id]
+                for cls in dominant_classes:
+                    if cls not in existing_profile.object_classes:
+                        existing_profile.object_classes.append(cls)
+
+            scene_start_frame = chunk[0][0]
+            scene_end_frame = chunk[-1][0]
+            scene_suffix = (
+                f"_{scene_end_frame:06d}" if scene_end_frame != scene_start_frame else ""
+            )
+            scene_id = f"scene_{scene_start_frame:06d}{scene_suffix}"
+
             locations[location_id].scene_ids.append(scene_id)
 
-            for obj in frame_objects:
+            for obj in aggregated_objects:
+                obj["scene_id"] = scene_id
                 obj["location_id"] = location_id
+                obj.setdefault("location_zone", location_info["zone"])
+                obj.setdefault("location_grid", location_info["grid_key"])
+                if location_info["scene_type"] and not obj.get("location_scene_type"):
+                    obj["location_scene_type"] = location_info["scene_type"]
 
             scene_segment = SceneSegment(
                 scene_id=scene_id,
-                frame_number=frame_number,
+                frame_number=scene_start_frame,
                 start_timestamp=start_time,
                 end_timestamp=end_time,
                 description=description,
@@ -556,6 +738,9 @@ class SceneAssembler:
                 entity = self.tracker.get_entity(entity_id)
                 if entity is not None:
                     entity.add_scene(scene_id)
+
+            chunk = []
+            _emit_progress()
 
         return scenes, locations
 

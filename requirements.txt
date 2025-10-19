@@ -68,7 +68,9 @@ requests>=2.32.5latex2mathml==3.78.1
 
 httpx>=0.28.1# Editable install with no version control (llava==1.2.2.post1)
 
-httpcore>=1.0.9# -e /Users/riddhiman.rana/Desktop/Coding/orion-research/ml-fastvlm
+httpcore>=1.0.9
+# Local mlx-vlm package (editable install)
+-e ./mlx-vlm
 
 markdown-it-py==4.0.0
 

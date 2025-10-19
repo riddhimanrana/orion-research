@@ -20,6 +20,8 @@ from typing import Dict, List, Optional, Tuple, Any
 from collections import defaultdict
 import json
 
+from .config import OrionConfig
+from .class_correction import ClassCorrector
 from .spatial_utils import SpatialZone, calculate_spatial_zone_from_bbox, infer_scene_type
 
 logger = logging.getLogger(__name__)
@@ -35,8 +37,9 @@ class ContextualEngine:
     """
     
     def __init__(self, config=None, model_manager=None):
-        self.config = config
+        self.config = config or OrionConfig()
         self.model_manager = model_manager
+        self.corrector = ClassCorrector(config=self.config, model_manager=model_manager)
         self.scene_cache = {}  # Cache scene analysis
         self.stats = {
             'objects_processed': 0,
@@ -62,6 +65,14 @@ class ContextualEngine:
         if progress_callback:
             progress_callback("contextual.start", {"total": len(perception_log)})
         
+        self.stats = {
+            'objects_processed': 0,
+            'llm_calls': 0,
+            'cache_hits': 0,
+            'corrections': 0,
+            'spatial_zones_detected': 0,
+        }
+
         if not perception_log:
             return []
         
@@ -154,33 +165,112 @@ class ContextualEngine:
             if zone.zone_type != 'unknown':
                 self.stats['spatial_zones_detected'] += 1
             
-            # Determine if needs LLM
-            entity['needs_llm'] = self._needs_llm_analysis(entity)
+        self._apply_class_corrections(entities)
+
+        for entity in entities:
+            force_llm = bool(entity.pop('_force_llm', False))
+            if entity.get('corrected_class'):
+                entity['needs_llm'] = False
+            else:
+                entity['needs_llm'] = force_llm or self._needs_llm_analysis(entity)
         
         return entities
+
+    def _apply_class_corrections(self, entities: List[Dict]) -> None:
+        """Run deterministic class correction heuristics."""
+        if not self.corrector:
+            return
+
+        enable_canonical = bool(getattr(self.config.correction, "enable_canonical_labels", True))
+
+        for entity in entities:
+            original_class = entity.get('class', '')
+            description = entity.get('description', '')
+            confidence = float(entity.get('confidence', 0.0))
+
+            if not original_class or not description:
+                continue
+
+            try:
+                needs_correction = self.corrector.should_correct(
+                    original_class,
+                    description,
+                    confidence,
+                    clip_verified=False,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Class correction heuristic failed: %s", exc)
+                continue
+
+            canonical_label: Optional[str] = None
+            if enable_canonical:
+                canonical_label = self.corrector._canonical_from_description(description, original_class)  # noqa: SLF001
+                if canonical_label and not entity.get('canonical_label'):
+                    entity['canonical_label'] = canonical_label
+
+            if needs_correction:
+                corrected_class, corr_conf = self.corrector.extract_corrected_class(
+                    original_class,
+                    description,
+                    use_llm=False,
+                )
+
+                if corrected_class and corrected_class != original_class:
+                    entity['corrected_class'] = corrected_class
+                    entity['correction_confidence'] = corr_conf
+                    entity['correction_reason'] = 'rule_based'
+                    entity['original_class'] = original_class
+                    if canonical_label and not entity.get('canonical_label'):
+                        entity['canonical_label'] = canonical_label
+                    self.stats['corrections'] += 1
+                else:
+                    # Flag for LLM follow-up when heuristics cannot finalize
+                    entity['_force_llm'] = True
+            elif canonical_label and canonical_label != original_class:
+                # Canonical label differs from YOLO class: ask LLM to reconcile mapping
+                entity['_force_llm'] = True
     
     
     
     def _needs_llm_analysis(self, entity: Dict) -> bool:
         """Determine if entity needs expensive LLM analysis"""
-        yolo_class = entity.get('class', '').lower()
-        description = entity.get('description', '').lower()
-        confidence = entity.get('confidence', 0.0)
+        yolo_class = (entity.get('class') or '').lower()
+        description = (entity.get('description') or '').lower()
+        confidence = float(entity.get('confidence', 0.0))
+
+        if not yolo_class:
+            return False
+
+        if entity.get('corrected_class'):
+            return False
         
         # High confidence + matching description = skip
         if confidence > 0.7 and yolo_class in description:
             return False
+
+        # High confidence with synonym mention
+        if confidence > 0.7 and self.corrector:
+            synonym_map = {
+                'tv': ['monitor', 'screen', 'display'],
+                'laptop': ['computer', 'notebook'],
+                'cell phone': ['phone', 'smartphone'],
+            }
+            for syn in synonym_map.get(yolo_class, []):
+                if syn in description:
+                    return False
         
         # Unambiguous objects
         clear_objects = {
             'person', 'chair', 'laptop', 'book', 'cup', 'bottle',
-            'bed', 'couch', 'tv', 'keyboard', 'clock'
+            'bed', 'couch', 'keyboard', 'clock'
         }
         if yolo_class in clear_objects and confidence > 0.6:
             return False
         
         # Known problematic YOLO classes
         problematic = {'hair drier', 'cell phone', 'remote', 'potted plant'}
+        if self.corrector:
+            problematic.update(cls.lower() for cls in self.corrector.COMMON_CORRECTIONS.keys())
         if yolo_class in problematic:
             return True
         
@@ -316,6 +406,9 @@ JSON only:"""
             else:
                 enhanced_obj['was_corrected'] = False
             
+            if entity.get('canonical_label'):
+                enhanced_obj['canonical_label'] = entity['canonical_label']
+
             # Ensure entity_id is set
             if not enhanced_obj.get('entity_id'):
                 enhanced_obj['entity_id'] = entity['entity_id']

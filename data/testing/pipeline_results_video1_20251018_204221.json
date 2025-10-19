@@ -1,0 +1,57 @@
+{
+  "video_path": "data/examples/video1.mp4",
+  "timestamp": "20251018_204221",
+  "part1": {
+    "success": true,
+    "duration_seconds": 181.4497561454773,
+    "num_objects": 445,
+    "num_entities": 21,
+    "efficiency": "21.2x",
+    "output_file": "data/testing/perception_log_video1_20251018_204221.json",
+    "mode": "balanced"
+  },
+  "part2": {
+    "success": true,
+    "duration_seconds": 18.43607211112976,
+    "perception_log": "data/testing/perception_log_video1_20251018_204221.json",
+    "mode": "balanced",
+    "num_entities": 49,
+    "num_scenes": 96,
+    "num_locations": 36,
+    "num_scene_similarity_links": 0,
+    "num_state_changes": 0,
+    "num_windows": 0,
+    "num_causal_links": 0,
+    "windows_with_causal": 0,
+    "causal_engine_calls": 0,
+    "causal_candidate_pairs": 0,
+    "causal_pairs_retained": 0,
+    "num_queries": 0,
+    "llm_windows_total": 0,
+    "llm_windows_composed": 0,
+    "llm_windows_skipped": 0,
+    "llm_windows_capped": 0,
+    "llm_calls": 0,
+    "llm_latency_seconds": 0.0,
+    "graph_stats": {
+      "entity_nodes": 49,
+      "event_nodes": 0,
+      "scene_nodes": 96,
+      "location_nodes": 36,
+      "relationships": 443,
+      "entity_scene_relationships": 252,
+      "scene_location_relationships": 96,
+      "scene_transition_relationships": 95,
+      "scene_similarity_relationships": 0
+    }
+  },
+  "success": true,
+  "errors": [],
+  "runtime": "mlx",
+  "contextual": {
+    "success": true,
+    "duration_seconds": 0.03434324264526367,
+    "corrections": 0,
+    "spatial_zones": 445
+  }
+}
