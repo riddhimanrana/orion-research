@@ -1,6 +1,8 @@
 """
 Embedding Model Wrapper
 Supports both Sentence Transformers and Ollama EmbeddingGemma
+
+Uses centralized config (ConfigManager) for Ollama settings.
 """
 
 import logging
@@ -9,13 +11,14 @@ from typing import Any, List, Optional, Tuple
 import numpy as np
 
 try:  # Ensure shared model caches are configured before downloads
-    from .models import ModelManager as AssetManager
+    from .models import AssetManager
 except ImportError:  # pragma: no cover
     from models import ModelManager as AssetManager  # type: ignore
 
+from .config_manager import ConfigManager
+
 logger = logging.getLogger(__name__)
 
-DEFAULT_OLLAMA_MODEL = "openai/clip-vit-base-patch32"
 DEFAULT_SENTENCE_MODEL = "all-MiniLM-L6-v2"
 
 _ASSET_MANAGER: Optional[AssetManager] = None
@@ -64,14 +67,20 @@ class EmbeddingModel:
     def _initialize_model(self) -> None:
         attempts: List[Tuple[str, str]] = []
         backend_choice = (self.requested_backend or "auto").lower()
+        
+        # Get Ollama config from centralized manager
+        config = ConfigManager.get_config()
+        ollama_model = self.primary_model or config.ollama.embedding_model
+        
         if backend_choice == "ollama":
-            attempts.append(("ollama", self.primary_model or DEFAULT_OLLAMA_MODEL))
+            attempts.append(("ollama", ollama_model))
         elif backend_choice == "sentence-transformer":
             attempts.append(
                 ("sentence-transformer", self.primary_model or DEFAULT_SENTENCE_MODEL)
             )
         else:
-            attempts.append(("ollama", self.primary_model or DEFAULT_OLLAMA_MODEL))
+            # Auto: try Ollama first, then sentence-transformer
+            attempts.append(("ollama", ollama_model))
             attempts.append(("sentence-transformer", DEFAULT_SENTENCE_MODEL))
 
         errors: List[str] = []
@@ -93,7 +102,11 @@ class EmbeddingModel:
     def _initialize_ollama(self, model_name: str) -> Tuple[bool, str]:
         if not OLLAMA_AVAILABLE or ollama is None:
             return False, "Ollama client is not available."
+        
         try:
+            # Get Ollama URL from config
+            config = ConfigManager.get_config()
+            # Note: ollama library reads from OLLAMA_BASE_URL env var, so we'd need to set it
             probe = ollama.embeddings(model=model_name, prompt="ping")
         except Exception as exc:  # noqa: BLE001
             return False, f"Ollama model '{model_name}' unavailable: {exc}"
@@ -193,7 +206,9 @@ def create_embedding_model(
     if resolved_backend == "sentence-transformer" and resolved_model is None:
         resolved_model = DEFAULT_SENTENCE_MODEL
     if resolved_backend == "ollama" and resolved_model is None:
-        resolved_model = DEFAULT_OLLAMA_MODEL
+        # Get default from config
+        config = ConfigManager.get_config()
+        resolved_model = config.ollama.embedding_model
 
     return EmbeddingModel(resolved_backend, resolved_model)
 

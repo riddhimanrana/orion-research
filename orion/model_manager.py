@@ -62,7 +62,7 @@ class ModelManager:
         if models_dir is None:
             # Auto-detect models directory
             try:
-                from .models import ModelManager as AssetManager
+                from .models import AssetManager
                 self.asset_manager = AssetManager()
             except ImportError:
                 # Fallback: try from parent directory

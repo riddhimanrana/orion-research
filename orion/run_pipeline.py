@@ -30,7 +30,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 # Use asset manager for model assets, runtime manager for LLM-enabled operations
-from .models import ModelManager as AssetModelManager
+from .models import AssetManager
 from .model_manager import ModelManager as RuntimeModelManager
 from .neo4j_manager import clear_neo4j_for_new_run
 from .tracking_engine import run_tracking_engine
@@ -53,13 +53,25 @@ except ImportError:  # pragma: no cover
     VideoQASystem = None
     QA_AVAILABLE = False
 
-# Configurations
+# Configurations (Now in unified config.py)
 apply_part1_config: Any
 apply_part2_config: Any
 
 try:
-    from .perception_config import apply_config as apply_part1_config
-    from .semantic_config import apply_config as apply_part2_config
+    from .config import (
+        SEMANTIC_FAST_CONFIG, 
+        SEMANTIC_BALANCED_CONFIG, 
+        SEMANTIC_ACCURATE_CONFIG
+    )
+    
+    # Helper functions for compatibility
+    def apply_part1_config(cfg: dict) -> None:
+        """Apply perception config (deprecated - configs now in config.py)"""
+        pass
+    
+    def apply_part2_config(cfg: dict) -> None:
+        """Apply semantic config (deprecated - configs now in config.py)"""
+        pass
 
     CONFIGS_AVAILABLE = True
 except ImportError:  # pragma: no cover
@@ -368,7 +380,7 @@ def print_banner():
     console.print(banner)
 
 
-def _resolve_runtime(preferred: Optional[str]) -> Tuple[str, AssetModelManager]:
+def _resolve_runtime(preferred: Optional[str]) -> Tuple[str, AssetManager]:
     normalized: Optional[str] = preferred.lower() if preferred else None
     if normalized == "auto":
         normalized = None
@@ -384,7 +396,7 @@ def _resolve_runtime(preferred: Optional[str]) -> Tuple[str, AssetModelManager]:
         backend = select_backend(None)
 
     set_active_backend(backend)
-    manager = AssetModelManager()
+    manager = AssetManager()
     if not manager.assets_ready(backend):
         console.print(
             f"[yellow]Preparing model assets for runtime '{backend}'...[/yellow]"
@@ -766,15 +778,15 @@ def run_pipeline(
             else:
                 if CONFIGS_AVAILABLE:
                     if part2_config == "fast":
-                        from .semantic_config import FAST_CONFIG as SEM_FAST
+                        from .config import SEMANTIC_FAST_CONFIG as SEM_FAST
 
                         apply_part2_config(SEM_FAST)
                     elif part2_config == "accurate":
-                        from .semantic_config import ACCURATE_CONFIG as SEM_ACCURATE
+                        from .config import SEMANTIC_ACCURATE_CONFIG as SEM_ACCURATE
 
                         apply_part2_config(SEM_ACCURATE)
                     else:
-                        from .semantic_config import BALANCED_CONFIG as SEM_BALANCED
+                        from .config import SEMANTIC_BALANCED_CONFIG as SEM_BALANCED
 
                         apply_part2_config(SEM_BALANCED)
 

@@ -42,7 +42,7 @@ except ImportError:
     from config import OrionConfig  # type: ignore
 
 try:
-    from .models import ModelManager as AssetManager
+    from .models import AssetManager
 except ImportError:
     from models import ModelManager as AssetManager  # type: ignore
 

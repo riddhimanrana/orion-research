@@ -1,5 +1,5 @@
 """Model management utilities for Orion."""
 
-from .manager import ModelAsset, ModelManager
+from .asset_manager import AssetManager, ModelAsset
 
-__all__ = ["ModelAsset", "ModelManager"]
+__all__ = ["AssetManager", "ModelAsset"]

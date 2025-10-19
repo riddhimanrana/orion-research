@@ -36,7 +36,7 @@ class ModelAsset:
     description: Optional[str] = None
 
 
-class ModelManager:
+class AssetManager:
     """Coordinate model downloads, caching, and environment settings for Orion."""
 
     def __init__(self, cache_dir: Optional[Path] = None):

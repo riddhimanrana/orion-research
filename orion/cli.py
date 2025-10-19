@@ -13,7 +13,7 @@ from rich.console import Console, Group
 from rich.table import Table
 from rich.text import Text
 
-from .models import ModelManager
+from .models import AssetManager
 from .runtime import select_backend, set_active_backend
 from .settings import OrionSettings, SettingsError
 
@@ -34,13 +34,13 @@ def _import_video_qa() -> Any:
         return None
 
 
-def _prepare_runtime(requested: Optional[str]) -> Tuple[str, ModelManager]:
+def _prepare_runtime(requested: Optional[str]) -> Tuple[str, AssetManager]:
     with console.status(
         "[dim]Selecting runtime backend...[/dim]", spinner="dots"
     ) as status:
         backend = select_backend(requested)
         set_active_backend(backend)
-        manager = ModelManager()
+        manager = AssetManager()
 
         if manager.assets_ready(backend):
             status.update(f"[green]Runtime '{backend}' ready.[/green]")
