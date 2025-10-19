@@ -279,7 +279,13 @@ For more help: orion <command> --help
 
     subparsers.add_parser("models", help="Show model information")
     subparsers.add_parser("modes", help="Show processing modes")
-    subparsers.add_parser("status", help="Show system and database status")
+    
+    # Enhanced status command
+    status_parser = subparsers.add_parser(
+        "status",
+        help="Comprehensive system and service status check"
+    )
+    
     index_parser = subparsers.add_parser("index", help="Create vector indexes and backfill embeddings")
     
     # Benchmark evaluation command
@@ -475,37 +481,10 @@ def main(argv: list[str] | None = None) -> None:
         show_modes()
 
     elif args.command == "status":
-        from .neo4j_manager import Neo4jManager
-        from .vector_indexing import ENTITY_INDEX, SCENE_INDEX
-
-        mgr = Neo4jManager(
-            settings.neo4j_uri, settings.neo4j_user, settings.get_neo4j_password()
-        )
-        if not mgr.connect():
-            console.print("[red]Cannot connect to Neo4j.[/red]")
-            return
-        stats = mgr.get_stats()
-        status_table = Table(title="Neo4j Status", box=box.ROUNDED)
-        status_table.add_column("Metric", style="cyan")
-        status_table.add_column("Value", style="green")
-        status_table.add_row("Nodes", str(stats.get("nodes", 0)))
-        status_table.add_row("Relationships", str(stats.get("relationships", 0)))
-        console.print(status_table)
-
-        # Quick index check
-        try:
-            with mgr.driver.session() as session:  # type: ignore[union-attr]
-                res = session.run("CALL db.indexes() YIELD name, type RETURN name, type")
-                rows = res.data()
-                idx_table = Table(title="Indexes", box=box.ROUNDED)
-                idx_table.add_column("Name", style="yellow")
-                idx_table.add_column("Type", style="magenta")
-                for r in rows:
-                    idx_table.add_row(str(r.get("name")), str(r.get("type")))
-                console.print(idx_table)
-        except Exception as e:
-            console.print(f"[dim]Index list unavailable: {e}[/dim]")
-        mgr.close()
+        from .auto_config import status_command
+        
+        # Show comprehensive status including services and database
+        status_command(args)
 
     elif args.command == "index":
         from .vector_indexing import backfill_embeddings
@@ -564,6 +543,59 @@ def main(argv: list[str] | None = None) -> None:
             runner.close()
 
     elif args.command == "init":
+        console.print("\n[bold cyan]🚀 Orion Initialization[/bold cyan]\n")
+        
+        # Step 1: Check services (integrated from setup_command)
+        console.print("[bold]Step 1: Detecting services...[/bold]\n")
+        from .auto_config import AutoConfiguration
+        config = AutoConfiguration()
+        results = config.detect_all_services()
+        
+        neo4j_ok, neo4j_msg = results["neo4j"]
+        ollama_ok, ollama_msg, _ = results["ollama"]
+        docker_ok, docker_msg = results["docker"]
+        
+        status_table = Table(title="Service Status", box=box.ROUNDED)
+        status_table.add_column("Service", style="cyan")
+        status_table.add_column("Status", style="green")
+        status_table.add_column("Details", style="yellow")
+        
+        status_table.add_row(
+            "Neo4j",
+            "[green]✓ Running[/green]" if neo4j_ok else "[red]✗ Not available[/red]",
+            neo4j_msg
+        )
+        status_table.add_row(
+            "Ollama",
+            "[green]✓ Running[/green]" if ollama_ok else "[red]✗ Not available[/red]",
+            ollama_msg
+        )
+        status_table.add_row(
+            "Docker",
+            "[green]✓ Available[/green]" if docker_ok else "[yellow]⚠ Not available[/yellow]",
+            docker_msg
+        )
+        
+        console.print(status_table)
+        
+        # Step 2: Auto-start services if needed
+        if not (neo4j_ok and ollama_ok):
+            if docker_ok:
+                console.print("\n[bold]Step 2: Starting services with Docker...[/bold]\n")
+                if config.auto_setup_with_docker():
+                    console.print("[green]✓ All services started successfully![/green]\n")
+                else:
+                    console.print("[yellow]⚠ Some services may still be starting...[/yellow]\n")
+            else:
+                console.print("\n[bold yellow]Step 2: Manual service startup required[/bold yellow]\n")
+                commands = config.suggest_setup_docker()
+                console.print("[bold]To start Neo4j:[/bold]")
+                console.print(f"[dim]{commands['neo4j']}[/dim]\n")
+                console.print("[bold]To start Ollama:[/bold]")
+                console.print(f"[dim]{commands['ollama']}[/dim]\n")
+        
+        # Step 3: Download models and configure environment
+        console.print("[bold]Step 3: Preparing runtime and downloading models...[/bold]\n")
         try:
             backend, manager = _prepare_runtime(
                 args.runtime or settings.runtime_backend
@@ -574,8 +606,7 @@ def main(argv: list[str] | None = None) -> None:
         console.print(f"[green]Runtime '{backend}' assets are ready.[/green]")
 
         # Print setup summary with correct model paths
-        # (Table imported at module level)
-        summary_table = Table(title="Setup Summary", box=box.ROUNDED)
+        summary_table = Table(title="Model Assets", box=box.ROUNDED)
         summary_table.add_column("Component", style="cyan", no_wrap=True)
         summary_table.add_column("Status", style="green", justify="center")
         summary_table.add_column("Details", style="magenta")
@@ -589,16 +620,17 @@ def main(argv: list[str] | None = None) -> None:
         fastvlm_path = manager.get_asset_path(fastvlm_asset_name) if fastvlm_asset_name in manager._manifest else "Not found"
         summary_table.add_row("FastVLM-0.5B", "✓" if Path(fastvlm_path).exists() else "✗", str(fastvlm_path))
 
-        # Show Gemma3:4b
-        summary_table.add_row("gemma3:4b", "✓", "Installed")
-        summary_table.add_row("CLIP (OpenAI)", "✓", "Installed")
+        # Show Gemma3:4b and CLIP
+        summary_table.add_row("gemma3:4b", "✓", "Available")
+        summary_table.add_row("CLIP (OpenAI)", "✓", "Available")
 
         console.print(summary_table)
 
+        # Step 4: Run interactive initialization script
         init_script = Path(__file__).resolve().parents[1] / "scripts" / "init.py"
         if init_script.exists():
-            console.print("\n[bold cyan]Running initialization...[/bold cyan]\n")
-            console.print(f"[dim]python {init_script}[/dim]")
+            console.print("\n[bold]Step 4: Running interactive setup...[/bold]\n")
+            console.print(f"[dim]python {init_script}[/dim]\n")
             import subprocess
 
             subprocess.run([sys.executable, str(init_script)], check=False)
