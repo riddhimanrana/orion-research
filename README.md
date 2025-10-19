@@ -31,26 +31,50 @@ orion qa
 
 ## Pre-Installation Requirements
 
-Before starting, install these tools:
+**REQUIRED** - Install these first (in order):
 
-1. **Conda** - For Python environment management
-   - [Download Miniconda](https://docs.conda.io/projects/miniconda/en/latest/) (recommended, minimal)
-   - Or [Anaconda](https://www.anaconda.com/download) (full version)
-   - Verify: `conda --version`
+### 1. Conda - Python Environment Manager
 
-2. **Git** - To clone the repository
-   - macOS: `brew install git`
-   - Linux: `sudo apt-get install git`
-   - Windows: [Download Git](https://git-scm.com/)
-   - Verify: `git --version`
+Conda isolates Orion from your system Python. Install one:
 
-3. **Docker** (optional but recommended)
-   - Makes Neo4j/Ollama setup automatic
-   - [Install Docker Desktop](https://www.docker.com/products/docker-desktop)
+- **[Miniconda](https://docs.conda.io/projects/miniconda/en/latest/)** (5 min, ~500MB) - Recommended, lightweight
+- **[Anaconda](https://www.anaconda.com/download)** (10 min, ~3GB) - Full version with extra tools
 
-4. **System Space**
-   - 20GB+ free disk space (for ML models)
-   - 8GB+ RAM (16GB recommended)
+After installation, verify:
+
+```bash
+conda --version
+```
+
+### 2. Git - Version Control
+
+Required to clone the repository.
+
+- **macOS:** `brew install git` (requires Homebrew, or [install Git directly](https://git-scm.com/download/mac))
+- **Linux:** `sudo apt-get install git`
+- **Windows:** [Download Git for Windows](https://git-scm.com/download/win)
+
+Verify:
+
+```bash
+git --version
+```
+
+### 3. Docker - Service Containers (Optional but Strongly Recommended)
+
+Automatically starts Neo4j and Ollama. Without Docker, you'll need to start them manually.
+
+- [Install Docker Desktop](https://www.docker.com/products/docker-desktop)
+- Supports: macOS, Linux, Windows
+- Verify: `docker --version`
+
+**No Docker?** → `orion init` will show you how to install and run Neo4j and Ollama manually (takes ~10 min more).
+
+### System Requirements
+
+- **20GB+** free disk space (for ML models)
+- **8GB+ RAM** (16GB recommended for comfortable performance)
+- **Internet connection** (for first download of models)
 
 ## Installation
 
@@ -80,14 +104,30 @@ pip install -e .
 orion init
 ```
 
-This will:
+This comprehensive setup will:
 
 - **Detect your hardware** (Apple Silicon / NVIDIA GPU / CPU)
-- **Prompt for configuration** (Neo4j, Ollama settings)
-- **Download models** (~5-15 minutes)
-- **Test connections**
+- **Check for services** (Neo4j, Ollama, Docker)
+- **Auto-start services** (if Docker is available)
+- **Download models** (~5-15 minutes depending on internet speed)
+- **Prompt for configuration** (Neo4j credentials, Ollama URL)
+- **Test all connections** before finishing
 
-If you don't have Docker, `orion init` will show commands to start Neo4j and Ollama manually.
+**What if you don't have Docker?**
+
+`orion init` will detect this and show you:
+
+1. Manual commands to install Ollama ([ollama.com](https://ollama.com))
+2. Docker commands to run Neo4j and Ollama separately
+3. How to configure them (defaults often work fine locally)
+
+You can follow the printed commands step-by-step, or run everything natively on your machine.
+
+**Total time:** 10-30 minutes (first time only)
+
+- 5-15 min: Model downloads (depends on internet)
+- 5-10 min: Service setup (Docker or manual)
+- 5 min: Configuration and testing
 
 ### 5. Verify Setup
 
