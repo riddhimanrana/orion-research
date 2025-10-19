@@ -33,7 +33,7 @@ from rich.table import Table
 from .models import ModelManager as AssetModelManager
 from .model_manager import ModelManager as RuntimeModelManager
 from .neo4j_manager import clear_neo4j_for_new_run
-from .smart_perception import run_smart_perception
+from .tracking_engine import run_tracking_engine
 from .semantic_uplift import run_semantic_uplift
 from .contextual_engine import apply_contextual_understanding
 
@@ -350,13 +350,6 @@ def _refresh_engine_loggers() -> None:
     """Re-evaluate engine loggers after toggling suppression flags."""
 
     try:
-        from . import perception_engine
-
-        perception_engine.logger = perception_engine.setup_logger("PerceptionEngine")
-    except Exception:  # pragma: no cover - defensive
-        pass
-
-    try:
         from . import semantic_uplift
 
         semantic_uplift.logger = semantic_uplift.setup_logger("SemanticUplift")
@@ -398,6 +391,49 @@ def _resolve_runtime(preferred: Optional[str]) -> Tuple[str, AssetModelManager]:
         )
         manager.ensure_runtime_assets(backend)
     return backend, manager
+
+
+def _convert_tracking_results_to_perception_log(entities: List[Any], observations: List[Any]) -> List[Dict[str, Any]]:
+    """
+    Convert tracking engine output (entities, observations) to perception log format.
+    
+    The tracking engine returns Entity and Observation objects.
+    We convert them to a list of dicts matching the perception log format.
+    """
+    perception_log = []
+    
+    for obs in observations:
+        # Create perception object from observation
+        perception_obj = {
+            # Identity
+            'entity_id': obs.entity_id if hasattr(obs, 'entity_id') else obs.get('entity_id', ''),
+            'temp_id': obs.entity_id if hasattr(obs, 'entity_id') else obs.get('entity_id', ''),
+            
+            # Classification
+            'object_class': obs.class_name if hasattr(obs, 'class_name') else obs.get('class_name', 'unknown'),
+            'detection_confidence': obs.confidence if hasattr(obs, 'confidence') else obs.get('confidence', 0.5),
+            
+            # Description (from entity, not individual observation)
+            'rich_description': obs.description if hasattr(obs, 'description') else obs.get('description', ''),
+            
+            # Temporal
+            'timestamp': obs.timestamp if hasattr(obs, 'timestamp') else obs.get('timestamp', 0.0),
+            'frame_number': obs.frame_number if hasattr(obs, 'frame_number') else obs.get('frame_number', 0),
+            
+            # Spatial
+            'bounding_box': obs.bbox if hasattr(obs, 'bbox') else obs.get('bbox', [0, 0, 0, 0]),
+            'centroid': (
+                (obs.bbox[0] + obs.bbox[2]) / 2, (obs.bbox[1] + obs.bbox[3]) / 2
+            ) if (hasattr(obs, 'bbox') and len(obs.bbox) >= 4) else (0, 0),
+            
+            # Visual
+            'visual_embedding': obs.embedding.tolist() if (hasattr(obs, 'embedding') and hasattr(obs.embedding, 'tolist')) else obs.embedding if hasattr(obs, 'embedding') else [],
+            'crop_size': (obs.bbox[2] - obs.bbox[0], obs.bbox[3] - obs.bbox[1]) if (hasattr(obs, 'bbox') and len(obs.bbox) >= 4) else (0, 0),
+        }
+        
+        perception_log.append(perception_obj)
+    
+    return perception_log
 
 
 def run_pipeline(
@@ -553,14 +589,14 @@ def run_pipeline(
                     if not ui.enabled:
                         return
                     
-                    # Smart perception events
-                    if event == "smart_perception.start":
-                        ui.set_stage_status("perception", "Starting smart perception...")
+                    # Tracking engine events
+                    if event == "tracking.start":
+                        ui.set_stage_status("perception", "Starting tracking engine...")
                     
-                    elif event == "smart_perception.phase1.start":
+                    elif event == "tracking.phase1.start":
                         ui.start_stage("perception.phase1", "Detecting objects with YOLO11x")
                         ui.set_stage_status("perception", "Phase 1: Detection")
-                    elif event == "smart_perception.phase1.complete":
+                    elif event == "tracking.phase1.complete":
                         observations = payload.get("observations", 0)
                         msg = payload.get("message", f"{observations} observations")
                         ui.complete_stage("perception.phase1", msg)
@@ -569,7 +605,7 @@ def run_pipeline(
                         ui.start_stage("perception.phase2", "Clustering with HDBSCAN")
                         ui.set_stage_status("perception", "Phase 2: Clustering")
                     
-                    elif event == "smart_perception.phase2.complete":
+                    elif event == "tracking.phase2.complete":
                         ui.advance_stage("perception", increment=1)
                         entities = payload.get("entities", 0)
                         observations = payload.get("observations", 0)
@@ -580,14 +616,14 @@ def run_pipeline(
                         ui.start_stage("perception.phase3", f"Describing {entities} entities")
                         ui.set_stage_status("perception", "Phase 3: Descriptions")
                     
-                    elif event == "smart_perception.phase3.complete":
+                    elif event == "tracking.phase3.complete":
                         entities = payload.get("entities", 0)
                         msg = payload.get("message", f"{entities} descriptions")
                         ui.complete_stage("perception.phase3", msg)
                         ui.advance_stage("perception", increment=1)
                         ui.set_stage_status("perception", "Phase 3 complete")
                     
-                    elif event == "smart_perception.complete":
+                    elif event == "tracking.complete":
                         entities = payload.get("entities", 0)
                         observations = payload.get("observations", 0)
                         efficiency = payload.get("efficiency", "N/A")
@@ -678,16 +714,18 @@ def run_pipeline(
 
                 start_time = time.time()
                 try:
-                    perception_log = run_smart_perception(
+                    # Run tracking engine to detect, cluster, and describe entities
+                    entities, observations = run_tracking_engine(
                         video_path,
-                        progress_callback=handle_progress if ui.enabled else None,
+                        config=None,  # Uses default config
                     )
+                    
+                    # Convert tracking results to perception log format
+                    perception_log = _convert_tracking_results_to_perception_log(entities, observations)
+                    
                 except Exception as exc:
                     if ui.enabled:
-                        ui.fail_stage("perception", "Smart perception failed")
-                        ui.fail_stage("perception.phase1", "Detection failed")
-                        ui.fail_stage("perception.phase2", "Clustering failed")
-                        ui.fail_stage("perception.phase3", "Description failed")
+                        ui.fail_stage("perception", "Tracking engine failed")
                     raise
 
                 perception_duration = time.time() - start_time
@@ -699,7 +737,7 @@ def run_pipeline(
                 if ui.enabled:
                     ui.complete_stage(
                         "perception",
-                        f"Smart perception complete: {unique_entities} entities, {num_objects} observations",
+                        f"Tracking complete: {unique_entities} entities, {num_objects} observations",
                     )
 
                 perception_log_path = str(

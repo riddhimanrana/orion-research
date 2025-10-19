@@ -27,7 +27,7 @@ from pathlib import Path
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from orion.perception_engine import run_perception_engine
+from orion.tracking_engine import run_tracking_engine
 from orion.semantic_uplift import run_semantic_uplift
 from orion.evaluation import HeuristicBaseline, GraphComparator
 from orion.evaluation.benchmarks import VSGRBenchmark
@@ -50,10 +50,23 @@ def run_perception_on_video(video_path: str, output_dir: Path) -> Path:
     Returns:
         Path to saved perception log JSON
     """
-    logger.info(f"Running perception engine on {video_path}")
+    logger.info(f"Running tracking engine on {video_path}")
     
-    # Process video using function-based API
-    perception_log = run_perception_engine(video_path)
+    # Process video using tracking engine
+    entities, observations = run_tracking_engine(video_path)
+    
+    # Convert to perception log format
+    perception_log = []
+    for obs in observations:
+        perception_obj = {
+            'entity_id': getattr(obs, 'entity_id', ''),
+            'object_class': getattr(obs, 'class_name', 'unknown'),
+            'detection_confidence': getattr(obs, 'confidence', 0.5),
+            'timestamp': getattr(obs, 'timestamp', 0.0),
+            'frame_number': getattr(obs, 'frame_number', 0),
+            'bounding_box': getattr(obs, 'bbox', [0, 0, 0, 0]),
+        }
+        perception_log.append(perception_obj)
     
     # Save perception log
     perception_log_path = output_dir / "perception_log.json"
@@ -61,7 +74,7 @@ def run_perception_on_video(video_path: str, output_dir: Path) -> Path:
         json.dump(perception_log, f, indent=2)
     
     logger.info(f"Saved perception log to {perception_log_path}")
-    logger.info(f"Total objects detected: {len(perception_log)}")
+    logger.info(f"Total observations: {len(perception_log)}, unique entities: {len(entities)}")
     
     return perception_log_path
 

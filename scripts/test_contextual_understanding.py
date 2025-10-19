@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from orion.config import OrionConfig
 from orion.model_manager import ModelManager
-from orion.llm_contextual_understanding import EnhancedContextualUnderstandingEngine
+from orion.contextual_engine import ContextualEngine
 from orion.class_correction import ClassCorrector
 
 # Setup logging
@@ -103,7 +103,7 @@ def main():
     logger.info("STEP 2: LLM-Enhanced Contextual Understanding")
     logger.info("="*80)
     
-    engine = EnhancedContextualUnderstandingEngine(config, model_manager)
+    engine = ContextualEngine(config, model_manager)
     
     understanding = engine.understand_scene(
         tracking_results=tracking_results,
