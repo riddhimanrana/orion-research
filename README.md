@@ -191,7 +191,6 @@ orion init
 
 ## Documentation
 
-- **[QUICKSTART_GUIDE.md](QUICKSTART_GUIDE.md)** - Detailed step-by-step guide
 - **[TECHNICAL_ARCHITECTURE.md](TECHNICAL_ARCHITECTURE.md)** - System design
 - **[KNOWLEDGE_GRAPH_SCHEMA.md](KNOWLEDGE_GRAPH_SCHEMA.md)** - Database schema
 
