@@ -45,22 +45,7 @@ After installation, verify:
 ```bash
 conda --version
 ```
-
-### 2. Git - Version Control
-
-Required to clone the repository.
-
-- **macOS:** `brew install git` (requires Homebrew, or [install Git directly](https://git-scm.com/download/mac))
-- **Linux:** `sudo apt-get install git`
-- **Windows:** [Download Git for Windows](https://git-scm.com/download/win)
-
-Verify:
-
-```bash
-git --version
-```
-
-### 3. Docker - Service Containers (Optional but Strongly Recommended)
+### 2. Docker - Service Containers (Optional but Strongly Recommended)
 
 Automatically starts Neo4j and Ollama. Without Docker, you'll need to start them manually.
 
@@ -70,18 +55,12 @@ Automatically starts Neo4j and Ollama. Without Docker, you'll need to start them
 
 **No Docker?** → `orion init` will show you how to install and run Neo4j and Ollama manually (takes ~10 min more).
 
-### System Requirements
-
-- **20GB+** free disk space (for ML models)
-- **8GB+ RAM** (16GB recommended for comfortable performance)
-- **Internet connection** (for first download of models)
-
 ## Installation
 
 ### 1. Clone Repository
 
 ```bash
-git clone https://github.com/riddhimanrana/orion-research.git
+git clone https://github.com/riddhimanrana/orion-research
 cd orion-research
 ```
 
@@ -125,37 +104,6 @@ This runs a 3-step initialization:
 - Configures Ollama URL
 - Tests all connections
 - Saves configuration to `~/.orion/config.json`
-
-**What if services aren't running?**
-
-No problem! `orion init` will tell you exactly what to do:
-
-```bash
-⚠️  Missing Prerequisites
-Orion requires Neo4j and Ollama to be running.
-
-Option 1: Use Docker (Recommended)
-  docker run -d --name orion-neo4j ...
-  docker run -d --name orion-ollama ...
-
-Option 2: Manual Installation
-  Neo4j: https://neo4j.com/download/
-  Ollama: https://ollama.com
-
-Once services are running, run orion init again!
-```
-
-Then you:
-
-1. Follow the Docker commands or install manually
-2. Run `orion init` again
-3. Everything completes successfully
-
-**Total time:** 10-30 minutes first time
-
-- 5-15 min: Model downloads
-- 5-10 min: Service setup (Docker or manual)
-- 5 min: Configuration and testing
 
 ### 5. Verify Setup
 
@@ -296,13 +244,4 @@ If you use Orion in research:
   author={Rana, Riddhiman},
   year={2025}
 }
-```
-
----
-
-**Ready to analyze videos?**
-
-```bash
-conda activate orion
-orion analyze your-video.mp4
 ```
