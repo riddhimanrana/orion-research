@@ -19,7 +19,10 @@ from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-from neo4j import GraphDatabase
+
+from .config import OrionConfig
+from .config_manager import ConfigManager
+from .neo4j_manager import Neo4jManager
 
 logger = logging.getLogger('TemporalGraph')
 
@@ -29,25 +32,29 @@ class TemporalGraphBuilder:
     
     def __init__(
         self,
-        neo4j_uri: str = "neo4j://127.0.0.1:7687",
-        neo4j_user: str = "neo4j",
-        neo4j_password: str = "orion123"
+        config: Optional[OrionConfig] = None,
+        neo4j_manager: Optional[Neo4jManager] = None
     ):
-        self.uri = neo4j_uri
-        self.user = neo4j_user
-        self.password = neo4j_password
-        self.driver = None
+        self.config = config or ConfigManager.get_config()
+        self.neo4j_manager: Optional[Neo4jManager] = neo4j_manager
+        self.driver: Optional[Any] = None
     
     def connect(self) -> bool:
         """Connect to Neo4j"""
         try:
-            self.driver = GraphDatabase.driver(
-                self.uri,
-                auth=(self.user, self.password)
-            )
+            if self.neo4j_manager is None:
+                neo4j_config = self.config.neo4j
+                self.neo4j_manager = Neo4jManager(
+                    uri=neo4j_config.uri,
+                    user=neo4j_config.user,
+                    password=neo4j_config.password,
+                )
+
+            if not self.neo4j_manager.connect():
+                return False
+
             # Test connection
-            with self.driver.session() as session:
-                session.run("RETURN 1")
+            self.driver = self.neo4j_manager.driver
             logger.info("✓ Connected to Neo4j")
             return True
         except Exception as e:
@@ -400,8 +407,9 @@ class TemporalGraphBuilder:
     
     def close(self):
         """Close Neo4j connection"""
-        if self.driver:
-            self.driver.close()
+        if self.neo4j_manager:
+            self.neo4j_manager.close()
+            self.driver = None
             logger.info("Neo4j connection closed")
 
 

@@ -22,11 +22,12 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
-from neo4j import GraphDatabase
 from sklearn.cluster import DBSCAN
 
 from .config import OrionConfig
+from .config_manager import ConfigManager
 from .model_manager import ModelManager
+from .neo4j_manager import Neo4jManager
 
 logger = logging.getLogger('orion.knowledge_graph')
 
@@ -549,15 +550,11 @@ class KnowledgeGraphBuilder:
     def __init__(
         self,
         config: Optional[OrionConfig] = None,
-        neo4j_uri: str = "neo4j://127.0.0.1:7687",
-        neo4j_user: str = "neo4j",
-        neo4j_password: str = "orion123"
+        neo4j_manager: Optional[Neo4jManager] = None
     ):
-        self.config = config or OrionConfig()
-        self.uri = neo4j_uri
-        self.user = neo4j_user
-        self.password = neo4j_password
-        self.driver = None
+        self.config = config or ConfigManager.get_config()
+        self.neo4j_manager: Optional[Neo4jManager] = neo4j_manager
+        self.driver: Optional[Any] = None
         
         self.scene_classifier = SceneClassifier()
         self.spatial_analyzer = SpatialAnalyzer()
@@ -567,12 +564,18 @@ class KnowledgeGraphBuilder:
     def connect(self) -> bool:
         """Connect to Neo4j"""
         try:
-            self.driver = GraphDatabase.driver(
-                self.uri,
-                auth=(self.user, self.password)
-            )
-            with self.driver.session() as session:
-                session.run("RETURN 1")
+            if self.neo4j_manager is None:
+                neo4j_config = self.config.neo4j
+                self.neo4j_manager = Neo4jManager(
+                    uri=neo4j_config.uri,
+                    user=neo4j_config.user,
+                    password=neo4j_config.password,
+                )
+
+            if not self.neo4j_manager.connect():
+                return False
+
+            self.driver = self.neo4j_manager.driver
             logger.info("✓ Connected to Neo4j for knowledge graph")
             return True
         except Exception as e:
@@ -1107,8 +1110,9 @@ class KnowledgeGraphBuilder:
     
     def close(self):
         """Close Neo4j connection"""
-        if self.driver:
-            self.driver.close()
+        if self.neo4j_manager:
+            self.neo4j_manager.close()
+            self.driver = None
             logger.info("Neo4j connection closed")
 
 

@@ -451,9 +451,9 @@ def _convert_tracking_results_to_perception_log(entities: List[Any], observation
 def run_pipeline(
     video_path: str,
     output_dir: str = "data/testing",
-    neo4j_uri: str = "neo4j://127.0.0.1:7687",
-    neo4j_user: str = "neo4j",
-    neo4j_password: str = "orion123",
+    neo4j_uri: Optional[str] = None,
+    neo4j_user: Optional[str] = None,
+    neo4j_password: Optional[str] = None,
     clear_db: bool = True,
     part1_config: str = "balanced",
     part2_config: str = "balanced",
@@ -469,9 +469,9 @@ def run_pipeline(
     Args:
         video_path: Path to input video.
         output_dir: Directory for output artifacts.
-        neo4j_uri: Neo4j database URI.
-        neo4j_user: Neo4j username.
-        neo4j_password: Neo4j password.
+        neo4j_uri: Neo4j database URI (uses ConfigManager if not provided).
+        neo4j_user: Neo4j username (uses ConfigManager if not provided).
+        neo4j_password: Neo4j password (uses ConfigManager if not provided).
         clear_db: Whether to clear Neo4j before running Part 2.
         part1_config: Perception configuration preset (fast/balanced/accurate).
         part2_config: Semantic uplift configuration preset (fast/balanced/accurate).
@@ -484,6 +484,13 @@ def run_pipeline(
     Returns:
         Results dictionary with statistics and file paths.
     """
+    from .config_manager import ConfigManager
+    
+    # Use ConfigManager for defaults
+    config = ConfigManager.get_config()
+    neo4j_uri = neo4j_uri or config.neo4j.uri
+    neo4j_user = neo4j_user or config.neo4j.user
+    neo4j_password = neo4j_password or config.neo4j.password
 
     setup_logging(verbose)
 
@@ -557,17 +564,14 @@ def run_pipeline(
             else:
                 if CONFIGS_AVAILABLE:
                     if part1_config == "fast":
-                        from .perception_config import FAST_CONFIG
-
-                        apply_part1_config(FAST_CONFIG)
+                        from .config import get_fast_config
+                        # Deprecated: apply_part1_config no-op
                     elif part1_config == "accurate":
-                        from .perception_config import ACCURATE_CONFIG
-
-                        apply_part1_config(ACCURATE_CONFIG)
+                        from .config import get_accurate_config
+                        # Deprecated: apply_part1_config no-op
                     else:
-                        from .perception_config import BALANCED_CONFIG
-
-                        apply_part1_config(BALANCED_CONFIG)
+                        from .config import get_balanced_config
+                        # Deprecated: apply_part1_config no-op
 
                 if ui.enabled:
                     ui.add_stage(
@@ -1217,9 +1221,9 @@ Examples:
         help="Processing configuration",
     )
     parser.add_argument(
-        "--neo4j-uri", default="neo4j://127.0.0.1:7687", help="Neo4j URI"
+        "--neo4j-uri", default=None, help="Neo4j URI (uses ConfigManager if not provided)"
     )
-    parser.add_argument("--neo4j-password", default="orion123", help="Neo4j password")
+    parser.add_argument("--neo4j-password", default=None, help="Neo4j password (uses ConfigManager if not provided)")
     parser.add_argument(
         "--no-clear-db", action="store_true", help="Do not clear Neo4j before running"
     )

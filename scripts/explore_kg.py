@@ -3,19 +3,20 @@
 Knowledge Graph Visualization and Exploration
 ==============================================
 
-Interactive tool to visualize and explore the knowledge graph.
+Interactive tool to visualize and explore the Neo4j knowledge graph.
 
 Features:
-- View graph statistics
-- List all scenes, entities, relationships
-- Visualize spatial relationships
-- Export subgraphs
-- Generate reports
+- View comprehensive graph statistics
+- Chronological scene timeline navigation
+- Spatial relationship network analysis
+- Subgraph export to JSON
+- Statistical reporting
 
 Usage:
-    python scripts/explore_kg.py
-    python scripts/explore_kg.py --export scene_graph.json
     python scripts/explore_kg.py --stats
+    python scripts/explore_kg.py --timeline
+    python scripts/explore_kg.py --spatial
+    python scripts/explore_kg.py --export graph.json --scene-type office
 """
 
 import argparse
@@ -23,9 +24,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
-
-from neo4j import GraphDatabase
+from typing import Any, Dict, List, Optional
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,33 +34,30 @@ logger = logging.getLogger(__name__)
 
 
 class KnowledgeGraphExplorer:
-    """Interactive knowledge graph explorer"""
+    """Interactive knowledge graph explorer using Neo4j"""
     
-    def __init__(
-        self,
-        neo4j_uri: str = "neo4j://127.0.0.1:7687",
-        neo4j_user: str = "neo4j",
-        neo4j_password: str = "orion123"
-    ):
-        self.uri = neo4j_uri
-        self.user = neo4j_user
-        self.password = neo4j_password
+    def __init__(self):
+        """Initialize explorer with centralized Neo4j credentials"""
+        from orion.config_manager import ConfigManager
+        from orion.neo4j_manager import Neo4jManager
+        
+        config = ConfigManager.get_config()
+        self.manager = Neo4jManager(
+            uri=config.neo4j.uri,
+            user=config.neo4j.user,
+            password=config.neo4j.password,
+        )
         self.driver = None
     
     def connect(self) -> bool:
-        """Connect to Neo4j"""
-        try:
-            self.driver = GraphDatabase.driver(
-                self.uri,
-                auth=(self.user, self.password)
-            )
-            with self.driver.session() as session:
-                session.run("RETURN 1")
-            logger.info("✓ Connected to Neo4j")
-            return True
-        except Exception as e:
-            logger.error(f"✗ Failed to connect to Neo4j: {e}")
+        """Connect to Neo4j database"""
+        if not self.manager.connect():
+            logger.error("✗ Failed to connect to Neo4j")
             return False
+        
+        self.driver = self.manager.driver
+        logger.info("✓ Connected to Neo4j")
+        return True
     
     def get_statistics(self) -> Dict[str, Any]:
         """Get comprehensive graph statistics"""
@@ -138,7 +134,7 @@ class KnowledgeGraphExplorer:
             
             return results
     
-    def list_entities(self, scene_type: str = None) -> List[Dict[str, Any]]:
+    def list_entities(self, scene_type: Optional[str] = None) -> List[Dict[str, Any]]:
         """List entities, optionally filtered by scene type"""
         if not self.driver:
             return []
@@ -166,7 +162,7 @@ class KnowledgeGraphExplorer:
             
             return results
     
-    def get_spatial_relationships(self, entity_class: str = None) -> List[Dict[str, Any]]:
+    def get_spatial_relationships(self, entity_class: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get spatial relationships, optionally filtered by entity class"""
         if not self.driver:
             return []
@@ -220,8 +216,8 @@ class KnowledgeGraphExplorer:
     def export_subgraph(
         self,
         output_path: Path,
-        scene_type: str = None,
-        entity_class: str = None
+        scene_type: Optional[str] = None,
+        entity_class: Optional[str] = None
     ):
         """Export subgraph to JSON"""
         if not self.driver:

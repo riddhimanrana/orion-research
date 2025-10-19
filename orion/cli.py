@@ -595,7 +595,7 @@ def main(argv: list[str] | None = None) -> None:
 
         console.print(summary_table)
 
-        init_script = Path(__file__).resolve().parents[2] / "scripts" / "init.py"
+        init_script = Path(__file__).resolve().parents[1] / "scripts" / "init.py"
         if init_script.exists():
             console.print("\n[bold cyan]Running initialization...[/bold cyan]\n")
             console.print(f"[dim]python {init_script}[/dim]")

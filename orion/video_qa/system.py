@@ -590,15 +590,15 @@ class VideoQASystem:
         query = """
         MATCH (e:Entity)
         WHERE e.id IN $ids
-    OPTIONAL MATCH (e)-[scene_rel:IN_SCENE]->(s:Scene)
-    OPTIONAL MATCH (e)-[r:RELATED_TO]->(target:Entity)
-        OPTIONAL MATCH (e)-[:ASSOCIATED_WITH]->(ev:Event)
+    OPTIONAL MATCH (e)-[scene_rel:APPEARS_IN]->(s:Scene)
+    OPTIONAL MATCH (e)-[r:SPATIAL_REL]->(target:Entity)
+        OPTIONAL MATCH (ev:Event)-[:INVOLVES|TARGETS]->(e)
         RETURN e.id AS id,
                e.class AS label,
                e.description AS description,
                e.appearance_count AS appearances,
                collect(DISTINCT {
-                   relation: type(r),
+                   relation: r.type,
                    target_id: target.id,
                    target_label: target.class
                }) AS relations,

@@ -19,7 +19,7 @@ import tempfile
 from pathlib import Path
 
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from orion.evaluation import HeuristicBaseline, GraphComparator
 from orion.evaluation.metrics import evaluate_graph_quality, compare_graphs

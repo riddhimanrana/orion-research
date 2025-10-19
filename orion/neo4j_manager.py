@@ -3,12 +3,17 @@ Neo4j Database Management Utilities
 
 This module provides utilities for managing the Neo4j database,
 including clearing all data before new pipeline runs.
+
+All Neo4j credentials should be managed via ConfigManager, which reads
+from environment variables for security.
 """
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from neo4j import GraphDatabase
+
+from .config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -16,19 +21,27 @@ logger = logging.getLogger(__name__)
 class Neo4jManager:
     """Manager for Neo4j database operations"""
 
-    def __init__(self, uri: str, user: str, password: str):
+    def __init__(self, uri: Optional[str] = None, user: Optional[str] = None, password: Optional[str] = None):
         """
         Initialize Neo4j manager
 
         Args:
-            uri: Neo4j connection URI (e.g., neo4j://127.0.0.1:7687)
-            user: Database username
-            password: Database password
+            uri: Neo4j connection URI (e.g., neo4j://127.0.0.1:7687). 
+                 If None, uses ConfigManager.
+            user: Database username. If None, uses ConfigManager.
+            password: Database password. If None, uses ConfigManager.
         """
+        # Use centralized config if credentials not provided
+        if uri is None or user is None or password is None:
+            config = ConfigManager.get_config()
+            uri = uri or config.neo4j.uri
+            user = user or config.neo4j.user
+            password = password or config.neo4j.password
+
         self.uri = uri
         self.user = user
         self.password = password
-        self.driver: Optional[GraphDatabase.driver] = None
+        self.driver: Any = None
 
     def connect(self) -> bool:
         """
@@ -104,15 +117,15 @@ class Neo4jManager:
 
 
 def clear_neo4j_for_new_run(
-    uri: str = "neo4j://127.0.0.1:7687", user: str = "neo4j", password: str = "orion123"
+    uri: Optional[str] = None, user: Optional[str] = None, password: Optional[str] = None
 ) -> bool:
     """
     Utility function to clear Neo4j database before a new pipeline run
 
     Args:
-        uri: Neo4j URI
-        user: Database username
-        password: Database password
+        uri: Neo4j URI (optional, uses ConfigManager if not provided)
+        user: Database username (optional, uses ConfigManager if not provided)
+        password: Database password (optional, uses ConfigManager if not provided)
 
     Returns:
         True if successful, False otherwise

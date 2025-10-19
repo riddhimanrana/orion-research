@@ -18,9 +18,10 @@ import logging
 import sys
 from pathlib import Path
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from orion.neo4j_manager import Neo4jManager
 from orion.tracking_engine import run_tracking_engine
 from orion.temporal_graph_builder import TemporalGraphBuilder
 
@@ -161,11 +162,12 @@ def main():
         if args.build_graph:
             logger.info("Building temporal knowledge graph...")
             
-            builder = TemporalGraphBuilder(
-                neo4j_uri=args.neo4j_uri,
-                neo4j_user=args.neo4j_user,
-                neo4j_password=args.neo4j_password
+            neo4j_manager = Neo4jManager(
+                uri=args.neo4j_uri,
+                user=args.neo4j_user,
+                password=args.neo4j_password,
             )
+            builder = TemporalGraphBuilder(neo4j_manager=neo4j_manager)
             
             try:
                 stats = builder.build_graph(entities, observations)
