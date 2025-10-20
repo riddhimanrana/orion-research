@@ -2,22 +2,19 @@
 Unified Configuration for Orion
 ================================
 
-Clean, centralized configuration for all components and external services.
+Clean, centralized configuration for all components.
 
 Architecture:
     YOLO11x → Detection
     CLIP    → Re-ID embeddings
     FastVLM → Descriptions
-    Gemma3  → Q&A (via Ollama)
-    Neo4j   → Knowledge graph storage
-    Docker  → Container orchestration
+    Gemma3  → Q&A
 
 Author: Orion Research Team
 Date: October 2025
 """
 
 import logging
-import os
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -105,7 +102,6 @@ class ClusteringConfig:
     
     # CLIP-optimized epsilon
     cluster_selection_epsilon: float = 0.35
-    """Max distance to merge clusters (tuned for CLIP's 512-dim space)"""
     """Max distance to merge clusters (tuned for CLIP's 512-dim space)"""
     
     # State change detection
@@ -206,53 +202,6 @@ class CorrectionConfig:
 
 
 @dataclass
-class Neo4jConfig:
-    """Neo4j database configuration"""
-    
-    uri: str = "neo4j://127.0.0.1:7687"
-    """Neo4j connection URI (bolt or neo4j protocol)"""
-    
-    user: str = "neo4j"
-    """Neo4j username"""
-    
-    password_env_var: str = "ORION_NEO4J_PASSWORD"
-    """Environment variable name for Neo4j password (for security)"""
-    
-    @property
-    def password(self) -> str:
-        """Get password from environment variable"""
-        pwd = os.getenv(self.password_env_var, "")
-        if not pwd:
-            raise ValueError(f"Neo4j password not set in {self.password_env_var}")
-        return pwd
-
-
-@dataclass
-class OllamaConfig:
-    """Ollama configuration for Q&A and embeddings"""
-    
-    base_url: str = "http://localhost:11434"
-    """Ollama server URL"""
-    
-    qa_model: str = "gemma3:4b"
-    """Model for Q&A tasks"""
-    
-    embedding_model: str = "openai/clip-vit-base-patch32"
-    """Model for text embeddings (if using Ollama for embeddings)"""
-
-
-@dataclass
-class RuntimeConfig:
-    """Runtime and backend configuration"""
-    
-    backend: Literal["auto", "torch", "mlx"] = "auto"
-    """Compute backend (auto=detect, torch=CUDA/CPU, mlx=Apple Silicon)"""
-    
-    device: Literal["auto", "cuda", "mps", "cpu"] = "auto"
-    """Device selection (auto=detect from backend)"""
-
-
-@dataclass
 class OrionConfig:
     """
     Master configuration for Orion pipeline.
@@ -280,9 +229,6 @@ class OrionConfig:
     performance: PerformanceConfig = field(default_factory=PerformanceConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     correction: CorrectionConfig = field(default_factory=CorrectionConfig)
-    neo4j: Neo4jConfig = field(default_factory=Neo4jConfig)
-    ollama: OllamaConfig = field(default_factory=OllamaConfig)
-    runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     
     def __post_init__(self):
         """Initialize sub-configs if not provided"""
@@ -302,12 +248,6 @@ class OrionConfig:
             self.logging = LoggingConfig()
         if not isinstance(self.correction, CorrectionConfig):
             self.correction = CorrectionConfig()
-        if not isinstance(self.neo4j, Neo4jConfig):
-            self.neo4j = Neo4jConfig()
-        if not isinstance(self.ollama, OllamaConfig):
-            self.ollama = OllamaConfig()
-        if not isinstance(self.runtime, RuntimeConfig):
-            self.runtime = RuntimeConfig()
 
 
 # Preset configurations
@@ -390,119 +330,6 @@ def get_accurate_config() -> OrionConfig:
         ),
     )
 
-
-# ============================================================================
-# SEMANTIC UPLIFT PRESETS (Part 2)
-# ============================================================================
-
-# Fast processing - loose clustering, fewer events
-SEMANTIC_FAST_CONFIG = {
-    "MIN_CLUSTER_SIZE": 5,
-    "CLUSTER_SELECTION_EPSILON": 0.20,
-    "STATE_CHANGE_THRESHOLD": 0.80,
-    "TIME_WINDOW_SIZE": 60.0,
-    "MIN_EVENTS_PER_WINDOW": 3,
-    "LOG_LEVEL": logging.WARNING,
-    "DESCRIPTION": "Fast mode - loose clustering, larger windows",
-}
-
-# Balanced - default settings
-SEMANTIC_BALANCED_CONFIG = {
-    "MIN_CLUSTER_SIZE": 3,
-    "CLUSTER_SELECTION_EPSILON": 0.15,
-    "STATE_CHANGE_THRESHOLD": 0.85,
-    "TIME_WINDOW_SIZE": 30.0,
-    "MIN_EVENTS_PER_WINDOW": 2,
-    "LOG_LEVEL": logging.INFO,
-    "DESCRIPTION": "Balanced mode - default settings",
-}
-
-# Accurate - tight clustering, more events
-SEMANTIC_ACCURATE_CONFIG = {
-    "MIN_CLUSTER_SIZE": 2,
-    "CLUSTER_SELECTION_EPSILON": 0.10,
-    "STATE_CHANGE_THRESHOLD": 0.90,
-    "TIME_WINDOW_SIZE": 15.0,
-    "MIN_EVENTS_PER_WINDOW": 1,
-    "LOG_LEVEL": logging.DEBUG,
-    "DESCRIPTION": "Accurate mode - tight clustering, small windows, sensitive to changes",
-}
-
-# ============================================================================
-# QUERY PRESETS (Part 3)
-# ============================================================================
-
-QUERY_BASELINE_CONFIG = {
-    "name": "Baseline",
-    "description": "Minimal configuration for basic testing",
-    "GEMINI_MODEL": "gemini-2.0-flash-exp",
-    "GEMINI_TEMPERATURE": 0.3,
-    "GEMINI_MAX_TOKENS": 1024,
-    "CLIP_MAX_FRAMES": 5,
-    "CLIP_FRAME_SAMPLE_RATE": 10,
-    "USE_VISION_CONTEXT": True,
-    "USE_GRAPH_CONTEXT": True,
-    "MAX_GRAPH_RESULTS": 10,
-    "RERANK_RESULTS": False,
-    "EC15_QUESTION_COUNT": 10,
-    "LOTQ_QUESTION_COUNT": 3,
-    "SIMILARITY_THRESHOLD": 0.75,
-    "TEMPORAL_TOLERANCE_SECONDS": 2.0,
-}
-
-QUERY_BALANCED_CONFIG = {
-    "name": "Balanced",
-    "description": "Balanced quality and performance (recommended)",
-    "GEMINI_MODEL": "gemini-2.0-flash-exp",
-    "GEMINI_TEMPERATURE": 0.3,
-    "GEMINI_MAX_TOKENS": 2048,
-    "CLIP_MAX_FRAMES": 10,
-    "CLIP_FRAME_SAMPLE_RATE": 5,
-    "USE_VISION_CONTEXT": True,
-    "USE_GRAPH_CONTEXT": True,
-    "MAX_GRAPH_RESULTS": 20,
-    "RERANK_RESULTS": True,
-    "EC15_QUESTION_COUNT": 15,
-    "LOTQ_QUESTION_COUNT": 5,
-    "SIMILARITY_THRESHOLD": 0.75,
-    "TEMPORAL_TOLERANCE_SECONDS": 2.0,
-}
-
-QUERY_HIGH_QUALITY_CONFIG = {
-    "name": "High Quality",
-    "description": "Maximum quality for research evaluation",
-    "GEMINI_MODEL": "gemini-2.0-flash-exp",
-    "GEMINI_TEMPERATURE": 0.2,
-    "GEMINI_MAX_TOKENS": 4096,
-    "CLIP_MAX_FRAMES": 20,
-    "CLIP_FRAME_SAMPLE_RATE": 3,
-    "USE_VISION_CONTEXT": True,
-    "USE_GRAPH_CONTEXT": True,
-    "MAX_GRAPH_RESULTS": 50,
-    "RERANK_RESULTS": True,
-    "EC15_QUESTION_COUNT": 20,
-    "LOTQ_QUESTION_COUNT": 10,
-    "SIMILARITY_THRESHOLD": 0.80,
-    "TEMPORAL_TOLERANCE_SECONDS": 1.5,
-}
-
-QUERY_FAST_CONFIG = {
-    "name": "Fast",
-    "description": "Quick testing with minimal API calls",
-    "GEMINI_MODEL": "gemini-2.0-flash-exp",
-    "GEMINI_TEMPERATURE": 0.5,
-    "GEMINI_MAX_TOKENS": 512,
-    "CLIP_MAX_FRAMES": 3,
-    "CLIP_FRAME_SAMPLE_RATE": 15,
-    "USE_VISION_CONTEXT": True,
-    "USE_GRAPH_CONTEXT": True,
-    "MAX_GRAPH_RESULTS": 5,
-    "RERANK_RESULTS": False,
-    "EC15_QUESTION_COUNT": 5,
-    "LOTQ_QUESTION_COUNT": 2,
-    "SIMILARITY_THRESHOLD": 0.70,
-    "TEMPORAL_TOLERANCE_SECONDS": 3.0,
-}
 
 # Default configuration
 DEFAULT_CONFIG = get_balanced_config()

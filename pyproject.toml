@@ -20,13 +20,13 @@ authors = [
 keywords = ["research", "orion", "computer-vision", "transformers"]
 dependencies = [
     "torch==2.6.0", "torchvision==0.21.0",
-    "transformers==4.48.3", "tokenizers==0.21.0", "sentencepiece==0.1.99", "shortuuid",
+    "transformers==4.36.2", "tokenizers==0.21.0", "sentencepiece==0.1.99", "shortuuid", "sentence-transformers==2.2.2",
     "accelerate==1.6.0", "peft>=0.10.0,<0.14.0", "bitsandbytes",
     "pydantic", "markdown2[all]", "numpy==1.26.4", "scikit-learn==1.2.2",
     "gradio==5.11.0", "requests", "uvicorn", "fastapi",
     "einops==0.6.1", "einops-exts==0.0.4", "timm==1.0.15",
-    "coremltools==8.2","neo4==6.0.2",
-    "mlx-vlm @ file://./mlx-vlm", "ultralytics=8.3.217",
+    "coremltools==8.2","neo4j==6.0.2",
+    "mlx-vlm @ file:./mlx-vlm", "ultralytics==8.3.217",
     "ollama", "hdbscan", "httpx"
 ]
 

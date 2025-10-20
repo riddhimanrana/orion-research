@@ -22,12 +22,11 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
+from neo4j import GraphDatabase
 from sklearn.cluster import DBSCAN
 
 from .config import OrionConfig
-from .config_manager import ConfigManager
 from .model_manager import ModelManager
-from .neo4j_manager import Neo4jManager
 
 logger = logging.getLogger('orion.knowledge_graph')
 
@@ -544,26 +543,21 @@ class CausalReasoningEngine:
 # MAIN KNOWLEDGE GRAPH BUILDER
 # ============================================================================
 
-def _euclidean_distance(p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
-    """Calculate Euclidean distance between two points"""
-    return np.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
-
-def get_bbox_center(bbox: List[int]) -> Tuple[float, float]:
-    """Calculate bounding box center"""
-    x1, y1, x2, y2 = bbox
-    return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
-
 class KnowledgeGraphBuilder:
     """Main class for building the knowledge graph"""
     
     def __init__(
         self,
         config: Optional[OrionConfig] = None,
-        neo4j_manager: Optional[Neo4jManager] = None
+        neo4j_uri: str = "neo4j://127.0.0.1:7687",
+        neo4j_user: str = "neo4j",
+        neo4j_password: str = "orion123"
     ):
-        self.config = config or ConfigManager.get_config()
-        self.neo4j_manager: Optional[Neo4jManager] = neo4j_manager
-        self.driver: Optional[Any] = None
+        self.config = config or OrionConfig()
+        self.uri = neo4j_uri
+        self.user = neo4j_user
+        self.password = neo4j_password
+        self.driver = None
         
         self.scene_classifier = SceneClassifier()
         self.spatial_analyzer = SpatialAnalyzer()
@@ -573,18 +567,12 @@ class KnowledgeGraphBuilder:
     def connect(self) -> bool:
         """Connect to Neo4j"""
         try:
-            if self.neo4j_manager is None:
-                neo4j_config = self.config.neo4j
-                self.neo4j_manager = Neo4jManager(
-                    uri=neo4j_config.uri,
-                    user=neo4j_config.user,
-                    password=neo4j_config.password,
-                )
-
-            if not self.neo4j_manager.connect():
-                return False
-
-            self.driver = self.neo4j_manager.driver
+            self.driver = GraphDatabase.driver(
+                self.uri,
+                auth=(self.user, self.password)
+            )
+            with self.driver.session() as session:
+                session.run("RETURN 1")
             logger.info("✓ Connected to Neo4j for knowledge graph")
             return True
         except Exception as e:
@@ -738,7 +726,7 @@ class KnowledgeGraphBuilder:
         for frame_num in frames:
             for entity in frame_to_entities[frame_num]:
                 if entity['id'] in entity_ids:
-                    object_classes.append(entity['class_name'])
+                    object_classes.append(entity['class'])
         
         # Count occurrences
         class_counts = Counter(object_classes)
@@ -778,20 +766,17 @@ class KnowledgeGraphBuilder:
         entities_data: List[Dict]
     ) -> List[SpatialRelationship]:
         """Analyze spatial relationships between entities"""
+        relationships = []
         
-        bbox_map = {}
-        for entity in entities_data:
-            for obs in entity.get('observations', []):
-                bbox_map[(entity['id'], obs['frame_number'])] = obs
-
+        # Build co-occurrence matrix
+        co_occurrence: Dict[Tuple[str, str], Dict[str, Any]] = defaultdict(lambda: {'count': 0, 'distances': []})
+        
         # Group by frame
         frame_to_entities = defaultdict(list)
         for entity in entities_data:
             for frame_num in entity.get('frame_numbers', []):
                 frame_to_entities[frame_num].append(entity)
         
-        co_occurrence: Dict[Tuple[str, str], Dict[str, Any]] = defaultdict(lambda: {'count': 0, 'distances': [], 'frames': []})
-
         # Check each frame for co-occurrences
         for frame_num, frame_entities in frame_to_entities.items():
             if len(frame_entities) < 2:
@@ -802,44 +787,26 @@ class KnowledgeGraphBuilder:
                 for entity_b in frame_entities[i+1:]:
                     key = tuple(sorted([entity_a['id'], entity_b['id']]))
                     co_occurrence[key]['count'] += 1
-                    co_occurrence[key]['frames'].append(frame_num)
                     
-                    obs_a = bbox_map.get((entity_a['id'], frame_num))
-                    obs_b = bbox_map.get((entity_b['id'], frame_num))
-
-                    if obs_a and obs_b:
-                        c1 = get_bbox_center(obs_a['bbox'])
-                        c2 = get_bbox_center(obs_b['bbox'])
-                        distance = _euclidean_distance(c1, c2)
-                        co_occurrence[key]['distances'].append(distance)
-
-        relationships = []
+                    # TODO: If we had bbox info per frame, compute distance here
+                    # For now, just track co-occurrence
+        
         # Create relationships for significant co-occurrences
         for (entity_a_id, entity_b_id), data in co_occurrence.items():
             count = int(data['count'])
             if count >= 3:  # Minimum co-occurrence threshold
-                avg_distance = np.mean(data['distances']) if data['distances'] else 0
-                
-                # Determine relationship type
-                if avg_distance < 150:
-                    rel_type = 'very_near'
-                elif avg_distance < 400:
-                    rel_type = 'near'
-                else:
-                    rel_type = 'same_region'
-
+                # Determine relationship type (simplified without bbox data)
+                rel_type = 'near' if count > 10 else 'same_region'
                 confidence = min(1.0, count / 20.0)
                 
-                frame_range = (min(data['frames']), max(data['frames']))
-
                 relationships.append(SpatialRelationship(
                     entity_a=entity_a_id,
                     entity_b=entity_b_id,
                     relationship_type=rel_type,
                     confidence=confidence,
-                    frame_range=frame_range,
+                    frame_range=(0, 0),  # TODO: Track actual frame range
                     co_occurrence_count=count,
-                    avg_distance=avg_distance
+                    avg_distance=0.5  # Placeholder
                 ))
         
         logger.info(f"Found {len(relationships)} spatial relationships")
@@ -887,7 +854,7 @@ class KnowledgeGraphBuilder:
             # Create profile
             profile = ContextualEntityProfile(
                 entity_id=entity_id,
-                object_class=entity['class_name'],
+                object_class=entity['class'],
                 description=entity.get('description', ''),
                 canonical_label=entity.get('canonical_label'),
                 appearance_count=entity['appearance_count'],
@@ -1140,9 +1107,8 @@ class KnowledgeGraphBuilder:
     
     def close(self):
         """Close Neo4j connection"""
-        if self.neo4j_manager:
-            self.neo4j_manager.close()
-            self.driver = None
+        if self.driver:
+            self.driver.close()
             logger.info("Neo4j connection closed")
 
 

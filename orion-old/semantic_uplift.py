@@ -33,8 +33,6 @@ from difflib import SequenceMatcher
 from neo4j import GraphDatabase
 from neo4j.exceptions import ServiceUnavailable
 
-from .neo4j_manager import Neo4jManager
-
 # Suppress warnings
 warnings.filterwarnings("ignore")
 
@@ -120,6 +118,12 @@ class Config:
     MIN_EVENTS_PER_WINDOW = 2  # Minimum state changes to trigger event composition
 
     # Causal Influence Scoring
+    CAUSAL_MAX_PIXEL_DISTANCE = 600.0
+    CAUSAL_TEMPORAL_DECAY = 4.0  # seconds before influence decays
+    CAUSAL_PROXIMITY_WEIGHT = 0.45
+    CAUSAL_MOTION_WEIGHT = 0.25
+    CAUSAL_TEMPORAL_WEIGHT = 0.2
+    CAUSAL_EMBEDDING_WEIGHT = 0.1
     CAUSAL_MIN_SCORE = 0.55
     CAUSAL_TOP_K_PER_WINDOW = 5
 
@@ -147,7 +151,10 @@ class Config:
     OLLAMA_MAX_TOKENS = 2000
     OLLAMA_TIMEOUT = 60  # seconds
 
-    # Neo4j Configuration (from ConfigManager - do not hardcode)
+    # Neo4j Configuration
+    NEO4J_URI = "neo4j://127.0.0.1:7687"
+    NEO4J_USER = "neo4j"
+    NEO4J_PASSWORD = "orion123"  # Local Neo4j password
     NEO4J_DATABASE = "neo4j"
     MAX_CONNECTION_LIFETIME = 3600
     MAX_CONNECTION_POOL_SIZE = 50
@@ -264,19 +271,6 @@ class Entity:
         if not timeline:
             return None
         return min(timeline, key=lambda app: abs(app.get("timestamp", 0.0) - timestamp))
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for serialization"""
-        return {
-            'id': self.entity_id,
-            'class_name': self.object_class,
-            'appearance_count': len(self.appearances),
-            'first_seen': self.first_timestamp,
-            'last_seen': self.last_timestamp,
-            'description': self.appearances[0].get('rich_description', '') if self.appearances else '',
-            'observations': self.appearances,
-            'frame_numbers': [obs['frame_number'] for obs in self.appearances],
-        }
 
 
 @dataclass
@@ -1240,7 +1234,16 @@ class CausalInfluenceScorer:
             and AgentCandidate is not None
             and CISStateChange is not None
         ):
-            self.causal_config = CausalConfig()
+            self.causal_config = CausalConfig(
+                proximity_weight=Config.CAUSAL_PROXIMITY_WEIGHT,
+                motion_weight=Config.CAUSAL_MOTION_WEIGHT,
+                temporal_weight=Config.CAUSAL_TEMPORAL_WEIGHT,
+                embedding_weight=Config.CAUSAL_EMBEDDING_WEIGHT,
+                max_pixel_distance=Config.CAUSAL_MAX_PIXEL_DISTANCE,
+                temporal_decay=Config.CAUSAL_TEMPORAL_DECAY,
+                min_score=Config.CAUSAL_MIN_SCORE,
+                top_k_per_event=Config.CAUSAL_TOP_K_PER_WINDOW,
+            )
             self.engine = CausalInferenceEngine(self.causal_config)
             logger.info(
                 "Causal inference engine enabled (top_k=%d, min_score=%.2f)",
@@ -2622,19 +2625,10 @@ Now generate Cypher queries for the state changes above:
 class KnowledgeGraphBuilder:
     """Builds and manages Neo4j knowledge graph"""
 
-    def __init__(self, neo4j_manager: Optional[Neo4jManager] = None):
-        from .config_manager import ConfigManager
-        
-        if neo4j_manager is None:
-            config = ConfigManager.get_config()
-            self.neo4j_manager = Neo4jManager(
-                uri=config.neo4j.uri,
-                user=config.neo4j.user,
-                password=config.neo4j.password,
-            )
-        else:
-            self.neo4j_manager = neo4j_manager
-        
+    def __init__(self, uri: str = None, user: str = None, password: str = None):
+        self.uri = uri or Config.NEO4J_URI
+        self.user = user or Config.NEO4J_USER
+        self.password = password or Config.NEO4J_PASSWORD
         self.driver = None
 
     def connect(self) -> bool:
@@ -2645,15 +2639,24 @@ class KnowledgeGraphBuilder:
             True if connection successful
         """
         try:
-            if not self.neo4j_manager.connect():
-                return False
+            logger.info(f"Connecting to Neo4j at {self.uri}...")
 
-            self.driver = self.neo4j_manager.driver
+            self.driver = GraphDatabase.driver(
+                self.uri,
+                auth=(self.user, self.password),
+                max_connection_lifetime=Config.MAX_CONNECTION_LIFETIME,
+                max_connection_pool_size=Config.MAX_CONNECTION_POOL_SIZE,
+                connection_timeout=Config.CONNECTION_TIMEOUT,
+            )
+
+            # Verify connection
+            self.driver.verify_connectivity()
+
             logger.info("Connected to Neo4j successfully")
             return True
 
         except ServiceUnavailable:
-            logger.error("Could not connect to Neo4j")
+            logger.error(f"Could not connect to Neo4j at {self.uri}")
             logger.error("Make sure Neo4j is running and credentials are correct")
             return False
         except Exception as e:
@@ -2662,9 +2665,8 @@ class KnowledgeGraphBuilder:
 
     def close(self):
         """Close Neo4j connection"""
-        if self.neo4j_manager:
-            self.neo4j_manager.close()
-            self.driver = None
+        if self.driver:
+            self.driver.close()
             logger.info("Neo4j connection closed")
 
     def initialize_schema(self, *, scene_embedding_dim: Optional[int] = None):
@@ -3545,26 +3547,17 @@ def run_semantic_uplift(
             graph_builder.driver = neo4j_driver
             connection_detail = "Using provided Neo4j driver"
         else:
-            # Use ConfigManager for defaults if parameters not provided
-            from .config_manager import ConfigManager
-            config = ConfigManager.get_config()
-            
-            resolved_uri = neo4j_uri or config.neo4j.uri
-            resolved_user = neo4j_user or config.neo4j.user
-            resolved_password = neo4j_password or config.neo4j.password
-            
-            manager = Neo4jManager(
-                uri=resolved_uri,
-                user=resolved_user,
-                password=resolved_password,
+            graph_builder = KnowledgeGraphBuilder(
+                neo4j_uri or Config.NEO4J_URI,
+                neo4j_user or Config.NEO4J_USER,
+                neo4j_password or Config.NEO4J_PASSWORD,
             )
-            graph_builder = KnowledgeGraphBuilder(neo4j_manager=manager)
             if not graph_builder.connect():
                 message = "Failed to connect to Neo4j"
                 emit("semantic.error", {"message": message, "step": "neo4j_connection"})
                 raise RuntimeError(message)
             close_builder = True
-            connection_detail = f"Connected to Neo4j at {resolved_uri}"
+            connection_detail = f"Connected to Neo4j at {graph_builder.uri}"
         logger.info(connection_detail)
         complete_step(step_id, "neo4j_connection", connection_detail)
 
@@ -3748,16 +3741,12 @@ if __name__ == "__main__":
 
         logger.info(f"Loaded perception log with {len(perception_log)} objects")
 
-        # Get Neo4j credentials from ConfigManager
-        from .config_manager import ConfigManager
-        config = ConfigManager.get_config()
-
         # Run semantic uplift
         results = run_semantic_uplift(
             perception_log,
-            neo4j_uri=config.neo4j.uri,
-            neo4j_user=config.neo4j.user,
-            neo4j_password=config.neo4j.password,
+            neo4j_uri=Config.NEO4J_URI,
+            neo4j_user=Config.NEO4J_USER,
+            neo4j_password=Config.NEO4J_PASSWORD,
         )
 
         # Save results

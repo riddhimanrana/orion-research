@@ -33,21 +33,21 @@ logger = logging.getLogger("CausalInference")
 class CausalConfig:
     """Configuration for Causal Influence Score calculation"""
     
-    # Weights for CIS components (from TECHNICAL_ARCHITECTURE.md)
-    temporal_proximity_weight: float = 0.3
-    spatial_proximity_weight: float = 0.3
-    entity_overlap_weight: float = 0.2
-    semantic_similarity_weight: float = 0.2
+    # Weights for CIS components (should sum to ~1.0)
+    proximity_weight: float = 0.45  # w1 in paper
+    motion_weight: float = 0.25      # w2 in paper
+    temporal_weight: float = 0.20    # w3 (temporal proximity)
+    embedding_weight: float = 0.10   # w4 (visual similarity)
     
     # Thresholds
-    max_pixel_distance: float = 600.0
-    temporal_decay: float = 4.0
-    min_score: float = 0.55
-    top_k_per_event: int = 5
+    max_pixel_distance: float = 600.0  # Maximum distance to consider
+    temporal_decay: float = 4.0        # Seconds for temporal influence decay
+    min_score: float = 0.55            # Minimum CIS to pass to LLM
+    top_k_per_event: int = 5           # Max agents to consider per state change
     
-    # Motion parameters (used for motion score, but not in main CIS)
-    motion_angle_threshold: float = math.pi / 4
-    min_motion_speed: float = 5.0
+    # Motion parameters
+    motion_angle_threshold: float = math.pi / 4  # 45 degrees for "towards"
+    min_motion_speed: float = 5.0                # Pixels/second minimum speed
 
 
 @dataclass
@@ -138,15 +138,6 @@ class CausalInferenceEngine:
         self.config = config or CausalConfig()
         logger.info(f"Initialized CausalInferenceEngine with config: {self.config}")
     
-    def _entity_overlap_score(self, agent: AgentCandidate, patient: StateChange) -> float:
-        """
-        f_overlap: Entity overlap function
-        
-        This is a placeholder. In a real scenario, this would check for shared parts
-        or other forms of overlap. For now, we'll return a neutral score.
-        """
-        return 0.5
-
     def calculate_cis(
         self,
         agent: AgentCandidate,
@@ -155,7 +146,7 @@ class CausalInferenceEngine:
         """
         Calculate the Causal Influence Score for an agent-patient pair
         
-        CIS = w1·f_temporal + w2·f_spatial + w3·f_overlap + w4·f_semantic
+        CIS = w1·f_prox + w2·f_motion + w3·f_temporal + w4·f_embedding
         
         Args:
             agent: Potential causal agent
@@ -165,17 +156,17 @@ class CausalInferenceEngine:
             CIS score in [0, 1]
         """
         # Component scores
+        prox_score = self._proximity_score(agent, patient)
+        motion_score = self._motion_score(agent, patient)
         temporal_score = self._temporal_score(agent, patient)
-        spatial_score = self._proximity_score(agent, patient)
-        overlap_score = self._entity_overlap_score(agent, patient)
-        semantic_score = self._embedding_score(agent, patient)
+        embedding_score = self._embedding_score(agent, patient)
         
         # Weighted combination
         cis = (
-            self.config.temporal_proximity_weight * temporal_score +
-            self.config.spatial_proximity_weight * spatial_score +
-            self.config.entity_overlap_weight * overlap_score +
-            self.config.semantic_similarity_weight * semantic_score
+            self.config.proximity_weight * prox_score +
+            self.config.motion_weight * motion_score +
+            self.config.temporal_weight * temporal_score +
+            self.config.embedding_weight * embedding_score
         )
         
         return max(0.0, min(1.0, cis))  # Clamp to [0, 1]
@@ -308,7 +299,19 @@ class CausalInferenceEngine:
             if agent.entity_id == patient.entity_id:
                 continue
             
-            cis = self.calculate_cis(agent, patient)
+            # Calculate component scores
+            prox = self._proximity_score(agent, patient)
+            motion = self._motion_score(agent, patient)
+            temporal = self._temporal_score(agent, patient)
+            embedding = self._embedding_score(agent, patient)
+            
+            # Calculate overall CIS
+            cis = (
+                self.config.proximity_weight * prox +
+                self.config.motion_weight * motion +
+                self.config.temporal_weight * temporal +
+                self.config.embedding_weight * embedding
+            )
             
             # Only include if above threshold
             if cis >= self.config.min_score:
@@ -316,10 +319,10 @@ class CausalInferenceEngine:
                     agent=agent,
                     patient=patient,
                     cis_score=cis,
-                    proximity_score=self._proximity_score(agent, patient),
-                    motion_score=self._motion_score(agent, patient),
-                    temporal_score=self._temporal_score(agent, patient),
-                    embedding_score=self._embedding_score(agent, patient)
+                    proximity_score=prox,
+                    motion_score=motion,
+                    temporal_score=temporal,
+                    embedding_score=embedding
                 )
                 links.append(link)
         

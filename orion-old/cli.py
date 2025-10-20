@@ -1,12 +1,8 @@
-"Command-line interface for the Orion research toolkit."
+"""Command-line interface for the Orion research toolkit."""
 
 from __future__ import annotations
 
 import argparse
-import os
-import secrets
-import string
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -17,7 +13,7 @@ from rich.console import Console, Group
 from rich.table import Table
 from rich.text import Text
 
-from .models import AssetManager
+from .models import ModelManager
 from .runtime import select_backend, set_active_backend
 from .settings import OrionSettings, SettingsError
 
@@ -38,13 +34,13 @@ def _import_video_qa() -> Any:
         return None
 
 
-def _prepare_runtime(requested: Optional[str]) -> Tuple[str, AssetManager]:
+def _prepare_runtime(requested: Optional[str]) -> Tuple[str, ModelManager]:
     with console.status(
         "[dim]Selecting runtime backend...[/dim]", spinner="dots"
     ) as status:
         backend = select_backend(requested)
         set_active_backend(backend)
-        manager = AssetManager()
+        manager = ModelManager()
 
         if manager.assets_ready(backend):
             status.update(f"[green]Runtime '{backend}' ready.[/green]")
@@ -62,132 +58,6 @@ def _prepare_runtime(requested: Optional[str]) -> Tuple[str, AssetManager]:
         status.update(f"[green]Runtime '{backend}' synchronized.[/green]")
         time.sleep(0.2)
         return backend, manager
-
-
-def _prepare_runtime_for_backend(backend: str) -> AssetManager:
-    """Prepare runtime assets for a specific backend"""
-    with console.status(
-        "[dim]Preparing runtime assets...[/dim]", spinner="dots"
-    ) as status:
-        set_active_backend(backend)
-        manager = AssetManager()
-
-        if manager.assets_ready(backend):
-            status.update(f"[green]Runtime '{backend}' ready.[/green]")
-            time.sleep(0.2)
-            return manager
-
-        status.update(f"[yellow]Syncing model assets for '{backend}'...[/yellow]")
-        try:
-            manager.ensure_runtime_assets(backend)
-        except Exception as exc:  # noqa: BLE001
-            status.stop()
-            console.print(f"[red]Failed to prepare models: {exc}[/red]")
-            raise
-
-        status.update(f"[green]Runtime '{backend}' synchronized.[/green]")
-        time.sleep(0.2)
-        return manager
-
-
-def _handle_neo4j_command(args: argparse.Namespace) -> None:
-    """Handle Neo4j service management commands"""
-    action = getattr(args, "neo4j_action", None)
-    if action is None:
-        console.print("[red]No Neo4j action provided. Use 'orion services neo4j --help'.[/red]")
-        return
-
-    try:
-        if action == "start":
-            # Check if container exists and start it
-            check_result = subprocess.run(['docker', 'ps', '-a', '--filter', 'name=orion-neo4j'],
-                                        capture_output=True, text=True)
-
-            if 'orion-neo4j' in check_result.stdout:
-                status_result = subprocess.run(['docker', 'ps', '--filter', 'name=orion-neo4j'],
-                                             capture_output=True, text=True)
-
-                if 'orion-neo4j' in status_result.stdout:
-                    console.print("[yellow]✓ Neo4j container already running[/yellow]")
-                else:
-                    result = subprocess.run(['docker', 'start', 'orion-neo4j'], check=True,
-                                          capture_output=True, text=True)
-                    console.print("[green]✓ Neo4j container started[/green]")
-            else:
-                console.print("[red]✗ Neo4j container not found. Run 'orion init' first.[/red]")
-
-        elif action == "stop":
-            result = subprocess.run(['docker', 'stop', 'orion-neo4j'], check=True,
-                                  capture_output=True, text=True)
-            console.print("[green]✓ Neo4j container stopped[/green]")
-
-        elif action == "status":
-            result = subprocess.run(['docker', 'ps', '--filter', 'name=orion-neo4j'],
-                                  capture_output=True, text=True)
-            if 'orion-neo4j' in result.stdout:
-                console.print("[green]✓ Neo4j container is running[/green]")
-            else:
-                console.print("[yellow]⚠ Neo4j container is not running[/yellow]")
-
-        elif action == "restart":
-            subprocess.run(['docker', 'restart', 'orion-neo4j'], check=True,
-                         capture_output=True, text=True)
-            console.print("[green]✓ Neo4j container restarted[/green]")
-
-    except subprocess.CalledProcessError as e:
-        console.print(f"[red]✗ Docker command failed: {e.stderr}[/red]")
-    except FileNotFoundError:
-        console.print("[red]✗ Docker not found. Please install Docker first.[/red]")
-
-
-def _handle_ollama_command(args: argparse.Namespace) -> None:
-    """Handle Ollama service management commands"""
-    action = getattr(args, "ollama_action", None)
-    if action is None:
-        console.print("[red]No Ollama action provided. Use 'orion services ollama --help'.[/red]")
-        return
-
-    try:
-        if action == "start":
-            # Check if container exists and start it
-            check_result = subprocess.run(['docker', 'ps', '-a', '--filter', 'name=orion-ollama'],
-                                        capture_output=True, text=True)
-
-            if 'orion-ollama' in check_result.stdout:
-                status_result = subprocess.run(['docker', 'ps', '--filter', 'name=orion-ollama'],
-                                             capture_output=True, text=True)
-
-                if 'orion-ollama' in status_result.stdout:
-                    console.print("[yellow]✓ Ollama container already running[/yellow]")
-                else:
-                    result = subprocess.run(['docker', 'start', 'orion-ollama'], check=True,
-                                          capture_output=True, text=True)
-                    console.print("[green]✓ Ollama container started[/green]")
-            else:
-                console.print("[red]✗ Ollama container not found. Run 'orion init' first.[/red]")
-
-        elif action == "stop":
-            result = subprocess.run(['docker', 'stop', 'orion-ollama'], check=True,
-                                  capture_output=True, text=True)
-            console.print("[green]✓ Ollama container stopped[/green]")
-
-        elif action == "status":
-            result = subprocess.run(['docker', 'ps', '--filter', 'name=orion-ollama'],
-                                  capture_output=True, text=True)
-            if 'orion-ollama' in result.stdout:
-                console.print("[green]✓ Ollama container is running[/green]")
-            else:
-                console.print("[yellow]⚠ Ollama container is not running[/yellow]")
-
-        elif action == "restart":
-            subprocess.run(['docker', 'restart', 'orion-ollama'], check=True,
-                         capture_output=True, text=True)
-            console.print("[green]✓ Ollama container restarted[/green]")
-
-    except subprocess.CalledProcessError as e:
-        console.print(f"[red]✗ Docker command failed: {e.stderr}[/red]")
-    except FileNotFoundError:
-        console.print("[red]✗ Docker not found. Please install Docker first.[/red]")
 
 
 def _handle_config_command(args: argparse.Namespace, settings: OrionSettings) -> int:
@@ -409,33 +279,7 @@ For more help: orion <command> --help
 
     subparsers.add_parser("models", help="Show model information")
     subparsers.add_parser("modes", help="Show processing modes")
-
-    # Service management commands
-    services_parser = subparsers.add_parser("services", help="Manage Orion services (Neo4j, Ollama)")
-    services_subparsers = services_parser.add_subparsers(dest="service_command", help="Service actions")
-
-    # Neo4j management
-    neo4j_parser = services_subparsers.add_parser("neo4j", help="Manage Neo4j service")
-    neo4j_subparsers = neo4j_parser.add_subparsers(dest="neo4j_action", help="Neo4j actions")
-    neo4j_subparsers.add_parser("start", help="Start Neo4j container")
-    neo4j_subparsers.add_parser("stop", help="Stop Neo4j container")
-    neo4j_subparsers.add_parser("status", help="Check Neo4j container status")
-    neo4j_subparsers.add_parser("restart", help="Restart Neo4j container")
-
-    # Ollama management
-    ollama_parser = services_subparsers.add_parser("ollama", help="Manage Ollama service")
-    ollama_subparsers = ollama_parser.add_subparsers(dest="ollama_action", help="Ollama actions")
-    ollama_subparsers.add_parser("start", help="Start Ollama container")
-    ollama_subparsers.add_parser("stop", help="Stop Ollama container")
-    ollama_subparsers.add_parser("status", help="Check Ollama container status")
-    ollama_subparsers.add_parser("restart", help="Restart Ollama container")
-    
-    # Enhanced status command
-    status_parser = subparsers.add_parser(
-        "status",
-        help="Comprehensive system and service status check"
-    )
-    
+    subparsers.add_parser("status", help="Show system and database status")
     index_parser = subparsers.add_parser("index", help="Create vector indexes and backfill embeddings")
     
     # Benchmark evaluation command
@@ -522,186 +366,6 @@ For more help: orion <command> --help
     return parser
 
 
-def _run_command(command, description):
-    """Runs a shell command and returns its output."""
-    try:
-        console.print(f"\n>> {description}...")
-        process = subprocess.run(
-            command,
-            shell=True,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        return process.stdout.strip()
-    except subprocess.CalledProcessError as e:
-        console.print(f"[red]Error: {e}[/red]")
-        console.print(f"[red]Stderr: {e.stderr}[/red]")
-        return None
-
-def _is_docker_daemon_running():
-    """Checks if the Docker daemon is running."""
-    console.print("[dim]Checking Docker daemon status...[/dim]")
-    return _run_command("docker info", "Checking Docker status") is not None
-
-def _is_container_running(container_name):
-    """Checks if a Docker container is running."""
-    output = _run_command(
-        f"docker ps -q -f name={container_name}",
-        f"Checking for container: {container_name}",
-    )
-    return output is not None and output != ""
-
-def _prompt_user(question):
-    """Prompts the user for a yes/no answer."""
-    from rich.prompt import Confirm
-    return Confirm.ask(question, default=True)
-
-def _setup_neo4j():
-    """Sets up the Neo4j container."""
-    NEO4J_CONTAINER_NAME = "orion-neo4j"
-    NEO4J_IMAGE = "neo4j:5"
-    if _is_container_running(NEO4J_CONTAINER_NAME):
-        console.print(f"[green]✓ Neo4j container '{NEO4J_CONTAINER_NAME}' is already running.[/green]")
-        return
-
-    if _prompt_user(
-        f"Neo4j container '{NEO4J_CONTAINER_NAME}' not found. Would you like to create and start it?"
-    ):
-        _run_command(f"docker pull {NEO4J_IMAGE}", f"Pulling Neo4j image: {NEO4J_IMAGE}")
-        _run_command(
-            f"docker run -d --name {NEO4J_CONTAINER_NAME} "
-            f"-p 7474:7474 -p 7687:7687 "
-            f"-e NEO4J_AUTH=neo4j/orion123 "
-            f"{NEO4J_IMAGE}",
-            "Starting Neo4j container",
-        )
-        console.print("[green]✓ Neo4j container started.[/green]")
-
-def _setup_ollama():
-    """Checks for local Ollama installation and pulls models."""
-    OLLAMA_MODELS = ["gemma3:4b"]
-
-    # Check if ollama is installed
-    if _run_command("ollama --version", "Checking for local Ollama installation") is None:
-        console.print("[red]✗ Ollama is not installed.[/red]")
-        console.print("Please install it from https://ollama.com and then run this command again.")
-        sys.exit(1)
-
-    console.print("[green]✓ Ollama is installed.[/green]")
-
-    # Pull models
-    for model in OLLAMA_MODELS:
-        console.print(f"\n-- Checking for Ollama model: {model} --")
-        _run_command(
-            f"ollama pull {model}",
-            f"Pulling Ollama model: {model}",
-        )
-
-def _handle_init_command(args: argparse.Namespace):
-    """Handles the init command."""
-    console.print("\n[bold cyan]🚀 Orion Initialization[/bold cyan]\n")
-
-    # Pre-flight check: Verify all required services are available
-    console.print("[bold]Step 1: Pre-flight Check - Verifying Prerequisites[/bold]\n")
-    from .auto_config import AutoConfiguration
-    config = AutoConfiguration()
-    results = config.detect_all_services()
-    
-    neo4j_ok, neo4j_msg = results["neo4j"]
-    ollama_ok, ollama_msg, _ = results["ollama"]
-    docker_ok, docker_msg = results["docker"]
-    
-    status_table = Table(title="Service Status", box=box.ROUNDED)
-    status_table.add_column("Service", style="cyan")
-    status_table.add_column("Status", style="green")
-    status_table.add_column("Details", style="yellow")
-    
-    status_table.add_row(
-        "Neo4j",
-        "[green]✓ Running[/green]" if neo4j_ok else "[red]✗ Not available[/red]",
-        neo4j_msg
-    )
-    status_table.add_row(
-        "Ollama",
-        "[green]✓ Running[/green]" if ollama_ok else "[red]✗ Not available[/red]",
-        ollama_msg
-    )
-    status_table.add_row(
-        "Docker",
-        "[green]✓ Available[/green]" if docker_ok else "[yellow]⚠ Not available[/yellow]",
-        docker_msg
-    )
-    
-    console.print(status_table)
-
-    # Check for sentence-transformers
-    try:
-        import sentence_transformers
-    except ImportError:
-        console.print("[red]✗ sentence-transformers library not found.[/red]")
-        console.print("Please install it by running: pip install sentence-transformers==2.2.2")
-        sys.exit(1)
-
-    if not docker_ok:
-        console.print("\n[red]✗ Docker is not installed.[/red]")
-        console.print("Please install Docker Desktop and then run this command again.")
-        sys.exit(1)
-
-    if not _is_docker_daemon_running():
-        console.print("\n[red]✗ Docker daemon is not running.[/red]")
-        console.print("Please start Docker Desktop and then run this command again.")
-        sys.exit(1)
-
-    console.print("\n--- Setting up Neo4j ---")
-    _setup_neo4j()
-
-    console.print("\n--- Setting up Ollama ---")
-    _setup_ollama()
-    
-    console.print("\n[bold]Step 2: Detecting hardware and selecting runtime...[/bold]\n")
-
-    # Auto-detect the best runtime for this system (ignore CLI args for auto-detection)
-    try:
-        from .runtime import select_backend
-        backend: str = select_backend(None)  # Force auto-detection
-        console.print(f"[green]Selected runtime: {backend}[/green]")
-    except Exception as e:
-        console.print(f"[red]Failed to select runtime: {e}[/red]")
-        sys.exit(1)
-
-    # Download models and configure environment
-    console.print("[bold]Preparing runtime and downloading models...[/bold]\n")
-    try:
-        manager = _prepare_runtime_for_backend(backend)
-    except Exception:
-        sys.exit(1)
-
-    console.print(f"[green]Runtime '{backend}' assets are ready.[/green]\n")
-
-    # Print setup summary with correct model paths
-    summary_table = Table(title="Model Assets", box=box.ROUNDED)
-    summary_table.add_column("Component", style="cyan", no_wrap=True)
-    summary_table.add_column("Status", style="green", justify="center")
-    summary_table.add_column("Details", style="magenta")
-
-    # Show YOLO11x
-    yolo_path = manager.get_asset_path("yolo11x") if "yolo11x" in manager._manifest else "Not found"
-    summary_table.add_row("YOLO11x", "✓" if Path(yolo_path).exists() else "✗", str(yolo_path))
-
-    # Show FastVLM (MLX or Torch)
-    fastvlm_asset_name = "fastvlm-0.5b-mlx" if backend == "mlx" else "fastvlm-0.5b"
-    fastvlm_path = manager.get_asset_path(fastvlm_asset_name) if fastvlm_asset_name in manager._manifest else "Not found"
-    summary_table.add_row("FastVLM-0.5B", "✓" if Path(fastvlm_path).exists() else "✗", str(fastvlm_path))
-
-    # Show Gemma3:4b and CLIP
-    summary_table.add_row("gemma3:4b", "✓", "Available in Ollama")
-    summary_table.add_row("CLIP (OpenAI)", "✓", "Available via sentence-transformers")
-
-    console.print(summary_table)
-    
-    console.print("\n[green]✓ Orion initialization complete.[/green]")
-
 def main(argv: list[str] | None = None) -> None:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -738,6 +402,8 @@ def main(argv: list[str] | None = None) -> None:
         neo4j_user = args.neo4j_user or settings.neo4j_user
         neo4j_password = args.neo4j_password or settings.get_neo4j_password()
         qa_model = args.qa_model or settings.qa_model
+        embedding_backend = args.embedding_backend or settings.embedding_backend
+        embedding_model = args.embedding_model or settings.embedding_model
 
         console.print(f"\n[bold]Analyzing:[/bold] [cyan]{args.video}[/cyan]")
         config = "balanced"
@@ -768,7 +434,7 @@ def main(argv: list[str] | None = None) -> None:
             console.print("\n[bold cyan]Starting Q&A mode...[/bold cyan]\n")
             if VideoQASystem is None:
                 console.print(
-                    "[red]Q&A not available. Install: pip install ollama" 
+                    "[red]Q&A not available. Install: pip install ollama[/red]"
                 )
             else:
                 qa = VideoQASystem(
@@ -776,6 +442,8 @@ def main(argv: list[str] | None = None) -> None:
                     neo4j_user=neo4j_user,
                     neo4j_password=neo4j_password,
                     llm_model=qa_model,
+                    embedding_backend=embedding_backend,
+                    embedding_model=embedding_model,
                 )
                 qa.start_interactive_session()
 
@@ -783,7 +451,7 @@ def main(argv: list[str] | None = None) -> None:
         console.print("\n[bold cyan]Starting Q&A mode...[/bold cyan]\n")
         VideoQASystem = _import_video_qa()
         if VideoQASystem is None:
-            console.print("[red]Q&A not available. Install: pip install ollama")
+            console.print("[red]Q&A not available. Install: pip install ollama[/red]")
         else:
             try:
                 backend, _ = _prepare_runtime(args.runtime or settings.runtime_backend)
@@ -795,6 +463,8 @@ def main(argv: list[str] | None = None) -> None:
                 neo4j_user=args.neo4j_user or settings.neo4j_user,
                 neo4j_password=args.neo4j_password or settings.get_neo4j_password(),
                 llm_model=args.model or settings.qa_model,
+                embedding_backend=args.embedding_backend or settings.embedding_backend,
+                embedding_model=args.embedding_model or settings.embedding_model,
             )
             qa.start_interactive_session()
 
@@ -805,19 +475,37 @@ def main(argv: list[str] | None = None) -> None:
         show_modes()
 
     elif args.command == "status":
-        from .auto_config import status_command
+        from .neo4j_manager import Neo4jManager
+        from .vector_indexing import ENTITY_INDEX, SCENE_INDEX
 
-        # Show comprehensive status including services and database
-        status_command(args)
-
-    elif args.command == "services":
-        if args.service_command == "neo4j":
-            _handle_neo4j_command(args)
-        elif args.service_command == "ollama":
-            _handle_ollama_command(args)
-        else:
-            console.print("[red]No service command provided. Use 'orion services --help'.[/red]")
+        mgr = Neo4jManager(
+            settings.neo4j_uri, settings.neo4j_user, settings.get_neo4j_password()
+        )
+        if not mgr.connect():
+            console.print("[red]Cannot connect to Neo4j.[/red]")
             return
+        stats = mgr.get_stats()
+        status_table = Table(title="Neo4j Status", box=box.ROUNDED)
+        status_table.add_column("Metric", style="cyan")
+        status_table.add_column("Value", style="green")
+        status_table.add_row("Nodes", str(stats.get("nodes", 0)))
+        status_table.add_row("Relationships", str(stats.get("relationships", 0)))
+        console.print(status_table)
+
+        # Quick index check
+        try:
+            with mgr.driver.session() as session:  # type: ignore[union-attr]
+                res = session.run("CALL db.indexes() YIELD name, type RETURN name, type")
+                rows = res.data()
+                idx_table = Table(title="Indexes", box=box.ROUNDED)
+                idx_table.add_column("Name", style="yellow")
+                idx_table.add_column("Type", style="magenta")
+                for r in rows:
+                    idx_table.add_row(str(r.get("name")), str(r.get("type")))
+                console.print(idx_table)
+        except Exception as e:
+            console.print(f"[dim]Index list unavailable: {e}[/dim]")
+        mgr.close()
 
     elif args.command == "index":
         from .vector_indexing import backfill_embeddings
@@ -876,7 +564,47 @@ def main(argv: list[str] | None = None) -> None:
             runner.close()
 
     elif args.command == "init":
-        _handle_init_command(args)
+        try:
+            backend, manager = _prepare_runtime(
+                args.runtime or settings.runtime_backend
+            )
+        except Exception:
+            return
+
+        console.print(f"[green]Runtime '{backend}' assets are ready.[/green]")
+
+        # Print setup summary with correct model paths
+        # (Table imported at module level)
+        summary_table = Table(title="Setup Summary", box=box.ROUNDED)
+        summary_table.add_column("Component", style="cyan", no_wrap=True)
+        summary_table.add_column("Status", style="green", justify="center")
+        summary_table.add_column("Details", style="magenta")
+
+        # Show YOLO11x
+        yolo_path = manager.get_asset_path("yolo11x") if "yolo11x" in manager._manifest else "Not found"
+        summary_table.add_row("YOLO11x", "✓" if Path(yolo_path).exists() else "✗", str(yolo_path))
+
+        # Show FastVLM (MLX or Torch)
+        fastvlm_asset_name = "fastvlm-0.5b-mlx" if backend == "mlx" else "fastvlm-0.5b"
+        fastvlm_path = manager.get_asset_path(fastvlm_asset_name) if fastvlm_asset_name in manager._manifest else "Not found"
+        summary_table.add_row("FastVLM-0.5B", "✓" if Path(fastvlm_path).exists() else "✗", str(fastvlm_path))
+
+        # Show Gemma3:4b
+        summary_table.add_row("gemma3:4b", "✓", "Installed")
+        summary_table.add_row("CLIP (OpenAI)", "✓", "Installed")
+
+        console.print(summary_table)
+
+        init_script = Path(__file__).resolve().parents[2] / "scripts" / "init.py"
+        if init_script.exists():
+            console.print("\n[bold cyan]Running initialization...[/bold cyan]\n")
+            console.print(f"[dim]python {init_script}[/dim]")
+            import subprocess
+
+            subprocess.run([sys.executable, str(init_script)], check=False)
+        else:
+            console.print("[red]Init script not found![red]")
+            console.print(f"Expected: {init_script}")
 
     else:
         print_banner()

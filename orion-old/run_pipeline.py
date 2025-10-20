@@ -21,7 +21,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from rich import box
 from rich.console import Console
@@ -30,10 +30,10 @@ from rich.panel import Panel
 from rich.table import Table
 
 # Use asset manager for model assets, runtime manager for LLM-enabled operations
-from .models import AssetManager
+from .models import ModelManager as AssetModelManager
 from .model_manager import ModelManager as RuntimeModelManager
 from .neo4j_manager import clear_neo4j_for_new_run
-from .tracking_engine import run_tracking_engine, Entity, Observation
+from .smart_perception import run_smart_perception
 from .semantic_uplift import run_semantic_uplift
 from .contextual_engine import apply_contextual_understanding
 
@@ -53,25 +53,13 @@ except ImportError:  # pragma: no cover
     VideoQASystem = None
     QA_AVAILABLE = False
 
-# Configurations (Now in unified config.py)
+# Configurations
 apply_part1_config: Any
 apply_part2_config: Any
 
 try:
-    from .config import (
-        SEMANTIC_FAST_CONFIG, 
-        SEMANTIC_BALANCED_CONFIG, 
-        SEMANTIC_ACCURATE_CONFIG
-    )
-    
-    # Helper functions for compatibility
-    def apply_part1_config(cfg: dict) -> None:
-        """Apply perception config (deprecated - configs now in config.py)"""
-        pass
-    
-    def apply_part2_config(cfg: dict) -> None:
-        """Apply semantic config (deprecated - configs now in config.py)"""
-        pass
+    from .perception_config import apply_config as apply_part1_config
+    from .semantic_config import apply_config as apply_part2_config
 
     CONFIGS_AVAILABLE = True
 except ImportError:  # pragma: no cover
@@ -362,6 +350,13 @@ def _refresh_engine_loggers() -> None:
     """Re-evaluate engine loggers after toggling suppression flags."""
 
     try:
+        from . import perception_engine
+
+        perception_engine.logger = perception_engine.setup_logger("PerceptionEngine")
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+    try:
         from . import semantic_uplift
 
         semantic_uplift.logger = semantic_uplift.setup_logger("SemanticUplift")
@@ -380,7 +375,7 @@ def print_banner():
     console.print(banner)
 
 
-def _resolve_runtime(preferred: Optional[str]) -> Tuple[str, AssetManager]:
+def _resolve_runtime(preferred: Optional[str]) -> Tuple[str, AssetModelManager]:
     normalized: Optional[str] = preferred.lower() if preferred else None
     if normalized == "auto":
         normalized = None
@@ -396,7 +391,7 @@ def _resolve_runtime(preferred: Optional[str]) -> Tuple[str, AssetManager]:
         backend = select_backend(None)
 
     set_active_backend(backend)
-    manager = AssetManager()
+    manager = AssetModelManager()
     if not manager.assets_ready(backend):
         console.print(
             f"[yellow]Preparing model assets for runtime '{backend}'...[/yellow]"
@@ -405,213 +400,12 @@ def _resolve_runtime(preferred: Optional[str]) -> Tuple[str, AssetManager]:
     return backend, manager
 
 
-def run_smart_perception(
-    video_path: str,
-    progress_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
-    config: Optional[Any] = None,
-) -> List[Dict[str, Any]]:
-    """
-    Run smart tracking-based perception.
-
-    This replaces the old perception_engine with a much more efficient approach:
-    - Old: Describe all 436 detections individually
-    - New: Cluster into ~10-50 entities, describe each once
-
-    Args:
-        video_path: Path to video file
-        progress_callback: Optional callback for progress updates
-        config: Optional configuration
-
-    Returns:
-        List of perception objects (compatible with semantic_uplift)
-    """
-    logger = logging.getLogger(__name__)
-
-    # Notify start
-    if progress_callback:
-        progress_callback("smart_perception.start", {
-            "mode": "tracking-based",
-            "video": video_path
-        })
-
-    # Phase 1: Detection & Embedding
-    if progress_callback:
-        progress_callback("smart_perception.phase1.start", {
-            "phase": "Detection & CLIP Embeddings"
-        })
-
-    entities, observations = run_tracking_engine(video_path, config)
-
-    if progress_callback:
-        progress_callback("smart_perception.phase1.complete", {
-            "observations": len(observations),
-            "message": f"{len(observations)} observations with CLIP embeddings"
-        })
-
-    # Phase 2: Clustering
-    if progress_callback:
-        progress_callback("smart_perception.phase2.complete", {
-            "entities": len(entities),
-            "observations": len(observations),
-            "efficiency": f"{len(observations) / max(len(entities), 1):.1f}x",
-            "message": f"Clustered into {len(entities)} unique entities"
-        })
-
-    logger.info(f"\n✓ Tracking complete:")
-    logger.info(f"  Total detections: {len(observations)}")
-    logger.info(f"  Unique entities: {len(entities)}")
-    logger.info(f"  Efficiency: {len(observations) / max(len(entities), 1):.1f}x")
-    logger.info(f"  (described {len(entities)} entities instead of {len(observations)} objects)")
-
-    # Build entity lookup
-    entity_map = {e.id: e for e in entities}
-
-    # Convert to perception log format
-    perception_log = []
-
-    for obs in observations:
-        # Find the entity this observation belongs to
-        entity = None
-        for e in entities:
-            if any(_bboxes_match(o.bbox, obs.bbox) for o in e.observations):
-                entity = e
-                break
-
-        if not entity:
-            logger.warning(f"Observation at frame {obs.frame_number} has no entity - skipping")
-            continue
-
-        # Create perception object
-        perception_obj = {
-            # Identity
-            'entity_id': entity.id,
-            'temp_id': entity.id,  # Use entity ID as temp_id
-
-            # Classification
-            'object_class': entity.class_name,
-            'detection_confidence': obs.confidence,
-
-            # Description (from entity, not individual observation)
-            'rich_description': entity.description or f"a {entity.class_name}",
-
-            # Temporal
-            'timestamp': obs.timestamp,
-            'frame_number': obs.frame_number,
-
-            # Spatial
-            'bounding_box': obs.bbox,
-            'centroid': ((obs.bbox[0] + obs.bbox[2]) / 2, (obs.bbox[1] + obs.bbox[3]) / 2),
-
-            # Visual
-            'visual_embedding': obs.embedding.tolist() if hasattr(obs.embedding, 'tolist') else obs.embedding,
-            'crop_size': (obs.bbox[2] - obs.bbox[0], obs.bbox[3] - obs.bbox[1]),
-
-            # Tracking info
-            'appearance_count': entity.appearance_count,
-            'first_seen': entity.first_seen,
-            'last_seen': entity.last_seen,
-            'duration': entity.duration,
-
-            # State changes
-            'state_changes': len(entity.state_changes),
-            'has_state_change': len(entity.state_changes) > 0,
-        }
-
-        perception_log.append(perception_obj)
-
-    # Phase 3: Description Generation
-    if progress_callback:
-        progress_callback("smart_perception.phase3.complete", {
-            "entities": len(entities),
-            "message": f"{len(entities)} entity descriptions (reused for all appearances)"
-        })
-
-    # Complete
-    if progress_callback:
-        progress_callback("smart_perception.complete", {
-            "total": len(perception_log),
-            "entities": len(entities),
-            "observations": len(observations),
-            "efficiency": f"{len(observations) / max(len(entities), 1):.1f}x",
-            "message": f"Smart perception complete: {len(entities)} entities, {len(observations)} observations"
-        })
-
-    logger.info(f"\n✓ Generated perception log with {len(perception_log)} observations")
-    logger.info(f"✓ All {len(entities)} unique entities have descriptions")
-
-    return perception_log
-
-
-def _bboxes_match(bbox1: List[int], bbox2: List[int], threshold: float = 5.0) -> bool:
-    """Check if two bounding boxes match (within threshold pixels)"""
-    if len(bbox1) != 4 or len(bbox2) != 4:
-        return False
-
-    for i in range(4):
-        if abs(bbox1[i] - bbox2[i]) > threshold:
-            return False
-
-    return True
-
-
-def _convert_tracking_results_to_perception_log(entities: List[Any], observations: List[Any]) -> List[Dict[str, Any]]:
-    """
-    Convert tracking engine output (entities, observations) to perception log format.
-
-    The tracking engine returns Entity and Observation objects.
-    We convert them to a list of dicts matching the perception log format.
-    """
-    perception_log = []
-
-    # Create a mapping from observation to entity_id for lookup
-    obs_to_entity_id = {}
-    for entity in entities:
-        for obs in entity.observations:
-            obs_to_entity_id[id(obs)] = entity.id
-
-    for obs in observations:
-        # Get entity_id for this observation
-        entity_id = obs_to_entity_id.get(id(obs), '')
-
-        # Create perception object from observation
-        perception_obj = {
-            # Identity
-            'entity_id': entity_id,
-            'temp_id': entity_id,
-
-            # Classification
-            'object_class': obs.class_name,
-            'detection_confidence': obs.confidence,
-
-            # Description (from entity, not individual observation)
-            'rich_description': '',  # Will be filled from entity later if needed
-
-            # Temporal
-            'timestamp': obs.timestamp,
-            'frame_number': obs.frame_number,
-
-            # Spatial
-            'bounding_box': obs.bbox,
-            'centroid': (
-                (obs.bbox[0] + obs.bbox[2]) / 2, (obs.bbox[1] + obs.bbox[3]) / 2
-            ) if len(obs.bbox) >= 4 else (0, 0),
-
-            # Visual
-            'visual_embedding': obs.embedding.tolist() if hasattr(obs.embedding, 'tolist') else obs.embedding,
-            'crop_size': (obs.bbox[2] - obs.bbox[0], obs.bbox[3] - obs.bbox[1]) if len(obs.bbox) >= 4 else (0, 0),
-        }
-
-        perception_log.append(perception_obj)
-
-    return perception_log
-
-
 def run_pipeline(
     video_path: str,
     output_dir: str = "data/testing",
-    neo4j_uri: Optional[str] = None,
-    neo4j_user: Optional[str] = None,
-    neo4j_password: Optional[str] = None,
+    neo4j_uri: str = "neo4j://127.0.0.1:7687",
+    neo4j_user: str = "neo4j",
+    neo4j_password: str = "orion123",
     clear_db: bool = True,
     part1_config: str = "balanced",
     part2_config: str = "balanced",
@@ -627,9 +421,9 @@ def run_pipeline(
     Args:
         video_path: Path to input video.
         output_dir: Directory for output artifacts.
-        neo4j_uri: Neo4j database URI (uses ConfigManager if not provided).
-        neo4j_user: Neo4j username (uses ConfigManager if not provided).
-        neo4j_password: Neo4j password (uses ConfigManager if not provided).
+        neo4j_uri: Neo4j database URI.
+        neo4j_user: Neo4j username.
+        neo4j_password: Neo4j password.
         clear_db: Whether to clear Neo4j before running Part 2.
         part1_config: Perception configuration preset (fast/balanced/accurate).
         part2_config: Semantic uplift configuration preset (fast/balanced/accurate).
@@ -642,13 +436,6 @@ def run_pipeline(
     Returns:
         Results dictionary with statistics and file paths.
     """
-    from .config_manager import ConfigManager
-    
-    # Use ConfigManager for defaults
-    config = ConfigManager.get_config()
-    neo4j_uri = neo4j_uri or config.neo4j.uri
-    neo4j_user = neo4j_user or config.neo4j.user
-    neo4j_password = neo4j_password or config.neo4j.password
 
     setup_logging(verbose)
 
@@ -722,14 +509,17 @@ def run_pipeline(
             else:
                 if CONFIGS_AVAILABLE:
                     if part1_config == "fast":
-                        from .config import get_fast_config
-                        # Deprecated: apply_part1_config no-op
+                        from .perception_config import FAST_CONFIG
+
+                        apply_part1_config(FAST_CONFIG)
                     elif part1_config == "accurate":
-                        from .config import get_accurate_config
-                        # Deprecated: apply_part1_config no-op
+                        from .perception_config import ACCURATE_CONFIG
+
+                        apply_part1_config(ACCURATE_CONFIG)
                     else:
-                        from .config import get_balanced_config
-                        # Deprecated: apply_part1_config no-op
+                        from .perception_config import BALANCED_CONFIG
+
+                        apply_part1_config(BALANCED_CONFIG)
 
                 if ui.enabled:
                     ui.add_stage(
@@ -763,14 +553,14 @@ def run_pipeline(
                     if not ui.enabled:
                         return
                     
-                    # Tracking engine events
-                    if event == "tracking.start":
-                        ui.set_stage_status("perception", "Starting tracking engine...")
+                    # Smart perception events
+                    if event == "smart_perception.start":
+                        ui.set_stage_status("perception", "Starting smart perception...")
                     
-                    elif event == "tracking.phase1.start":
+                    elif event == "smart_perception.phase1.start":
                         ui.start_stage("perception.phase1", "Detecting objects with YOLO11x")
                         ui.set_stage_status("perception", "Phase 1: Detection")
-                    elif event == "tracking.phase1.complete":
+                    elif event == "smart_perception.phase1.complete":
                         observations = payload.get("observations", 0)
                         msg = payload.get("message", f"{observations} observations")
                         ui.complete_stage("perception.phase1", msg)
@@ -779,7 +569,7 @@ def run_pipeline(
                         ui.start_stage("perception.phase2", "Clustering with HDBSCAN")
                         ui.set_stage_status("perception", "Phase 2: Clustering")
                     
-                    elif event == "tracking.phase2.complete":
+                    elif event == "smart_perception.phase2.complete":
                         ui.advance_stage("perception", increment=1)
                         entities = payload.get("entities", 0)
                         observations = payload.get("observations", 0)
@@ -790,14 +580,14 @@ def run_pipeline(
                         ui.start_stage("perception.phase3", f"Describing {entities} entities")
                         ui.set_stage_status("perception", "Phase 3: Descriptions")
                     
-                    elif event == "tracking.phase3.complete":
+                    elif event == "smart_perception.phase3.complete":
                         entities = payload.get("entities", 0)
                         msg = payload.get("message", f"{entities} descriptions")
                         ui.complete_stage("perception.phase3", msg)
                         ui.advance_stage("perception", increment=1)
                         ui.set_stage_status("perception", "Phase 3 complete")
                     
-                    elif event == "tracking.complete":
+                    elif event == "smart_perception.complete":
                         entities = payload.get("entities", 0)
                         observations = payload.get("observations", 0)
                         efficiency = payload.get("efficiency", "N/A")
@@ -888,15 +678,16 @@ def run_pipeline(
 
                 start_time = time.time()
                 try:
-                    # Use the old wrapper function for proper event mapping
                     perception_log = run_smart_perception(
                         video_path,
                         progress_callback=handle_progress if ui.enabled else None,
                     )
-                    
                 except Exception as exc:
                     if ui.enabled:
-                        ui.fail_stage("perception", "Tracking engine failed")
+                        ui.fail_stage("perception", "Smart perception failed")
+                        ui.fail_stage("perception.phase1", "Detection failed")
+                        ui.fail_stage("perception.phase2", "Clustering failed")
+                        ui.fail_stage("perception.phase3", "Description failed")
                     raise
 
                 perception_duration = time.time() - start_time
@@ -908,7 +699,7 @@ def run_pipeline(
                 if ui.enabled:
                     ui.complete_stage(
                         "perception",
-                        f"Tracking complete: {unique_entities} entities, {num_objects} observations",
+                        f"Smart perception complete: {unique_entities} entities, {num_objects} observations",
                     )
 
                 perception_log_path = str(
@@ -937,15 +728,15 @@ def run_pipeline(
             else:
                 if CONFIGS_AVAILABLE:
                     if part2_config == "fast":
-                        from .config import SEMANTIC_FAST_CONFIG as SEM_FAST
+                        from .semantic_config import FAST_CONFIG as SEM_FAST
 
                         apply_part2_config(SEM_FAST)
                     elif part2_config == "accurate":
-                        from .config import SEMANTIC_ACCURATE_CONFIG as SEM_ACCURATE
+                        from .semantic_config import ACCURATE_CONFIG as SEM_ACCURATE
 
                         apply_part2_config(SEM_ACCURATE)
                     else:
-                        from .config import SEMANTIC_BALANCED_CONFIG as SEM_BALANCED
+                        from .semantic_config import BALANCED_CONFIG as SEM_BALANCED
 
                         apply_part2_config(SEM_BALANCED)
 
@@ -1376,9 +1167,9 @@ Examples:
         help="Processing configuration",
     )
     parser.add_argument(
-        "--neo4j-uri", default=None, help="Neo4j URI (uses ConfigManager if not provided)"
+        "--neo4j-uri", default="neo4j://127.0.0.1:7687", help="Neo4j URI"
     )
-    parser.add_argument("--neo4j-password", default=None, help="Neo4j password (uses ConfigManager if not provided)")
+    parser.add_argument("--neo4j-password", default="orion123", help="Neo4j password")
     parser.add_argument(
         "--no-clear-db", action="store_true", help="Do not clear Neo4j before running"
     )

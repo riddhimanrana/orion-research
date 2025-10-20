@@ -37,7 +37,7 @@ class VideoQASystem:
         settings = OrionSettings.load()
         self.neo4j_uri = neo4j_uri or settings.neo4j_uri
         self.neo4j_user = neo4j_user or settings.neo4j_user
-        self.neo4j_password = neo4j_password or settings.get_neo4j_password()
+        self.neo4j_password = neo4j_password or settings.neo4j_password
         self.llm_model = llm_model or settings.qa_model
         self.embedding_backend_choice = embedding_backend
         self.embedding_model_name = (
@@ -60,10 +60,10 @@ class VideoQASystem:
             )
             with self.driver.session() as session:
                 session.run("RETURN 1")
-            logger.info("✓ Connected to Neo4j for Q&A")
+            logger.info("\u2713 Connected to Neo4j for Q&A")
             return True
         except Exception as exc:  # pragma: no cover - connection errors are environment driven
-            logger.error("✗ Failed to connect to Neo4j: %s", exc)
+            logger.error("\u2717 Failed to connect to Neo4j: %s", exc)
             return False
 
     def close(self) -> None:
@@ -557,7 +557,7 @@ class VideoQASystem:
         if not self._ensure_embedding_model() or not self.embedding_model:
             return []
         try:
-            vec = self.embedding_model.encode_text(question).tolist()
+            vec = self.embedding_model.encode([question])[0].tolist()
         except Exception as exc:
             logger.debug("Question embedding failed: %s", exc)
             return []
@@ -590,15 +590,15 @@ class VideoQASystem:
         query = """
         MATCH (e:Entity)
         WHERE e.id IN $ids
-    OPTIONAL MATCH (e)-[scene_rel:APPEARS_IN]->(s:Scene)
-    OPTIONAL MATCH (e)-[r:SPATIAL_REL]->(target:Entity)
-        OPTIONAL MATCH (ev:Event)-[:INVOLVES|TARGETS]->(e)
+    OPTIONAL MATCH (e)-[scene_rel:IN_SCENE]->(s:Scene)
+    OPTIONAL MATCH (e)-[r:RELATED_TO]->(target:Entity)
+        OPTIONAL MATCH (e)-[:ASSOCIATED_WITH]->(ev:Event)
         RETURN e.id AS id,
                e.class AS label,
                e.description AS description,
                e.appearance_count AS appearances,
                collect(DISTINCT {
-                   relation: r.type,
+                   relation: type(r),
                    target_id: target.id,
                    target_label: target.class
                }) AS relations,
