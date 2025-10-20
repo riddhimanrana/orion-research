@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import os
+import secrets
+import string
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -58,6 +62,132 @@ def _prepare_runtime(requested: Optional[str]) -> Tuple[str, AssetManager]:
         status.update(f"[green]Runtime '{backend}' synchronized.[/green]")
         time.sleep(0.2)
         return backend, manager
+
+
+def _prepare_runtime_for_backend(backend: str) -> AssetManager:
+    """Prepare runtime assets for a specific backend"""
+    with console.status(
+        "[dim]Preparing runtime assets...[/dim]", spinner="dots"
+    ) as status:
+        set_active_backend(backend)
+        manager = AssetManager()
+
+        if manager.assets_ready(backend):
+            status.update(f"[green]Runtime '{backend}' ready.[/green]")
+            time.sleep(0.2)
+            return manager
+
+        status.update(f"[yellow]Syncing model assets for '{backend}'...[/yellow]")
+        try:
+            manager.ensure_runtime_assets(backend)
+        except Exception as exc:  # noqa: BLE001
+            status.stop()
+            console.print(f"[red]Failed to prepare models: {exc}[/red]")
+            raise
+
+        status.update(f"[green]Runtime '{backend}' synchronized.[/green]")
+        time.sleep(0.2)
+        return manager
+
+
+def _handle_neo4j_command(args: argparse.Namespace) -> None:
+    """Handle Neo4j service management commands"""
+    action = getattr(args, "neo4j_action", None)
+    if action is None:
+        console.print("[red]No Neo4j action provided. Use 'orion services neo4j --help'.[/red]")
+        return
+
+    try:
+        if action == "start":
+            # Check if container exists and start it
+            check_result = subprocess.run(['docker', 'ps', '-a', '--filter', 'name=orion-neo4j'],
+                                        capture_output=True, text=True)
+
+            if 'orion-neo4j' in check_result.stdout:
+                status_result = subprocess.run(['docker', 'ps', '--filter', 'name=orion-neo4j'],
+                                             capture_output=True, text=True)
+
+                if 'orion-neo4j' in status_result.stdout:
+                    console.print("[yellow]✓ Neo4j container already running[/yellow]")
+                else:
+                    result = subprocess.run(['docker', 'start', 'orion-neo4j'], check=True,
+                                          capture_output=True, text=True)
+                    console.print("[green]✓ Neo4j container started[/green]")
+            else:
+                console.print("[red]✗ Neo4j container not found. Run 'orion init' first.[/red]")
+
+        elif action == "stop":
+            result = subprocess.run(['docker', 'stop', 'orion-neo4j'], check=True,
+                                  capture_output=True, text=True)
+            console.print("[green]✓ Neo4j container stopped[/green]")
+
+        elif action == "status":
+            result = subprocess.run(['docker', 'ps', '--filter', 'name=orion-neo4j'],
+                                  capture_output=True, text=True)
+            if 'orion-neo4j' in result.stdout:
+                console.print("[green]✓ Neo4j container is running[/green]")
+            else:
+                console.print("[yellow]⚠ Neo4j container is not running[/yellow]")
+
+        elif action == "restart":
+            subprocess.run(['docker', 'restart', 'orion-neo4j'], check=True,
+                         capture_output=True, text=True)
+            console.print("[green]✓ Neo4j container restarted[/green]")
+
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]✗ Docker command failed: {e.stderr}[/red]")
+    except FileNotFoundError:
+        console.print("[red]✗ Docker not found. Please install Docker first.[/red]")
+
+
+def _handle_ollama_command(args: argparse.Namespace) -> None:
+    """Handle Ollama service management commands"""
+    action = getattr(args, "ollama_action", None)
+    if action is None:
+        console.print("[red]No Ollama action provided. Use 'orion services ollama --help'.[/red]")
+        return
+
+    try:
+        if action == "start":
+            # Check if container exists and start it
+            check_result = subprocess.run(['docker', 'ps', '-a', '--filter', 'name=orion-ollama'],
+                                        capture_output=True, text=True)
+
+            if 'orion-ollama' in check_result.stdout:
+                status_result = subprocess.run(['docker', 'ps', '--filter', 'name=orion-ollama'],
+                                             capture_output=True, text=True)
+
+                if 'orion-ollama' in status_result.stdout:
+                    console.print("[yellow]✓ Ollama container already running[/yellow]")
+                else:
+                    result = subprocess.run(['docker', 'start', 'orion-ollama'], check=True,
+                                          capture_output=True, text=True)
+                    console.print("[green]✓ Ollama container started[/green]")
+            else:
+                console.print("[red]✗ Ollama container not found. Run 'orion init' first.[/red]")
+
+        elif action == "stop":
+            result = subprocess.run(['docker', 'stop', 'orion-ollama'], check=True,
+                                  capture_output=True, text=True)
+            console.print("[green]✓ Ollama container stopped[/green]")
+
+        elif action == "status":
+            result = subprocess.run(['docker', 'ps', '--filter', 'name=orion-ollama'],
+                                  capture_output=True, text=True)
+            if 'orion-ollama' in result.stdout:
+                console.print("[green]✓ Ollama container is running[/green]")
+            else:
+                console.print("[yellow]⚠ Ollama container is not running[/yellow]")
+
+        elif action == "restart":
+            subprocess.run(['docker', 'restart', 'orion-ollama'], check=True,
+                         capture_output=True, text=True)
+            console.print("[green]✓ Ollama container restarted[/green]")
+
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]✗ Docker command failed: {e.stderr}[/red]")
+    except FileNotFoundError:
+        console.print("[red]✗ Docker not found. Please install Docker first.[/red]")
 
 
 def _handle_config_command(args: argparse.Namespace, settings: OrionSettings) -> int:
@@ -279,6 +409,26 @@ For more help: orion <command> --help
 
     subparsers.add_parser("models", help="Show model information")
     subparsers.add_parser("modes", help="Show processing modes")
+
+    # Service management commands
+    services_parser = subparsers.add_parser("services", help="Manage Orion services (Neo4j, Ollama)")
+    services_subparsers = services_parser.add_subparsers(dest="service_command", help="Service actions")
+
+    # Neo4j management
+    neo4j_parser = services_subparsers.add_parser("neo4j", help="Manage Neo4j service")
+    neo4j_subparsers = neo4j_parser.add_subparsers(dest="neo4j_action", help="Neo4j actions")
+    neo4j_subparsers.add_parser("start", help="Start Neo4j container")
+    neo4j_subparsers.add_parser("stop", help="Stop Neo4j container")
+    neo4j_subparsers.add_parser("status", help="Check Neo4j container status")
+    neo4j_subparsers.add_parser("restart", help="Restart Neo4j container")
+
+    # Ollama management
+    ollama_parser = services_subparsers.add_parser("ollama", help="Manage Ollama service")
+    ollama_subparsers = ollama_parser.add_subparsers(dest="ollama_action", help="Ollama actions")
+    ollama_subparsers.add_parser("start", help="Start Ollama container")
+    ollama_subparsers.add_parser("stop", help="Stop Ollama container")
+    ollama_subparsers.add_parser("status", help="Check Ollama container status")
+    ollama_subparsers.add_parser("restart", help="Restart Ollama container")
     
     # Enhanced status command
     status_parser = subparsers.add_parser(
@@ -482,9 +632,18 @@ def main(argv: list[str] | None = None) -> None:
 
     elif args.command == "status":
         from .auto_config import status_command
-        
+
         # Show comprehensive status including services and database
         status_command(args)
+
+    elif args.command == "services":
+        if args.service_command == "neo4j":
+            _handle_neo4j_command(args)
+        elif args.service_command == "ollama":
+            _handle_ollama_command(args)
+        else:
+            console.print("[red]No service command provided. Use 'orion services --help'.[/red]")
+            return
 
     elif args.command == "index":
         from .vector_indexing import backfill_embeddings
@@ -582,38 +741,213 @@ def main(argv: list[str] | None = None) -> None:
         if not neo4j_ok or not ollama_ok:
             console.print("\n[bold red]⚠️  Missing Prerequisites[/bold red]\n")
             console.print("[yellow]Orion requires Neo4j and Ollama to be running before initialization.[/yellow]\n")
-            
+
             if docker_ok:
+                # Interactive Docker setup
+                console.print("[bold cyan]Option 1: Automated Docker Setup (Recommended)[/bold cyan]\n")
+                console.print("[dim]We'll automatically set up Neo4j and Ollama using Docker[/dim]\n")
+
+                console.print("[bold cyan]Option 2: Manual Installation[/bold cyan]\n")
+                console.print("[bold]Neo4j:[/bold] Install from [link=https://neo4j.com/download/]https://neo4j.com/download/[/link]")
+                console.print("[bold]Ollama:[/bold] Install from [link=https://ollama.com]https://ollama.com[/link]\n")
+
+                # Ask user for preference
+                from rich.prompt import Prompt, Confirm
+                use_docker = Confirm.ask("Would you like us to automatically set up services using Docker?", default=True)
+
+                if use_docker:
+                    console.print("\n[bold cyan]🚀 Setting up services automatically with Docker...[/bold cyan]\n")
+
+                    # Generate secure password for Neo4j
+                    console.print("[bold]Step 1: Setting up Neo4j[/bold]")
+                    password_choice = Prompt.ask(
+                        "Choose Neo4j password [1] Enter custom password, [2] Generate secure password",
+                        choices=["1", "2"],
+                        default="2"
+                    )
+
+                    if password_choice == "1":
+                        neo4j_password = Prompt.ask("Enter Neo4j password", password=True)
+                    else:
+                        # Generate secure password using openssl
+                        try:
+                            result = subprocess.run(['openssl', 'rand', '-base64', '32'],
+                                                  capture_output=True, text=True, check=True)
+                            neo4j_password = result.stdout.strip()
+                            console.print(f"[green]Generated secure password: {neo4j_password}[/green]")
+                        except (subprocess.CalledProcessError, FileNotFoundError):
+                            # Fallback if openssl not available
+                            import secrets
+                            import string
+                            alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+                            neo4j_password = ''.join(secrets.choice(alphabet) for _ in range(32))
+                            console.print(f"[green]Generated secure password: {neo4j_password}[/green]")
+
+                    # Set password in environment for init script to use
+                    os.environ["ORION_NEO4J_PASSWORD"] = neo4j_password
+                    os.environ["ORION_NEO4J_USER"] = "neo4j"
+                    os.environ["ORION_NEO4J_URI"] = "neo4j://127.0.0.1:7687"
+                    os.environ["ORION_OLLAMA_URL"] = "http://localhost:11434"
+
+                    # Check if Neo4j container already exists
+                    console.print("[dim]Checking for existing Neo4j container...[/dim]")
+                    try:
+                        # Check if container exists
+                        check_result = subprocess.run(['docker', 'ps', '-a', '--filter', 'name=orion-neo4j'],
+                                                    capture_output=True, text=True)
+
+                        if 'orion-neo4j' in check_result.stdout:
+                            # Container exists, check if it's running
+                            status_result = subprocess.run(['docker', 'ps', '--filter', 'name=orion-neo4j'],
+                                                         capture_output=True, text=True)
+
+                            if 'orion-neo4j' in status_result.stdout:
+                                console.print("[yellow]✓ Neo4j container already running[/yellow]")
+                                console.print("[dim]Using existing Neo4j container[/dim]")
+                                # Test connection with the new password
+                                console.print("[dim]Testing connection with new password...[/dim]")
+                            else:
+                                console.print("[yellow]⚠ Neo4j container exists but is stopped[/yellow]")
+                                # Remove the stopped container and create a new one with our password
+                                console.print("[dim]Removing old container to use new password...[/dim]")
+                                subprocess.run(['docker', 'rm', 'orion-neo4j'], capture_output=True, text=True)
+                                console.print("[dim]Creating new Neo4j container...[/dim]")
+                                neo4j_cmd = f"docker run --name orion-neo4j -d -p 7687:7687 -p 7474:7474 -e NEO4J_AUTH=neo4j/{neo4j_password} neo4j:latest"
+                                result = subprocess.run(neo4j_cmd.split(), check=True, capture_output=True, text=True)
+                                console.print("[green]✓ Neo4j container created with new password[/green]")
+                        else:
+                            # Container doesn't exist, create new one
+                            console.print("[dim]Creating new Neo4j container...[/dim]")
+                            neo4j_cmd = f"docker run --name orion-neo4j -d -p 7687:7687 -p 7474:7474 -e NEO4J_AUTH=neo4j/{neo4j_password} neo4j:latest"
+                            result = subprocess.run(neo4j_cmd.split(), check=True, capture_output=True, text=True)
+                            console.print("[green]✓ Neo4j container created and started[/green]")
+
+                    except subprocess.CalledProcessError as e:
+                        console.print(f"[red]✗ Failed to manage Neo4j container: {e.stderr}[/red]")
+                        console.print("[yellow]Try manually:[/yellow]")
+                        console.print("[dim]docker stop orion-neo4j && docker rm orion-neo4j[/dim]")
+                        sys.exit(1)
+
+                    # Start Ollama container
+                    console.print("[bold]Step 2: Setting up Ollama[/bold]")
+
+                    # Check if Ollama container already exists
+                    console.print("[dim]Checking for existing Ollama container...[/dim]")
+                    try:
+                        # Check if container exists
+                        check_result = subprocess.run(['docker', 'ps', '-a', '--filter', 'name=orion-ollama'],
+                                                    capture_output=True, text=True)
+
+                        if 'orion-ollama' in check_result.stdout:
+                            # Container exists, check if it's running
+                            status_result = subprocess.run(['docker', 'ps', '--filter', 'name=orion-ollama'],
+                                                         capture_output=True, text=True)
+
+                            if 'orion-ollama' in status_result.stdout:
+                                console.print("[yellow]✓ Ollama container already running[/yellow]")
+                                console.print("[dim]Using existing Ollama container[/dim]")
+                            else:
+                                console.print("[yellow]⚠ Ollama container exists but is stopped[/yellow]")
+                                start_result = subprocess.run(['docker', 'start', 'orion-ollama'],
+                                                            capture_output=True, text=True)
+                                if start_result.returncode == 0:
+                                    console.print("[green]✓ Started existing Ollama container[/green]")
+                                else:
+                                    console.print(f"[red]✗ Failed to start existing container: {start_result.stderr}[/red]")
+                                    sys.exit(1)
+                        else:
+                            # Container doesn't exist, create new one
+                            console.print("[dim]Creating new Ollama container...[/dim]")
+                            ollama_cmd = "docker run --name orion-ollama -d -p 11434:11434 ollama/ollama"
+                            result = subprocess.run(ollama_cmd.split(), check=True, capture_output=True, text=True)
+                            console.print("[green]✓ Ollama container created and started[/green]")
+
+                        # Wait a moment for Ollama to be ready
+                        console.print("[dim]Waiting for Ollama to be ready...[/dim]")
+                        time.sleep(3)
+
+                        # Download the required model
+                        console.print("[dim]Downloading gemma3:4b model...[/dim]")
+                        try:
+                            pull_result = subprocess.run(['docker', 'exec', 'orion-ollama', 'ollama', 'pull', 'gemma3:4b'],
+                                                       check=True, capture_output=True, text=True)
+                            console.print("[green]✓ Model gemma3:4b downloaded successfully[/green]")
+                        except subprocess.CalledProcessError as e:
+                            console.print(f"[yellow]⚠ Model download failed: {e.stderr}[/yellow]")
+                            console.print("[dim]You can manually run: docker exec orion-ollama ollama pull gemma3:4b[/dim]")
+
+                    except subprocess.CalledProcessError as e:
+                        console.print(f"[red]✗ Failed to manage Ollama container: {e.stderr}[/red]")
+                        console.print("[yellow]Try manually:[/yellow]")
+                        console.print("[dim]docker stop orion-ollama && docker rm orion-ollama[/dim]")
+                        sys.exit(1)
+
+                    console.print("\n[green]✓ Services setup complete! Running initialization...[/green]")
+                    # Continue with normal initialization flow
+                else:
+                    console.print("[dim]Please install Neo4j and Ollama manually, then run 'orion init' again.[/dim]\n")
+                    sys.exit(1)
+            elif ollama_ok and not docker_ok:
+                console.print("\n[bold yellow]⚠️ Ollama is running but Docker is not available[/yellow]\n")
+                console.print("[yellow]You have two options:[/yellow]\n")
+
+                console.print("[bold cyan]Option 1: Install Docker (Recommended)[/bold cyan]")
+                console.print("[dim]Install Docker to get Neo4j running automatically:[/dim]")
+                console.print("[link=https://www.docker.com/products/docker-desktop]https://www.docker.com/products/docker-desktop[/link]\n")
+
+                console.print("[bold cyan]Option 2: Manual Neo4j Installation[/bold cyan]")
+                console.print("[dim]Install Neo4j manually and configure it to work with your existing Ollama setup[/dim]")
+                console.print("[link=https://neo4j.com/download/]https://neo4j.com/download/[/link]\n")
+
+                console.print("[bold cyan]Once Neo4j is running, run `orion init` again![/bold cyan]\n")
+                sys.exit(1)
+
+            elif docker_ok and not ollama_ok:
+                console.print("\n[bold yellow]⚠️ Docker is available but Ollama is not running[/yellow]\n")
+                console.print("[yellow]You have two options:[/yellow]\n")
+
                 console.print("[bold cyan]Option 1: Use Docker (Recommended)[/bold cyan]")
-                console.print("[dim]The easiest way to get both services running:[/dim]\n")
-                commands = config.suggest_setup_docker()
-                console.print("[bold]Start Neo4j:[/bold]")
-                console.print(f"[dim]{commands['neo4j']}[/dim]\n")
-                console.print("[bold]Start Ollama:[/bold]")
-                console.print(f"[dim]{commands['ollama']}[/dim]\n")
-                console.print("[dim]Then download the LLM model:[/dim]")
-                console.print("[dim]docker exec orion-ollama ollama pull gemma3:4b[/dim]\n")
+                console.print("[dim]We'll set up both Neo4j and Ollama using Docker[/dim]\n")
+
+                console.print("[bold cyan]Option 2: Manual Ollama Installation[/bold cyan]")
+                console.print("[dim]Install Ollama manually and we'll use Docker for Neo4j[/dim]")
+                console.print("[link=https://ollama.com]https://ollama.com[/link]\n")
+
+                console.print("[bold cyan]Once both services are running, run `orion init` again![/bold cyan]\n")
+                sys.exit(1)
+
             else:
+                console.print("\n[bold red]❌ Neither Docker nor the required services are available[/red]\n")
+                console.print("[yellow]Please install Docker (recommended) or set up Neo4j and Ollama manually:[/yellow]\n")
+
                 console.print("[bold cyan]Option 1: Install Docker[/bold cyan]")
-                console.print("[dim][https://www.docker.com/products/docker-desktop][/dim]\n")
-            
-            console.print("[bold cyan]Option 2: Manual Installation[/bold cyan]\n")
-            console.print("[bold]Neo4j:[/bold] Install from [https://neo4j.com/download/][/dim]")
-            console.print("[bold]Ollama:[/bold] Install from [https://ollama.com][/dim]\n")
-            console.print("[bold]Then run:[/bold]")
-            console.print("[dim]ollama pull gemma3:4b[/dim]\n")
-            
-            console.print("[bold cyan]Once services are running, run `orion init` again![/bold cyan]\n")
-            sys.exit(1)
+                console.print("[link=https://www.docker.com/products/docker-desktop]https://www.docker.com/products/docker-desktop[/link]\n")
+
+                console.print("[bold cyan]Option 2: Manual Installation[/bold cyan]")
+                console.print("[bold]Neo4j:[/bold] [link=https://neo4j.com/download/]https://neo4j.com/download/[/link]")
+                console.print("[bold]Ollama:[/bold] [link=https://ollama.com]https://ollama.com[/link]\n")
+
+                console.print("[bold cyan]Once services are running, run `orion init` again![/bold cyan]\n")
+                sys.exit(1)
         
         console.print("[green]✓ All prerequisites met![/green]\n")
         
-        # Step 2: Download models and configure environment
-        console.print("[bold]Step 2: Preparing runtime and downloading models...[/bold]\n")
+        # Step 2: Detect hardware and select runtime
+        console.print("[bold]Step 2: Detecting hardware and selecting runtime...[/bold]\n")
+
+        # Auto-detect the best runtime for this system (ignore CLI args for auto-detection)
         try:
-            backend, manager = _prepare_runtime(
-                args.runtime or settings.runtime_backend
-            )
+            from .runtime import select_backend
+            backend: str = select_backend(None)  # Force auto-detection
+            console.print(f"[green]Selected runtime: {backend}[/green]")
+        except Exception as e:
+            console.print(f"[red]Failed to select runtime: {e}[/red]")
+            sys.exit(1)
+
+        # Download models and configure environment
+        console.print("[bold]Preparing runtime and downloading models...[/bold]\n")
+        try:
+            manager = _prepare_runtime_for_backend(backend)
         except Exception:
             sys.exit(1)
 
@@ -645,7 +979,6 @@ def main(argv: list[str] | None = None) -> None:
         init_script = Path(__file__).resolve().parents[1] / "scripts" / "init.py"
         if init_script.exists():
             console.print(f"[dim]python {init_script}[/dim]\n")
-            import subprocess
 
             result = subprocess.run([sys.executable, str(init_script)], check=False)
             if result.returncode == 0:

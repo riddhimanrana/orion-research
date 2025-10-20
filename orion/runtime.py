@@ -24,6 +24,15 @@ def _is_apple_silicon() -> bool:
     return platform.system() == "Darwin" and platform.processor() == "arm"
 
 
+def _has_cuda() -> bool:
+    """Check if CUDA is available."""
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except ImportError:
+        return False
+
+
 def _normalize_backend_name(name: str) -> str:
     lowered = name.lower()
     if lowered in _SUPPORTED:
@@ -37,7 +46,7 @@ def is_backend_available(backend: str) -> bool:
     if normalized == "torch":
         return _module_exists("torch")
     if normalized == "mlx":
-        return _is_apple_silicon() and _module_exists("mlx")
+        return _is_apple_silicon() and _module_exists("mlx_vlm")
     return False
 
 
@@ -57,7 +66,7 @@ def select_backend(preferred: Optional[str] = None) -> BackendName:
         if normalized == "mlx":
             if not is_backend_available("mlx"):
                 raise RuntimeError(
-                    "MLX backend requires Apple Silicon (M1/M2/M3) and mlx-vlm package."
+                    "MLX backend requires Apple Silicon (M1/M2/M3) and mlx-vlm package. Install with: pip install mlx-vlm"
                 )
             logger.info("Using MLX backend for Apple Silicon optimization.")
             return "mlx"

@@ -8,6 +8,8 @@ import os
 import platform
 import subprocess
 import tempfile
+import urllib.request
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
@@ -47,8 +49,21 @@ class AssetManager:
 
     @staticmethod
     def _default_cache_dir() -> Path:
-        project_root = Path(__file__).resolve().parents[3]
-        return project_root / "models"
+        # Go up from orion/models/asset_manager.py to find orion-research/
+        # __file__ is orion/models/asset_manager.py
+        # parents[0] = orion/models/
+        # parents[1] = orion/
+        # parents[2] = orion-research/
+        project_root = Path(__file__).resolve().parents[2]
+        models_dir = project_root / "models"
+
+        # Debug logging
+        console.print(f"[dim]Debug: __file__ = {Path(__file__)}[/dim]")
+        console.print(f"[dim]Debug: resolved = {Path(__file__).resolve()}[/dim]")
+        console.print(f"[dim]Debug: parents[2] = {Path(__file__).resolve().parents[2]}[/dim]")
+        console.print(f"[dim]Debug: models_dir = {models_dir}[/dim]")
+
+        return models_dir
 
     @staticmethod
     def _is_apple_silicon() -> bool:
@@ -186,25 +201,20 @@ class AssetManager:
             zip_path = target_dir.parent / zip_filename
             
             try:
-                # wget to models directory
-                console.print(f"[dim]Running: wget -O {zip_path} {asset.url}[/dim]")
-                subprocess.run(
-                    ["wget", "-O", str(zip_path), asset.url],
-                    check=True,
-                    cwd=str(self.cache_dir),
-                    capture_output=True
-                )
+                # Download using Python's built-in urllib
+                console.print(f"[dim]Downloading {zip_filename}...[/dim]")
+                urllib.request.urlretrieve(asset.url, zip_path)
                 console.print(f"[green]✓ Downloaded {zip_filename}[/green]")
-                
-                # unzip -qq (quiet mode) to a temp location
+
+                # Extract using Python's built-in zipfile
                 temp_extract = target_dir.parent / f"{target_dir.name}_temp"
-                console.print(f"[dim]Running: unzip -qq {zip_path} -d {temp_extract}[/dim]")
-                subprocess.run(
-                    ["unzip", "-qq", str(zip_path), "-d", str(temp_extract)],
-                    check=True
-                )
+                temp_extract.mkdir(parents=True, exist_ok=True)
+
+                console.print(f"[dim]Extracting archive...[/dim]")
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(temp_extract)
                 console.print(f"[green]✓ Extracted archive[/green]")
-                
+
                 # Move files from subdirectory to target (Apple zip has nested dir)
                 import shutil
                 extracted_subdir = temp_extract / "llava-fastvithd_0.5b_stage3_llm.fp16"
@@ -218,49 +228,27 @@ class AssetManager:
                     # Fallback: rename temp to target
                     temp_extract.rename(target_dir)
                     console.print(f"[green]✓ Extracted to {target_dir}[/green]")
-                
-                # rm zip file
+
+                # Clean up zip file
                 zip_path.unlink()
                 console.print(f"[green]✓ Cleaned up {zip_filename}[/green]")
                 
-                # Convert to MLX format using mlx-vlm convert
-                console.print(f"[yellow]Converting model to MLX format...[/yellow]")
-                console.print(f"[dim]This may take a few minutes...[/dim]")
-                mlx_converted_dir = target_dir.parent / f"{target_dir.name}_mlx"
-                try:
-                    subprocess.run(
-                        [
-                            "python", "-m", "mlx_vlm.convert",
-                            "--hf-path", str(target_dir),
-                            "--mlx-path", str(mlx_converted_dir),
-                            "--only-llm"
-                        ],
-                        check=True,
-                        capture_output=True,
-                        text=True
-                    )
-                    # Move converted files back to target_dir
-                    import shutil
-                    shutil.rmtree(target_dir)
-                    mlx_converted_dir.rename(target_dir)
-                    console.print(f"[green]✓ Converted to MLX format[/green]")
-                except subprocess.CalledProcessError as conv_exc:
-                    console.print(f"[yellow]Warning: MLX conversion failed: {conv_exc}[/yellow]")
-                    console.print(f"[yellow]Model will use PyTorch format (slower)[/yellow]")
-                    if mlx_converted_dir.exists():
-                        import shutil
-                        shutil.rmtree(mlx_converted_dir, ignore_errors=True)
+                # Model is already pre-converted fp16 from Apple CDN
+                console.print(f"[green]✓ Pre-converted MLX fp16 model ready[/green]")
+                console.print(f"[dim]No conversion needed - using optimized Apple fp16 format[/dim]")
                 
                 console.print(f"[bold green]✓ MLX fp16 model ready at {target_dir}[/bold green]")
                 
-            except subprocess.CalledProcessError as exc:
+            except Exception as exc:
                 console.print(f"[red]Failed to download/extract MLX model: {exc}[/red]")
                 if zip_path.exists():
                     zip_path.unlink()
+                # Clean up temp directory if it exists
+                temp_extract = target_dir.parent / f"{target_dir.name}_temp"
+                if temp_extract.exists():
+                    import shutil
+                    shutil.rmtree(temp_extract, ignore_errors=True)
                 raise RuntimeError(f"MLX model download failed: {exc}")
-            except FileNotFoundError as exc:
-                console.print(f"[red]wget or unzip not found. Please install: brew install wget[/red]")
-                raise RuntimeError("Missing required tools for MLX download") from exc
             
             return target_dir
         elif asset.huggingface_repo:

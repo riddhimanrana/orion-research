@@ -118,7 +118,7 @@ Should show all services connected ✓
 ### Analyze Videos
 
 ```bash
-# Standard analysis
+# Standard analysis (balanced)
 orion analyze video.mp4
 
 # Quick mode (faster, less accurate)

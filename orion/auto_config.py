@@ -364,7 +364,7 @@ def status_command(args) -> int:
     
     Comprehensive system status check
     """
-    console.print("\n[bold cyan]📊 Orion System Status[/bold cyan]\n")
+    console.print("\n[bold cyan]Orion System Status[/bold cyan]\n")
     
     config = AutoConfiguration()
     results = config.detect_all_services()

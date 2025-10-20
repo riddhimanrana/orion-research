@@ -408,43 +408,52 @@ def _resolve_runtime(preferred: Optional[str]) -> Tuple[str, AssetManager]:
 def _convert_tracking_results_to_perception_log(entities: List[Any], observations: List[Any]) -> List[Dict[str, Any]]:
     """
     Convert tracking engine output (entities, observations) to perception log format.
-    
+
     The tracking engine returns Entity and Observation objects.
     We convert them to a list of dicts matching the perception log format.
     """
     perception_log = []
-    
+
+    # Create a mapping from observation to entity_id for lookup
+    obs_to_entity_id = {}
+    for entity in entities:
+        for obs in entity.observations:
+            obs_to_entity_id[id(obs)] = entity.id
+
     for obs in observations:
+        # Get entity_id for this observation
+        entity_id = obs_to_entity_id.get(id(obs), '')
+
         # Create perception object from observation
         perception_obj = {
             # Identity
-            'entity_id': obs.entity_id if hasattr(obs, 'entity_id') else obs.get('entity_id', ''),
-            'temp_id': obs.entity_id if hasattr(obs, 'entity_id') else obs.get('entity_id', ''),
-            
+            'entity_id': entity_id,
+            'temp_id': entity_id,
+
             # Classification
-            'object_class': obs.class_name if hasattr(obs, 'class_name') else obs.get('class_name', 'unknown'),
-            'detection_confidence': obs.confidence if hasattr(obs, 'confidence') else obs.get('confidence', 0.5),
-            
+            'object_class': obs.class_name,
+            'detection_confidence': obs.confidence,
+
             # Description (from entity, not individual observation)
-            'rich_description': obs.description if hasattr(obs, 'description') else obs.get('description', ''),
-            
+            'rich_description': '',  # Will be filled from entity later if needed
+
             # Temporal
-            'timestamp': obs.timestamp if hasattr(obs, 'timestamp') else obs.get('timestamp', 0.0),
-            'frame_number': obs.frame_number if hasattr(obs, 'frame_number') else obs.get('frame_number', 0),
-            
+            'timestamp': obs.timestamp,
+            'frame_number': obs.frame_number,
+
             # Spatial
-            'bounding_box': obs.bbox if hasattr(obs, 'bbox') else obs.get('bbox', [0, 0, 0, 0]),
+            'bounding_box': obs.bbox,
             'centroid': (
                 (obs.bbox[0] + obs.bbox[2]) / 2, (obs.bbox[1] + obs.bbox[3]) / 2
-            ) if (hasattr(obs, 'bbox') and len(obs.bbox) >= 4) else (0, 0),
-            
+            ) if len(obs.bbox) >= 4 else (0, 0),
+
             # Visual
-            'visual_embedding': obs.embedding.tolist() if (hasattr(obs, 'embedding') and hasattr(obs.embedding, 'tolist')) else obs.embedding if hasattr(obs, 'embedding') else [],
-            'crop_size': (obs.bbox[2] - obs.bbox[0], obs.bbox[3] - obs.bbox[1]) if (hasattr(obs, 'bbox') and len(obs.bbox) >= 4) else (0, 0),
+            'visual_embedding': obs.embedding.tolist() if hasattr(obs.embedding, 'tolist') else obs.embedding,
+            'crop_size': (obs.bbox[2] - obs.bbox[0], obs.bbox[3] - obs.bbox[1]) if len(obs.bbox) >= 4 else (0, 0),
         }
-        
+
         perception_log.append(perception_obj)
-    
+
     return perception_log
 
 

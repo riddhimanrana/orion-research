@@ -59,11 +59,14 @@ def detect_hardware() -> str:
             console.print("[green]✓ Apple Silicon detected (M1/M2/M3+)[/]")
             console.print("  [cyan]MLX backend available for optimal performance[/]")
             return "mlx"
+        else:
+            console.print("[yellow]⚠️  Apple Silicon detected but MLX not available[/]")
+            console.print("  [cyan]Install mlx-vlm for optimal performance: pip install -e ./mlx-vlm[/]")
+            return "torch"
 
     # Check for NVIDIA CUDA
     try:
         import torch
-
         if torch.cuda.is_available():
             console.print("[green]✓ NVIDIA GPU detected[/]")
             console.print(f"  [cyan]CUDA available: {torch.cuda.get_device_name(0)}[/]")
@@ -71,8 +74,15 @@ def detect_hardware() -> str:
     except ImportError:
         pass
 
-    console.print("[yellow]⚠️  CPU-only mode[/]")
-    console.print("  [cyan]Consider installing CUDA for GPU acceleration[/]")
+    # Check if we're on a system that could benefit from CUDA
+    if system == "Linux" and (processor and "x86" in processor):
+        console.print("[yellow]⚠️  Linux x86_64 detected[/]")
+        console.print("  [cyan]Consider installing CUDA for GPU acceleration[/]")
+        console.print("  [cyan]Install PyTorch with CUDA: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121[/]")
+    else:
+        console.print("[yellow]⚠️  CPU-only mode[/]")
+        console.print("  [cyan]Performance will be limited without GPU acceleration[/]")
+
     return "torch"
 
 
@@ -80,63 +90,56 @@ def check_system_deps() -> bool:
     """Check for required system dependencies"""
     console.print("\n[bold cyan]Checking system dependencies...[/]")
 
-    # Check for wget
-    try:
-        subprocess.run(["which", "wget"], capture_output=True, check=True)
-        console.print("[green]✓ wget found[/]")
-    except subprocess.CalledProcessError:
-        console.print("[yellow]⚠️  wget not found (optional)[/]")
-        if platform.system() == "Darwin":
-            console.print("  [cyan]Install with: brew install wget[/]")
-        else:
-            console.print("  [cyan]Install with: sudo apt-get install wget[/]")
+    # Check for Python modules we need
+    required_modules = ['requests', 'huggingface_hub']
+    missing_modules = []
 
+    for module in required_modules:
+        try:
+            __import__(module)
+            console.print(f"[green]✓ {module} found[/]")
+        except ImportError:
+            missing_modules.append(module)
+            console.print(f"[red]✗ {module} not found[/]")
+
+    if missing_modules:
+        console.print(f"[yellow]Install missing modules: pip install {' '.join(missing_modules)}[/]")
+        return False
+
+    console.print("[green]✓ All required Python modules available[/]")
     return True
 
 
 def setup_environment_variables() -> dict:
-    """Interactively set up environment variables"""
+    """Automatically set up environment variables based on detected configuration"""
     console.print("\n[bold cyan]Setting up environment variables...[/]")
 
     env_vars = {}
 
-    # Neo4j configuration
-    console.print("\n[bold yellow]Neo4j Configuration[/]")
-    neo4j_uri = Prompt.ask(
-        "Neo4j URI",
-        default="neo4j://127.0.0.1:7687",
-    )
-    neo4j_user = Prompt.ask("Neo4j username", default="neo4j")
-
-    # Securely prompt for password
-    console.print("[yellow]Neo4j password will be stored in environment variable[/]")
-    console.print("[yellow]It will NOT be saved to disk for security[/]")
-    neo4j_password = getpass.getpass("Neo4j password: ")
+    # Neo4j configuration - use environment variables set by CLI
+    neo4j_uri = os.environ.get("ORION_NEO4J_URI", "neo4j://127.0.0.1:7687")
+    neo4j_user = os.environ.get("ORION_NEO4J_USER", "neo4j")
+    neo4j_password = os.environ.get("ORION_NEO4J_PASSWORD", "orion_secure_password")
 
     env_vars["ORION_NEO4J_URI"] = neo4j_uri
     env_vars["ORION_NEO4J_USER"] = neo4j_user
     env_vars["ORION_NEO4J_PASSWORD"] = neo4j_password
 
     # Ollama configuration
-    console.print("\n[bold yellow]Ollama Configuration[/]")
-    ollama_url = Prompt.ask(
-        "Ollama server URL",
-        default="http://localhost:11434",
-    )
+    ollama_url = "http://localhost:11434"
     env_vars["ORION_OLLAMA_URL"] = ollama_url
 
-    # Runtime backend
+    # Runtime backend - use detected hardware
     detected_backend = detect_hardware()
-    use_detected = Confirm.ask(
-        f"Use detected backend ({detected_backend})?", default=True
-    )
-    if not use_detected:
-        backend = Prompt.ask(
-            "Runtime backend", choices=["auto", "torch", "mlx"], default="auto"
-        )
-        env_vars["ORION_RUNTIME_BACKEND"] = backend
-    else:
-        env_vars["ORION_RUNTIME_BACKEND"] = detected_backend
+    env_vars["ORION_RUNTIME_BACKEND"] = detected_backend
+
+    # Display the configuration to the user
+    console.print("\n[green]✓ Auto-configured environment variables:[/]")
+    console.print(f"  [cyan]Neo4j URI:[/] {neo4j_uri}")
+    console.print(f"  [cyan]Neo4j User:[/] {neo4j_user}")
+    console.print(f"  [cyan]Ollama URL:[/] {ollama_url}")
+    console.print(f"  [cyan]Runtime Backend:[/] {detected_backend}")
+    console.print(f"  [yellow]Neo4j Password:[/] [dim][Set securely in environment][/dim]\n")
 
     return env_vars
 
@@ -177,9 +180,15 @@ def verify_neo4j_connection(uri: str, user: str, password: str) -> bool:
         return True
 
     console.print("[red]❌ Could not connect to Neo4j[/]")
-    console.print("[yellow]Make sure Neo4j is running:[/]")
-    console.print("  [cyan]docker run -d --name neo4j -p 7474:7474 -p 7687:7687 \\[/]")
-    console.print('    [cyan]-e NEO4J_AUTH=neo4j/your-password neo4j:latest[/]')
+    console.print("[yellow]Make sure Neo4j is running with correct credentials:[/]")
+    console.print("  [cyan]docker run -d --name orion-neo4j -p 7474:7474 -p 7687:7687 \\[/]")
+    console.print(f'    [cyan]-e NEO4J_AUTH=neo4j/{password} neo4j:latest[/]')
+    console.print("[yellow]Or if container exists, restart with new password:[/]")
+    console.print("  [cyan]docker restart orion-neo4j[/]")
+    console.print("[yellow]Or manage services with:[/]")
+    console.print("  [cyan]orion services neo4j restart[/]")
+    console.print("[dim]You can also visit http://localhost:7474 in your browser[/]")
+    console.print("[dim]to access the Neo4j browser interface[/]")
     return False
 
 
@@ -279,9 +288,9 @@ def main():
             "[bold green]✓ Initialization Complete![/]\n"
             "[cyan]Next steps:[/]\n"
             "1. Source environment: [yellow]source ~/.orion/.env[/]\n"
-            "2. Start Neo4j: [yellow]docker run -d --name neo4j ...[/]\n"
-            "3. Start Ollama: [yellow]ollama serve[/]\n"
-            "4. Process video: [yellow]orion process video.mp4[/]",
+            "2. Start Neo4j: [yellow]orion services neo4j start[/]\n"
+            "3. Start Ollama: [yellow]orion services ollama start[/]\n"
+            "4. Process video: [yellow]orion analyze video.mp4[/]",
             border_style="green",
         )
     )

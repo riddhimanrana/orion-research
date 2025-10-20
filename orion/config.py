@@ -92,8 +92,8 @@ class EmbeddingConfig:
 class ClusteringConfig:
     """HDBSCAN clustering configuration"""
     
-    # Core parameters
-    min_cluster_size: int = 3
+    # Core parameters - reduced for more aggressive clustering
+    min_cluster_size: int = 2
     """Minimum appearances to form an entity"""
     
     min_samples: int = 1
@@ -103,8 +103,8 @@ class ClusteringConfig:
     metric: Literal["euclidean", "cosine"] = "euclidean"
     """Distance metric for clustering"""
     
-    # CLIP-optimized epsilon
-    cluster_selection_epsilon: float = 0.35
+    # CLIP-optimized epsilon - reduced to prevent over-clustering
+    cluster_selection_epsilon: float = 0.25
     """Max distance to merge clusters (tuned for CLIP's 512-dim space)"""
     
     # State change detection
