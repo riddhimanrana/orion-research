@@ -592,7 +592,7 @@ class VideoQASystem:
         WHERE e.id IN $ids
     OPTIONAL MATCH (e)-[scene_rel:APPEARS_IN]->(s:Scene)
     OPTIONAL MATCH (e)-[r:SPATIAL_REL]->(target:Entity)
-        OPTIONAL MATCH (ev:Event)-[:INVOLVES|TARGETS]->(e)
+        OPTIONAL MATCH (ev:Event)-[:INVOLVES]->(e)
         RETURN e.id AS id,
                e.class AS label,
                e.description AS description,
@@ -634,12 +634,15 @@ class VideoQASystem:
     def _fetch_recent_events(self, session, limit: int) -> List[Dict[str, Any]]:
         query = """
         MATCH (e:Event)
+        WITH e
+        ORDER BY e.timestamp DESC
+        LIMIT $limit
+        OPTIONAL MATCH (participant:Entity)-[:PARTICIPATED_IN]->(e)
         RETURN e.id AS id,
                e.type AS type,
                e.timestamp AS timestamp,
-               e.description AS description
-        ORDER BY e.timestamp DESC
-        LIMIT $limit
+               e.description AS description,
+               collect(DISTINCT participant.class) AS participants
         """
         return session.run(query, {"limit": int(limit)}).data()
 
@@ -652,7 +655,7 @@ class VideoQASystem:
         MATCH (e:Event)
         WHERE e.id IN $ids
         OPTIONAL MATCH (participant:Entity)-[:PARTICIPATED_IN]->(e)
-        OPTIONAL MATCH (e)-[:OCCURRED_AT]->(scene:Scene)
+        OPTIONAL MATCH (participant)-[:APPEARS_IN]->(scene:Scene)
         RETURN e.id AS id,
                collect(DISTINCT participant.class) AS participants,
                collect(DISTINCT scene.scene_type) AS locations
