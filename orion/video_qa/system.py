@@ -571,7 +571,7 @@ class VideoQASystem:
         query = """
         MATCH (e:Entity)
         RETURN e.id AS id,
-               e.class AS label,
+               e.object_class AS label,
                e.appearance_count AS appearances,
                e.description AS description
         ORDER BY e.appearance_count DESC
