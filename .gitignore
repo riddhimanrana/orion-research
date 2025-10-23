@@ -17,9 +17,11 @@ __pycache__/
 .DS_Store
 
 /data/testing/
+/data/*.json
+/data/benchmarks/
+/data/tao_amodal/
 
 /orion-old
-/data/vsgr_aspire
 
 
 # Distribution / packaging
