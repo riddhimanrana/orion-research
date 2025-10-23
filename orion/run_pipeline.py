@@ -409,7 +409,7 @@ def run_smart_perception(
     video_path: str,
     progress_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
     config: Optional[Any] = None,
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Run smart tracking-based perception.
 
@@ -423,7 +423,7 @@ def run_smart_perception(
         config: Optional configuration
 
     Returns:
-        List of perception objects (compatible with semantic_uplift)
+        Tuple of (perception_log, tracking_stats)
     """
     logger = logging.getLogger(__name__)
 
@@ -440,7 +440,7 @@ def run_smart_perception(
             "phase": "Detection & CLIP Embeddings"
         })
 
-    entities, observations = run_tracking_engine(video_path, config)
+    entities, observations, tracking_stats = run_tracking_engine(video_path, config)
 
     if progress_callback:
         progress_callback("smart_perception.phase1.complete", {
@@ -482,17 +482,22 @@ def run_smart_perception(
             continue
 
         # Create perception object
+        canonical_label = obs.canonical_label or entity.class_name
         perception_obj = {
             # Identity
             'entity_id': entity.id,
             'temp_id': entity.id,  # Use entity ID as temp_id
 
             # Classification
-            'object_class': entity.class_name,
+            'yolo_class': entity.class_name,  # Original YOLO output
+            'canonical_label': canonical_label,  # Corrected class
+            'object_class': canonical_label,  # For backward compatibility
             'detection_confidence': obs.confidence,
+            'was_corrected': obs.was_corrected,
+            'correction_confidence': obs.correction_confidence,
 
             # Description (from entity, not individual observation)
-            'rich_description': entity.description or f"a {entity.class_name}",
+            'rich_description': entity.description or f"a {canonical_label}",
 
             # Temporal
             'timestamp': obs.timestamp,
@@ -539,7 +544,7 @@ def run_smart_perception(
     logger.info(f"\n✓ Generated perception log with {len(perception_log)} observations")
     logger.info(f"✓ All {len(entities)} unique entities have descriptions")
 
-    return perception_log
+    return perception_log, tracking_stats
 
 
 def _bboxes_match(bbox1: List[int], bbox2: List[int], threshold: float = 5.0) -> bool:
@@ -580,8 +585,11 @@ def _convert_tracking_results_to_perception_log(entities: List[Any], observation
             'temp_id': entity_id,
 
             # Classification
-            'object_class': obs.class_name,
+            'object_class': getattr(obs, 'canonical_label', obs.class_name),  # Use corrected label if available
             'detection_confidence': obs.confidence,
+            'original_class': obs.class_name if hasattr(obs, 'canonical_label') and obs.canonical_label != obs.class_name else None,
+            'was_corrected': getattr(obs, 'was_corrected', False),
+            'correction_confidence': getattr(obs, 'correction_confidence', None),
 
             # Description (from entity, not individual observation)
             'rich_description': '',  # Will be filled from entity later if needed
@@ -670,6 +678,7 @@ def run_pipeline(
     perception_log: Optional[List[Dict[str, Any]]] = None
     perception_log_path: Optional[str] = None
     perception_duration: Optional[float] = None
+    tracking_stats: Dict[str, Any] = {}
     uplift_results: Dict[str, Any] = {}
     uplift_duration: Optional[float] = None
     neo4j_status: Optional[str] = None
@@ -887,12 +896,20 @@ def run_pipeline(
                         ui.set_stage_status("perception", "Finalizing")
 
                 start_time = time.time()
+                tracking_stats = {}  # Initialize with default
                 try:
                     # Use the old wrapper function for proper event mapping
-                    perception_log = run_smart_perception(
+                    result = run_smart_perception(
                         video_path,
                         progress_callback=handle_progress if ui.enabled else None,
                     )
+                    
+                    # Handle both tuple and single return value
+                    if isinstance(result, tuple) and len(result) == 2:
+                        perception_log, tracking_stats = result
+                    else:
+                        perception_log = result
+                        tracking_stats = {}
                     
                 except Exception as exc:
                     if ui.enabled:
@@ -927,6 +944,8 @@ def run_pipeline(
                     "efficiency": f"{num_objects / max(unique_entities, 1):.1f}x",
                     "output_file": perception_log_path,
                     "mode": part1_config,
+                    "corrections_applied": tracking_stats.get('corrections_applied', 0),
+                    "correction_examples": tracking_stats.get('correction_examples', []),
                 }
 
             if skip_part2:
@@ -1060,21 +1079,35 @@ def run_pipeline(
                     )
                     contextual_duration = time.time() - contextual_start
                     
-                    # Count corrections
-                    corrections = sum(1 for obj in perception_log if obj.get('was_corrected'))
-                    spatial_zones = sum(1 for obj in perception_log if obj.get('spatial_zone') != 'unknown')
+                    # Count corrections - FIXED: Count unique corrected entities, not observations
+                    corrected_entities = set()
+                    for obj in perception_log:
+                        if obj.get('was_corrected'):
+                            entity_id = str(obj.get('entity_id', obj.get('id')))
+                            corrected_entities.add(entity_id)
+                    
+                    corrections = len(corrected_entities)
+                    
+                    # Count unique entities with spatial positions (not observations)
+                    positioned_entities = set()
+                    for obj in perception_log:
+                        if obj.get('spatial_zone') and obj.get('spatial_zone') != 'unknown':
+                            entity_id = str(obj.get('entity_id', obj.get('id')))
+                            positioned_entities.add(entity_id)
+                    
+                    num_positioned_entities = len(positioned_entities)
                     
                     if ui.enabled:
                         ui.complete_stage(
                             "contextual", 
-                            f"Complete: {corrections} corrections, {spatial_zones} spatial zones"
+                            f"Complete: {num_positioned_entities} positioned entities ({corrections} had descriptions checked)"
                         )
                     
                     results["contextual"] = {
                         "success": True,
                         "duration_seconds": contextual_duration,
                         "corrections": corrections,
-                        "spatial_zones": spatial_zones,
+                        "objects_with_position": num_positioned_entities,  # Now counting unique entities
                     }
                 except Exception as exc:
                     logging.getLogger(__name__).warning(f"Contextual analysis failed: {exc}")
@@ -1167,20 +1200,32 @@ def run_pipeline(
 
                 uplift_duration = time.time() - start_time
                 entities_tracked = uplift_results.get("num_entities", 0)
+                spatial_zones_found = uplift_results.get("num_spatial_zones", 0)
 
                 if ui.enabled:
                     ui.complete_stage(
                         "semantic",
-                        f"Semantic uplift complete ({entities_tracked} entities)",
+                        f"Semantic uplift complete ({entities_tracked} entities, {spatial_zones_found} zones)",
                     )
 
-                results["part2"] = {
+                # Merge contextual results into part2 for unified reporting
+                part2_results = {
                     "success": uplift_results.get("success", False),
                     "duration_seconds": uplift_duration,
                     "perception_log": perception_log_path,
                     "mode": part2_config,
                     **uplift_results,
                 }
+                
+                # Add contextual metrics if available
+                if "contextual" in results:
+                    part2_results["num_llm_corrections"] = results["contextual"].get("corrections", 0)
+                    part2_results["num_entities_positioned"] = results["contextual"].get("objects_with_position", 0)
+                else:
+                    part2_results["num_llm_corrections"] = 0
+                    part2_results["num_entities_positioned"] = 0
+                
+                results["part2"] = part2_results
 
         results["success"] = True
 

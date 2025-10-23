@@ -14,8 +14,12 @@ from typing import TYPE_CHECKING, Any, Optional, Tuple
 
 from rich import box
 from rich.console import Console, Group
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
 from rich.table import Table
 from rich.text import Text
+from rich.live import Live
+from rich.layout import Layout
 
 from .models import AssetManager
 from .runtime import select_backend, set_active_backend
@@ -26,6 +30,232 @@ if TYPE_CHECKING:  # pragma: no cover
     from .run_pipeline import run_pipeline as _RunPipeline
 
 console = Console()
+
+
+def _display_detailed_results(results: dict) -> None:
+    """Display comprehensive pipeline results with detailed metrics"""
+    
+    # Header Panel
+    status_emoji = "✓" if results.get("success") else "✗"
+    status_color = "green" if results.get("success") else "red"
+    
+    header = Panel(
+        f"[bold {status_color}]{status_emoji} Pipeline Execution Complete[/bold {status_color}]",
+        style=status_color,
+        expand=False
+    )
+    console.print("\n", header)
+    
+    # ═══════════════════════════════════════════════════════════
+    # PART 1: PERCEPTION STAGE
+    # ═══════════════════════════════════════════════════════════
+    if not results.get("part1", {}).get("skipped"):
+        part1 = results.get("part1", {})
+        perception_table = Table(
+            title="[bold cyan]Part 1: Visual Perception[/bold cyan]",
+            box=box.DOUBLE_EDGE,
+            show_header=True,
+            header_style="bold magenta",
+            border_style="cyan",
+            expand=True
+        )
+        perception_table.add_column("Metric", style="cyan", no_wrap=True, width=30)
+        perception_table.add_column("Value", style="green", justify="right", width=20)
+        perception_table.add_column("Details", style="yellow", width=50)
+        
+        # Video info
+        perception_table.add_row(
+            "Video Duration",
+            f"{part1.get('duration_seconds', 0):.1f}s",
+            f"{part1.get('total_frames', 0):,} frames @ {part1.get('fps', 0):.1f} FPS"
+        )
+        
+        # Detection metrics
+        num_objects = part1.get('num_objects', 0)
+        num_unique = part1.get('unique_classes', 0)
+        perception_table.add_row(
+            "Objects Detected",
+            f"{num_objects:,}",
+            f"{num_unique} unique classes"
+        )
+        
+        # Processing speed
+        proc_time = part1.get('processing_time_seconds', 0)
+        if proc_time > 0:
+            fps = part1.get('total_frames', 0) / proc_time
+            perception_table.add_row(
+                "Processing Speed",
+                f"{fps:.1f} FPS",
+                f"Completed in {proc_time:.1f}s"
+            )
+        
+        console.print("\n", perception_table)
+    
+    # ═══════════════════════════════════════════════════════════
+    # PART 2: SEMANTIC UPLIFT
+    # ═══════════════════════════════════════════════════════════
+    if not results.get("part2", {}).get("skipped"):
+        part2 = results.get("part2", {})
+        
+        # --- Main Semantic Metrics ---
+        semantic_table = Table(
+            title="[bold cyan]Part 2: Semantic Uplift & Knowledge Graph[/bold cyan]",
+            box=box.DOUBLE_EDGE,
+            show_header=True,
+            header_style="bold magenta",
+            border_style="cyan",
+            expand=True
+        )
+        semantic_table.add_column("Metric", style="cyan", no_wrap=True, width=30)
+        semantic_table.add_column("Value", style="green", justify="right", width=20)
+        semantic_table.add_column("Details", style="yellow", width=50)
+        
+        # Entities
+        num_entities = part2.get('num_entities', 0)
+        num_descriptions = part2.get('num_descriptions', num_entities)  # Default: all entities described
+        num_unique_classes = part2.get('num_unique_classes', 0)
+        
+        entity_detail = f"{num_descriptions} with descriptions"
+        if num_unique_classes > 0:
+            entity_detail += f", {num_unique_classes} classes"
+        
+        semantic_table.add_row(
+            "Entities Created",
+            f"{num_entities:,}",
+            entity_detail
+        )
+        
+        # Spatial co-location zones (regions where entities co-occur)
+        num_zones = part2.get('num_spatial_zones', 0)
+        if num_zones > 0:
+            zone_detail = f"Regions where entities co-occur spatially & temporally"
+        else:
+            zone_detail = "No co-location zones detected (need 2+ entities near each other)"
+        semantic_table.add_row(
+            "Co-Location Zones",
+            f"{num_zones:,}",
+            zone_detail
+        )
+        
+        # Class corrections (from perception phase, not LLM)
+        num_corrections = part1.get('corrections_applied', 0)
+        num_positioned = part2.get('num_entities_positioned', 0)
+        correction_pct = (num_corrections / num_entities * 100) if num_entities > 0 else 0
+        semantic_table.add_row(
+            "Class Corrections",
+            f"{num_corrections:,}",
+            f"{correction_pct:.1f}% entities corrected (rule-based)"
+        )
+        
+        # Entity positioning (entities with spatial zone classification)
+        if num_positioned > 0:
+            position_pct = (num_positioned / num_entities * 100) if num_entities > 0 else 0
+            semantic_table.add_row(
+                "Spatial Positioning",
+                f"{num_positioned:,}",
+                f"{position_pct:.1f}% entities with position tags"
+            )
+        
+        # State changes
+        num_states = part2.get('num_state_changes', 0)
+        semantic_table.add_row(
+            "State Changes",
+            f"{num_states:,}",
+            "Temporal state transitions detected"
+        )
+        
+        # Causal links
+        num_causal = part2.get('num_causal_links', 0)
+        semantic_table.add_row(
+            "Causal Links",
+            f"{num_causal:,}",
+            "Event causality relationships"
+        )
+        
+        console.print("\n", semantic_table)
+        
+        # --- LLM Processing Details ---
+        llm_table = Table(
+            title="[bold yellow]LLM Processing Pipeline[/bold yellow]",
+            box=box.ROUNDED,
+            show_header=True,
+            header_style="bold yellow",
+            border_style="yellow"
+        )
+        llm_table.add_column("Stage", style="cyan", width=25)
+        llm_table.add_column("Count", style="green", justify="right", width=15)
+        llm_table.add_column("Notes", style="dim", width=60)
+        
+        windows_total = part2.get('llm_windows_total', 0)
+        windows_composed = part2.get('llm_windows_composed', 0)
+        windows_skipped = part2.get('llm_windows_skipped', 0)
+        llm_batches = part2.get('llm_batches', 0)
+        llm_calls = part2.get('llm_calls', 0)
+        llm_latency = part2.get('llm_latency_seconds', 0)
+        
+        llm_table.add_row(
+            "Total Windows",
+            f"{windows_total:,}",
+            "Temporal analysis windows"
+        )
+        llm_table.add_row(
+            "Windows Processed",
+            f"{windows_composed:,}",
+            f"Skipped: {windows_skipped} (low activity/duplicates)"
+        )
+        llm_table.add_row(
+            "Batch Operations",
+            f"{llm_batches:,}",
+            "Batched for efficiency"
+        )
+        llm_table.add_row(
+            "LLM API Calls",
+            f"{llm_calls:,}",
+            f"Total latency: {llm_latency:.2f}s"
+        )
+        
+        # Show async queue metrics if available
+        if part2.get('async_queue_size'):
+            llm_table.add_row(
+                "Async Queue Processed",
+                f"{part2.get('async_queue_size', 0):,}",
+                f"Description tasks: {part2.get('async_descriptions_generated', 0)}"
+            )
+        
+        console.print("\n", llm_table)
+        
+        # --- Graph Database Stats ---
+        graph_stats = part2.get('graph_stats', {})
+        if graph_stats:
+            graph_table = Table(
+                title="[bold green]Neo4j Knowledge Graph[/bold green]",
+                box=box.ROUNDED,
+                show_header=True,
+                header_style="bold green",
+                border_style="green"
+            )
+            graph_table.add_column("Node/Relationship Type", style="cyan", width=30)
+            graph_table.add_column("Count", style="green", justify="right", width=15)
+            
+            # Sort and display
+            for key, value in sorted(graph_stats.items()):
+                label = key.replace("_", " ").title()
+                graph_table.add_row(label, f"{value:,}")
+            
+            console.print("\n", graph_table)
+    
+    # ═══════════════════════════════════════════════════════════
+    # SUMMARY FOOTER
+    # ═══════════════════════════════════════════════════════════
+    summary_panel = Panel(
+        f"[bold]Output:[/bold] {results.get('output_file', 'N/A')}\n"
+        f"[bold]Runtime:[/bold] {results.get('runtime', 'N/A')}\n"
+        f"[bold]Neo4j:[/bold] {results.get('neo4j_status', 'Unknown')}",
+        title="[bold]Pipeline Artifacts[/bold]",
+        style="blue",
+        expand=False
+    )
+    console.print("\n", summary_panel)
 
 
 def _import_video_qa() -> Any:
@@ -39,100 +269,154 @@ def _import_video_qa() -> Any:
 
 
 def _prepare_runtime(requested: Optional[str]) -> Tuple[str, AssetManager]:
-    with console.status(
-        "[dim]Selecting runtime backend...[/dim]", spinner="dots"
-    ) as status:
+    """Prepare runtime with enhanced progress display"""
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeRemainingColumn(),
+        console=console,
+        transient=True
+    ) as progress:
+        task = progress.add_task("[cyan]Selecting runtime backend...", total=3)
+        
         backend = select_backend(requested)
         set_active_backend(backend)
+        progress.update(task, advance=1, description=f"[cyan]Selected: {backend}")
+        
         manager = AssetManager()
+        progress.update(task, advance=1, description=f"[yellow]Checking assets...")
 
         if manager.assets_ready(backend):
-            status.update(f"[green]Runtime '{backend}' ready.[/green]")
-            time.sleep(0.2)
+            progress.update(task, advance=1, description=f"[green]✓ Runtime '{backend}' ready", completed=3)
+            time.sleep(0.3)
             return backend, manager
 
-        status.update(f"[yellow]Syncing model assets for '{backend}'...[/yellow]")
+        progress.update(task, description=f"[yellow]Downloading models for '{backend}'...")
         try:
             manager.ensure_runtime_assets(backend)
+            progress.update(task, advance=1, description=f"[green]✓ Models synchronized", completed=3)
         except Exception as exc:  # noqa: BLE001
-            status.stop()
-            console.print(f"[red]Failed to prepare models: {exc}[/red]")
+            progress.stop()
+            console.print(f"[red]✗ Failed to prepare models: {exc}[/red]")
             raise
 
-        status.update(f"[green]Runtime '{backend}' synchronized.[/green]")
-        time.sleep(0.2)
+        time.sleep(0.3)
         return backend, manager
 
 
 def _prepare_runtime_for_backend(backend: str) -> AssetManager:
-    """Prepare runtime assets for a specific backend"""
-    with console.status(
-        "[dim]Preparing runtime assets...[/dim]", spinner="dots"
-    ) as status:
+    """Prepare runtime assets for a specific backend with enhanced progress"""
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+        transient=True
+    ) as progress:
+        task = progress.add_task(f"[cyan]Preparing {backend} runtime...", total=2)
+        
         set_active_backend(backend)
         manager = AssetManager()
+        progress.update(task, advance=1)
 
         if manager.assets_ready(backend):
-            status.update(f"[green]Runtime '{backend}' ready.[/green]")
-            time.sleep(0.2)
+            progress.update(task, advance=1, description=f"[green]✓ Runtime '{backend}' ready", completed=2)
+            time.sleep(0.3)
             return manager
 
-        status.update(f"[yellow]Syncing model assets for '{backend}'...[/yellow]")
+        progress.update(task, description=f"[yellow]Downloading {backend} models...")
         try:
             manager.ensure_runtime_assets(backend)
+            progress.update(task, advance=1, description=f"[green]✓ Models synchronized", completed=2)
         except Exception as exc:  # noqa: BLE001
-            status.stop()
-            console.print(f"[red]Failed to prepare models: {exc}[/red]")
+            progress.stop()
+            console.print(f"[red]✗ Failed to prepare models: {exc}[/red]")
             raise
 
-        status.update(f"[green]Runtime '{backend}' synchronized.[/green]")
-        time.sleep(0.2)
+        time.sleep(0.3)
         return manager
 
 
 def _handle_neo4j_command(args: argparse.Namespace) -> None:
-    """Handle Neo4j service management commands"""
+    """Handle Neo4j service management commands with enhanced feedback"""
     action = getattr(args, "neo4j_action", None)
     if action is None:
         console.print("[red]No Neo4j action provided. Use 'orion services neo4j --help'.[/red]")
         return
 
     try:
-        if action == "start":
-            # Check if container exists and start it
-            check_result = subprocess.run(['docker', 'ps', '-a', '--filter', 'name=orion-neo4j'],
-                                        capture_output=True, text=True)
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+            transient=True
+        ) as progress:
+            if action == "start":
+                task = progress.add_task("[cyan]Checking Neo4j container...", total=None)
+                
+                check_result = subprocess.run(
+                    ['docker', 'ps', '-a', '--filter', 'name=orion-neo4j'],
+                    capture_output=True, text=True
+                )
 
-            if 'orion-neo4j' in check_result.stdout:
-                status_result = subprocess.run(['docker', 'ps', '--filter', 'name=orion-neo4j'],
-                                             capture_output=True, text=True)
+                if 'orion-neo4j' in check_result.stdout:
+                    status_result = subprocess.run(
+                        ['docker', 'ps', '--filter', 'name=orion-neo4j'],
+                        capture_output=True, text=True
+                    )
 
-                if 'orion-neo4j' in status_result.stdout:
-                    console.print("[yellow]✓ Neo4j container already running[/yellow]")
+                    if 'orion-neo4j' in status_result.stdout:
+                        progress.update(task, description="[yellow]Neo4j already running")
+                        progress.stop()
+                        console.print("[green]✓ Neo4j container already running[/green]")
+                    else:
+                        progress.update(task, description="[cyan]Starting Neo4j...")
+                        subprocess.run(['docker', 'start', 'orion-neo4j'], check=True,
+                                     capture_output=True, text=True)
+                        progress.stop()
+                        console.print("[green]✓ Neo4j container started successfully[/green]")
+                        console.print("[dim]   Access at: http://localhost:7474[/dim]")
                 else:
-                    result = subprocess.run(['docker', 'start', 'orion-neo4j'], check=True,
-                                          capture_output=True, text=True)
-                    console.print("[green]✓ Neo4j container started[/green]")
-            else:
-                console.print("[red]✗ Neo4j container not found. Run 'orion init' first.[/red]")
+                    progress.stop()
+                    console.print("[red]✗ Neo4j container not found[/red]")
+                    console.print("[yellow]   Run 'orion init' first to create the container[/yellow]")
 
-        elif action == "stop":
-            result = subprocess.run(['docker', 'stop', 'orion-neo4j'], check=True,
-                                  capture_output=True, text=True)
-            console.print("[green]✓ Neo4j container stopped[/green]")
+            elif action == "stop":
+                task = progress.add_task("[cyan]Stopping Neo4j...", total=None)
+                subprocess.run(['docker', 'stop', 'orion-neo4j'], check=True,
+                             capture_output=True, text=True)
+                progress.stop()
+                console.print("[green]✓ Neo4j container stopped[/green]")
 
-        elif action == "status":
-            result = subprocess.run(['docker', 'ps', '--filter', 'name=orion-neo4j'],
-                                  capture_output=True, text=True)
-            if 'orion-neo4j' in result.stdout:
-                console.print("[green]✓ Neo4j container is running[/green]")
-            else:
-                console.print("[yellow]⚠ Neo4j container is not running[/yellow]")
+            elif action == "status":
+                task = progress.add_task("[cyan]Checking status...", total=None)
+                result = subprocess.run(['docker', 'ps', '--filter', 'name=orion-neo4j'],
+                                      capture_output=True, text=True)
+                progress.stop()
+                
+                status_table = Table(box=box.ROUNDED, show_header=False)
+                status_table.add_column("Item", style="cyan", width=20)
+                status_table.add_column("Value", style="green", width=50)
+                
+                if 'orion-neo4j' in result.stdout:
+                    status_table.add_row("Status", "[green]● Running[/green]")
+                    status_table.add_row("Browser UI", "http://localhost:7474")
+                    status_table.add_row("Bolt Port", "bolt://localhost:7687")
+                    console.print(status_table)
+                else:
+                    status_table.add_row("Status", "[red]○ Stopped[/red]")
+                    console.print(status_table)
+                    console.print("[yellow]Run 'orion services neo4j start' to start[/yellow]")
 
-        elif action == "restart":
-            subprocess.run(['docker', 'restart', 'orion-neo4j'], check=True,
-                         capture_output=True, text=True)
-            console.print("[green]✓ Neo4j container restarted[/green]")
+            elif action == "restart":
+                task = progress.add_task("[cyan]Restarting Neo4j...", total=None)
+                subprocess.run(['docker', 'restart', 'orion-neo4j'], check=True,
+                             capture_output=True, text=True)
+                progress.stop()
+                console.print("[green]✓ Neo4j container restarted[/green]")
 
     except subprocess.CalledProcessError as e:
         console.print(f"[red]✗ Docker command failed: {e.stderr}[/red]")
@@ -141,48 +425,81 @@ def _handle_neo4j_command(args: argparse.Namespace) -> None:
 
 
 def _handle_ollama_command(args: argparse.Namespace) -> None:
-    """Handle Ollama service management commands"""
+    """Handle Ollama service management commands with enhanced feedback"""
     action = getattr(args, "ollama_action", None)
     if action is None:
         console.print("[red]No Ollama action provided. Use 'orion services ollama --help'.[/red]")
         return
 
     try:
-        if action == "start":
-            # Check if container exists and start it
-            check_result = subprocess.run(['docker', 'ps', '-a', '--filter', 'name=orion-ollama'],
-                                        capture_output=True, text=True)
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+            transient=True
+        ) as progress:
+            if action == "start":
+                task = progress.add_task("[cyan]Checking Ollama...", total=None)
+                check_result = subprocess.run(
+                    ['docker', 'ps', '-a', '--filter', 'name=orion-ollama'],
+                    capture_output=True, text=True
+                )
 
-            if 'orion-ollama' in check_result.stdout:
-                status_result = subprocess.run(['docker', 'ps', '--filter', 'name=orion-ollama'],
-                                             capture_output=True, text=True)
+                if 'orion-ollama' in check_result.stdout:
+                    status_result = subprocess.run(
+                        ['docker', 'ps', '--filter', 'name=orion-ollama'],
+                        capture_output=True, text=True
+                    )
 
-                if 'orion-ollama' in status_result.stdout:
-                    console.print("[yellow]✓ Ollama container already running[/yellow]")
+                    if 'orion-ollama' in status_result.stdout:
+                        progress.update(task, description="[yellow]Ollama already running")
+                        progress.stop()
+                        console.print("[green]✓ Ollama container already running[/green]")
+                    else:
+                        progress.update(task, description="[cyan]Starting Ollama...")
+                        subprocess.run(['docker', 'start', 'orion-ollama'], check=True,
+                                     capture_output=True, text=True)
+                        progress.stop()
+                        console.print("[green]✓ Ollama container started successfully[/green]")
+                        console.print("[dim]   API available at: http://localhost:11434[/dim]")
                 else:
-                    result = subprocess.run(['docker', 'start', 'orion-ollama'], check=True,
-                                          capture_output=True, text=True)
-                    console.print("[green]✓ Ollama container started[/green]")
-            else:
-                console.print("[red]✗ Ollama container not found. Run 'orion init' first.[/red]")
+                    progress.stop()
+                    console.print("[red]✗ Ollama container not found[/red]")
+                    console.print("[yellow]   Run 'orion init' first to set up Ollama[/yellow]")
 
-        elif action == "stop":
-            result = subprocess.run(['docker', 'stop', 'orion-ollama'], check=True,
-                                  capture_output=True, text=True)
-            console.print("[green]✓ Ollama container stopped[/green]")
+            elif action == "stop":
+                task = progress.add_task("[cyan]Stopping Ollama...", total=None)
+                subprocess.run(['docker', 'stop', 'orion-ollama'], check=True,
+                             capture_output=True, text=True)
+                progress.stop()
+                console.print("[green]✓ Ollama container stopped[/green]")
 
-        elif action == "status":
-            result = subprocess.run(['docker', 'ps', '--filter', 'name=orion-ollama'],
-                                  capture_output=True, text=True)
-            if 'orion-ollama' in result.stdout:
-                console.print("[green]✓ Ollama container is running[/green]")
-            else:
-                console.print("[yellow]⚠ Ollama container is not running[/yellow]")
+            elif action == "status":
+                task = progress.add_task("[cyan]Checking status...", total=None)
+                result = subprocess.run(['docker', 'ps', '--filter', 'name=orion-ollama'],
+                                      capture_output=True, text=True)
+                progress.stop()
+                
+                status_table = Table(box=box.ROUNDED, show_header=False)
+                status_table.add_column("Item", style="cyan", width=20)
+                status_table.add_column("Value", style="green", width=50)
+                
+                if 'orion-ollama' in result.stdout:
+                    status_table.add_row("Status", "[green]● Running[/green]")
+                    status_table.add_row("API Endpoint", "http://localhost:11434")
+                    status_table.add_row("Model", "gemma3:4b")
+                    console.print(status_table)
+                else:
+                    status_table.add_row("Status", "[red]○ Stopped[/red]")
+                    console.print(status_table)
+                    console.print("[yellow]Run 'orion services ollama start' to start[/yellow]")
 
-        elif action == "restart":
-            subprocess.run(['docker', 'restart', 'orion-ollama'], check=True,
-                         capture_output=True, text=True)
-            console.print("[green]✓ Ollama container restarted[/green]")
+            elif action == "restart":
+                task = progress.add_task("[cyan]Restarting Ollama...", total=None)
+                subprocess.run(['docker', 'restart', 'orion-ollama'], check=True,
+                             capture_output=True, text=True)
+                progress.stop()
+                console.print("[green]✓ Ollama container restarted[/green]")
 
     except subprocess.CalledProcessError as e:
         console.print(f"[red]✗ Docker command failed: {e.stderr}[/red]")
@@ -286,33 +603,125 @@ def print_banner() -> None:
 
 
 def show_models() -> None:
-    table = Table(title="Orion Models", box=box.ROUNDED)
-    table.add_column("Model", style="cyan", no_wrap=True)
-    table.add_column("Job", style="yellow")
-    table.add_column("Size", style="green")
-    table.add_column("Speed", style="magenta")
+    """Display detailed model information"""
+    table = Table(
+        title="[bold cyan]Orion Model Architecture[/bold cyan]",
+        box=box.DOUBLE_EDGE,
+        show_header=True,
+        header_style="bold magenta",
+        border_style="cyan",
+        expand=True
+    )
+    table.add_column("Model", style="cyan bold", no_wrap=True, width=20)
+    table.add_column("Purpose", style="yellow", width=25)
+    table.add_column("Size", style="green", justify="right", width=12)
+    table.add_column("Performance", style="magenta", width=20)
+    table.add_column("Details", style="dim", width=40)
 
-    table.add_row("YOLO11x", "Object Detection", "50MB", "⚡⚡ Very Accurate")
-    table.add_row("FastVLM", "Description", "600MB", "⚡⚡ Fast")
-    table.add_row("ResNet50", "Visual ID", "100MB", "⚡⚡⚡ Very Fast")
-    table.add_row("CLIP (OpenAI)", "Text Meaning", "512MB", "⚡⚡ Fast")
-    table.add_row("Gemma3:4b", "Q&A", "1.6GB", "⚡ Medium")
+    table.add_row(
+        "YOLO11x",
+        "Object Detection",
+        "50MB",
+        "⚡⚡⚡ Very Fast",
+        "Real-time detection, 80+ classes"
+    )
+    table.add_row(
+        "FastVLM-0.5B",
+        "Visual Description",
+        "~600MB",
+        "⚡⚡ Fast",
+        "Generates semantic descriptions"
+    )
+    table.add_row(
+        "ResNet50",
+        "Visual Embeddings",
+        "~100MB",
+        "⚡⚡⚡ Very Fast",
+        "Appearance fingerprinting (512-dim)"
+    )
+    table.add_row(
+        "CLIP (OpenAI)",
+        "Text Embeddings",
+        "~512MB",
+        "⚡⚡ Fast",
+        "Semantic text understanding (512-dim)"
+    )
+    table.add_row(
+        "Gemma3:4b",
+        "Q&A & Reasoning",
+        "~1.6GB",
+        "⚡ Medium",
+        "Natural language interface via Ollama"
+    )
 
-    console.print(table)
+    console.print("\n", table)
+    
+    # Add architecture diagram
+    arch_panel = Panel(
+        "[bold]Pipeline Flow:[/bold]\n"
+        "1. YOLO11x → Detect objects in video frames\n"
+        "2. ResNet50 → Generate visual embeddings\n"
+        "3. FastVLM → Describe entities semantically\n"
+        "4. CLIP → Embed descriptions for similarity\n"
+        "5. Gemma3:4b → Answer questions about the scene",
+        title="[bold cyan]Architecture Overview[/bold cyan]",
+        border_style="cyan",
+        expand=False
+    )
+    console.print("\n", arch_panel, "\n")
 
 
 def show_modes() -> None:
-    table = Table(title="Processing Modes", box=box.ROUNDED)
-    table.add_column("Mode", style="cyan")
-    table.add_column("FPS", style="yellow")
-    table.add_column("Descriptions", style="green")
-    table.add_column("Best For", style="magenta")
+    """Display detailed processing mode information"""
+    table = Table(
+        title="[bold cyan]Processing Modes[/bold cyan]",
+        box=box.DOUBLE_EDGE,
+        show_header=True,
+        header_style="bold magenta",
+        border_style="cyan",
+        expand=True
+    )
+    table.add_column("Mode", style="cyan bold", width=15)
+    table.add_column("Detection FPS", style="yellow", justify="center", width=15)
+    table.add_column("Description Freq", style="green", justify="center", width=18)
+    table.add_column("Use Case", style="magenta", width=35)
+    table.add_column("Trade-offs", style="dim", width=40)
 
-    table.add_row("fast", "3", "Every 10th", "Long videos, testing")
-    table.add_row("balanced", "5", "Every 5th", "General use ⭐")
-    table.add_row("accurate", "10", "Every 2nd", "Short clips, detail")
+    table.add_row(
+        "fast",
+        "3 FPS",
+        "Every 10th frame",
+        "Long videos, quick overview",
+        "Lower detail, faster processing"
+    )
+    table.add_row(
+        "balanced",
+        "5 FPS",
+        "Every 5th frame",
+        "General use ⭐ (recommended)",
+        "Good balance of speed & accuracy"
+    )
+    table.add_row(
+        "accurate",
+        "10 FPS",
+        "Every 2nd frame",
+        "Short clips, high detail",
+        "Best quality, slower processing"
+    )
 
-    console.print(table)
+    console.print("\n", table)
+    
+    # Add recommendation panel
+    rec_panel = Panel(
+        "[bold]Recommendations:[/bold]\n"
+        "• [yellow]fast[/yellow]: 30+ min videos, exploratory analysis\n"
+        "• [green]balanced[/green]: Most use cases, 5-30 min videos\n"
+        "• [magenta]accurate[/magenta]: <5 min clips, critical analysis",
+        title="[bold cyan]Mode Selection Guide[/bold cyan]",
+        border_style="cyan",
+        expand=False
+    )
+    console.print("\n", rec_panel, "\n")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -739,14 +1148,31 @@ def main(argv: list[str] | None = None) -> None:
         neo4j_password = args.neo4j_password or settings.get_neo4j_password()
         qa_model = args.qa_model or settings.qa_model
 
-        console.print(f"\n[bold]Analyzing:[/bold] [cyan]{args.video}[/cyan]")
+        # Display analysis parameters
+        params_table = Table(box=box.ROUNDED, show_header=False, border_style="cyan")
+        params_table.add_column("Parameter", style="cyan bold", width=20)
+        params_table.add_column("Value", style="yellow", width=60)
+        
         config = "balanced"
         if args.fast:
             config = "fast"
         elif args.accurate:
             config = "accurate"
-        console.print(f"[bold]Mode:[/bold] [yellow]{config}[/yellow]")
-        console.print(f"[bold]Runtime:[/bold] [yellow]{backend}[/yellow]\n")
+            
+        params_table.add_row("Video", args.video)
+        params_table.add_row("Mode", config)
+        params_table.add_row("Runtime", backend)
+        params_table.add_row("Output", args.output)
+        if args.skip_perception:
+            params_table.add_row("Perception", "[red]Skipped[/red]")
+        if args.skip_graph:
+            params_table.add_row("Graph Build", "[red]Skipped[/red]")
+        if args.keep_db:
+            params_table.add_row("Database", "[yellow]Keeping existing data[/yellow]")
+        
+        console.print("\n")
+        console.print(Panel(params_table, title="[bold]Analysis Configuration[/bold]", border_style="cyan"))
+        console.print("\n")
 
         results = run_pipeline_main(
             video_path=args.video,
@@ -764,11 +1190,17 @@ def main(argv: list[str] | None = None) -> None:
             use_progress_ui=not args.verbose,
         )
 
+        # Display comprehensive results
+        if not args.verbose:
+            _display_detailed_results(results)
+
         if args.interactive and results.get("success"):
-            console.print("\n[bold cyan]Starting Q&A mode...[/bold cyan]\n")
+            console.print("\n[bold cyan]════════════════════════════════════════════════[/bold cyan]")
+            console.print("[bold cyan]       Starting Interactive Q&A Mode[/bold cyan]")
+            console.print("[bold cyan]════════════════════════════════════════════════[/bold cyan]\n")
             if VideoQASystem is None:
                 console.print(
-                    "[red]Q&A not available. Install: pip install ollama" 
+                    "[red]✗ Q&A not available. Install: pip install ollama[/red]" 
                 )
             else:
                 qa = VideoQASystem(

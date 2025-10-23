@@ -242,6 +242,53 @@ class OllamaConfig:
 
 
 @dataclass
+class AsyncConfig:
+    """Asynchronous processing configuration"""
+    
+    # Enable async processing
+    enable_async: bool = True
+    """Enable true asynchronous perception with fast/slow decoupling"""
+    
+    # Queue configuration
+    max_queue_size: int = 100
+    """Maximum detection tasks in queue before backpressure"""
+    
+    # Description strategy
+    describe_strategy: Literal["best_frame", "first_appearance", "periodic"] = "first_appearance"
+    """
+    Strategy for VLM descriptions:
+    - best_frame: Describe highest quality detection per entity (post-clustering)
+    - first_appearance: Describe on first appearance of entity
+    - periodic: Describe every N frames
+    """
+    
+    description_interval_frames: int = 30
+    """For periodic strategy: describe every N frames"""
+    
+    # Worker configuration
+    num_description_workers: int = 2
+    """Number of concurrent VLM workers (1-4 recommended)"""
+    
+    # Buffering
+    enable_frame_buffer: bool = True
+    """Buffer frames for smooth processing"""
+    
+    frame_buffer_size: int = 30
+    """Number of frames to buffer"""
+    
+    # Backpressure handling
+    enable_backpressure: bool = True
+    """Slow down fast loop when queue is full"""
+    
+    backpressure_threshold: float = 0.8
+    """Trigger backpressure at 80% queue capacity"""
+    
+    # Progress reporting
+    report_interval_seconds: float = 5.0
+    """Report progress every N seconds"""
+
+
+@dataclass
 class RuntimeConfig:
     """Runtime and backend configuration"""
     
@@ -283,6 +330,7 @@ class OrionConfig:
     neo4j: Neo4jConfig = field(default_factory=Neo4jConfig)
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
+    async_processing: AsyncConfig = field(default_factory=AsyncConfig)
     
     def __post_init__(self):
         """Initialize sub-configs if not provided"""
@@ -308,6 +356,8 @@ class OrionConfig:
             self.ollama = OllamaConfig()
         if not isinstance(self.runtime, RuntimeConfig):
             self.runtime = RuntimeConfig()
+        if not isinstance(self.async_processing, AsyncConfig):
+            self.async_processing = AsyncConfig()
 
 
 # Preset configurations

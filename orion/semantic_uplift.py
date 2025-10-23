@@ -82,6 +82,20 @@ try:
 except ImportError:
     from motion_tracker import MotionData  # type: ignore[assignment]
 
+try:
+    from .spatial_colocation import (
+        SpatialCoLocationAnalyzer,
+        extract_appearances_from_observations,
+    )
+    SPATIAL_COLOCATION_AVAILABLE = True
+except ImportError:
+    SpatialCoLocationAnalyzer = None  # type: ignore[assignment, misc]
+    extract_appearances_from_observations = None  # type: ignore[assignment, misc]
+    SPATIAL_COLOCATION_AVAILABLE = False
+    print(
+        "Warning: spatial_colocation not available. Spatial zones will not be analyzed."
+    )
+
 
 # ============================================================================
 # CONFIGURATION CONSTANTS
@@ -1901,36 +1915,155 @@ Now generate Cypher queries for the state changes above:
 
         return prompt
 
+    def json_to_cypher(self, event_data: Dict[str, Any]) -> List[str]:
+        """
+        Convert structured JSON event data to Cypher queries.
+        This is a deterministic function that reliably translates events into valid Cypher.
+        
+        Args:
+            event_data: Structured event data from LLM
+            
+        Returns:
+            List of valid Cypher queries
+        """
+        queries = []
+        
+        for event in event_data.get("events", []):
+            event_type = event.get("type", "")
+            entity_id = event.get("entity_id", "")
+            entity_label = event.get("entity_label", "unknown")
+            description = event.get("description", "")
+            timestamp = event.get("timestamp", 0.0)
+            location = event.get("location")
+            attributes = event.get("attributes", {})
+            
+            # Sanitize identifiers
+            entity_id_safe = entity_id.replace("'", "\\'")
+            entity_label_safe = entity_label.replace("'", "\\'")
+            description_safe = description.replace("'", "\\'")
+            
+            if event_type == "state_change":
+                old_state = attributes.get("old_state", "")
+                new_state = attributes.get("new_state", "")
+                confidence = attributes.get("confidence", 1.0)
+                
+                # Sanitize state values
+                old_state_safe = old_state.replace("'", "\\'") if old_state else ""
+                new_state_safe = new_state.replace("'", "\\'") if new_state else ""
+                
+                # Create entity and state change
+                query = f"""
+MERGE (e:Entity {{id: '{entity_id_safe}'}})
+ON CREATE SET e.label = '{entity_label_safe}'
+MERGE (sc:StateChange {{entity_id: '{entity_id_safe}', timestamp: {timestamp}}})
+SET sc.old_state = '{old_state_safe}', sc.new_state = '{new_state_safe}', sc.description = '{description_safe}', sc.confidence = {confidence}
+MERGE (e)-[:HAS_STATE_CHANGE]->(sc);
+""".strip()
+                queries.append(query)
+                
+                # Add location if present
+                if location:
+                    location_safe = location.replace("'", "\\'")
+                    loc_query = f"""
+MERGE (l:Location {{id: '{location_safe}'}})
+MERGE (sc:StateChange {{entity_id: '{entity_id_safe}', timestamp: {timestamp}}})
+MERGE (sc)-[:OCCURRED_AT]->(l);
+""".strip()
+                    queries.append(loc_query)
+                    
+            elif event_type == "causal_link":
+                cause_entity = attributes.get("cause_entity", "")
+                effect_entity = attributes.get("effect_entity", "")
+                confidence = attributes.get("confidence", 1.0)
+                
+                if cause_entity and effect_entity:
+                    cause_safe = cause_entity.replace("'", "\\'")
+                    effect_safe = effect_entity.replace("'", "\\'")
+                    
+                    query = f"""
+MERGE (cause:Entity {{id: '{cause_safe}'}})
+MERGE (effect:Entity {{id: '{effect_safe}'}})
+MERGE (cl:CausalLink {{cause_id: '{cause_safe}', effect_id: '{effect_safe}', timestamp: {timestamp}}})
+SET cl.description = '{description_safe}', cl.confidence = {confidence}
+MERGE (cause)-[:CAUSES]->(cl)
+MERGE (cl)-[:AFFECTS]->(effect);
+""".strip()
+                    queries.append(query)
+                    
+            elif event_type == "entity_movement":
+                if location:
+                    location_safe = location.replace("'", "\\'")
+                    
+                    query = f"""
+MERGE (e:Entity {{id: '{entity_id_safe}'}})
+ON CREATE SET e.label = '{entity_label_safe}'
+MERGE (l:Location {{id: '{location_safe}'}})
+MERGE (e)-[m:MOVED_TO {{timestamp: {timestamp}}}]->(l)
+SET m.description = '{description_safe}';
+""".strip()
+                    queries.append(query)
+        
+        return queries
+
     def parse_cypher_queries(self, llm_output: str) -> List[str]:
         """
-        Parse Cypher queries from LLM output
+        Parse structured JSON from LLM output and convert to Cypher queries.
+        
+        This replaces the old approach of having the LLM directly generate Cypher,
+        which was unreliable. Now the LLM generates JSON and we deterministically
+        translate it to Cypher.
 
         Args:
-            llm_output: Raw output from LLM
+            llm_output: Raw JSON output from LLM
 
         Returns:
             List of valid Cypher queries
         """
         queries = []
-
+        
+        try:
+            # Parse JSON from LLM output
+            if "```json" in llm_output:
+                start = llm_output.index("```json") + 7
+                end = llm_output.index("```", start)
+                llm_output = llm_output[start:end].strip()
+            elif "```" in llm_output:
+                start = llm_output.index("```") + 3
+                end = llm_output.index("```", start)
+                llm_output = llm_output[start:end].strip()
+            
+            event_data = json.loads(llm_output)
+            
+            # Convert JSON to Cypher using deterministic function
+            queries = self.json_to_cypher(event_data)
+            
+        except json.JSONDecodeError as exc:
+            logger.warning(f"Failed to parse JSON from LLM: {exc}")
+            # Fallback: try old cypher parsing for backwards compatibility
+            queries = self._parse_cypher_fallback(llm_output)
+        except Exception as exc:
+            logger.warning(f"Error converting JSON to Cypher: {exc}")
+            queries = []
+        
+        return queries
+    
+    def _parse_cypher_fallback(self, llm_output: str) -> List[str]:
+        """
+        Fallback parser for old-style Cypher output (backwards compatibility).
+        """
+        queries = []
         lines = llm_output.strip().split("\n")
         for line in lines:
             line = line.strip()
-
-            # Skip empty lines and comments
             if not line or line.startswith("//") or line.startswith("#"):
                 continue
-
-            # Look for Cypher keywords
             if any(
                 keyword in line.upper()
                 for keyword in ["MERGE", "CREATE", "MATCH", "SET"]
             ):
-                # Ensure semicolon
                 if not line.endswith(";"):
                     line += ";"
                 queries.append(line)
-
         return queries
 
     def validate_cypher_queries(self, queries: List[str]) -> List[str]:
@@ -2133,29 +2266,68 @@ Now generate Cypher queries for the state changes above:
         }
 
     def _create_batch_prompt(self, batch_payload: List[Dict[str, Any]]) -> str:
-        instructions = """You are an expert Neo4j knowledge graph builder. For each window you receive, generate Cypher queries that capture the described state changes and causal influences. Return STRICT JSON with this schema:\n{\n  \"windows\": [\n    {\"index\": <int>, \"queries\": [<string Cypher>; ...]}\n  ]\n}\nNo commentary, markdown, or extra text. Ensure each query ends with a semicolon. Use MERGE for nodes and relationships. Preserve the order of windows.\n"""
+        instructions = """You are an expert video analyst. For each window you receive, extract structured event data as JSON. Return STRICT JSON with this schema:
+{
+  "windows": [
+    {
+      "index": <int>,
+      "events": [
+        {
+          "type": "state_change|causal_link|entity_movement",
+          "entity_id": <string>,
+          "entity_label": <string>,
+          "description": <string>,
+          "timestamp": <float>,
+          "location": <string|null>,
+          "attributes": {
+            "old_state": <string|null>,
+            "new_state": <string|null>,
+            "cause_entity": <string|null>,
+            "effect_entity": <string|null>,
+            "confidence": <float>
+          }
+        }
+      ]
+    }
+  ]
+}
+No commentary, markdown, or extra text. Preserve the order of windows."""
 
         payload = {"windows": batch_payload}
         prompt = instructions + "\nWINDOW_DATA:\n" + json.dumps(payload, indent=2)
         return prompt
 
     def _parse_batch_response(self, response: str) -> Optional[Dict[str, List[str]]]:
+        """
+        Parse batch LLM response containing structured JSON events and convert to Cypher.
+        
+        Args:
+            response: Raw LLM response containing JSON
+            
+        Returns:
+            Dictionary mapping window index to list of Cypher queries
+        """
         try:
+            # Extract JSON from markdown if present
             if "```" in response:
                 start = response.index("```json") + 7 if "```json" in response else response.index("```") + 3
                 end = response.index("```", start)
                 response = response[start:end].strip()
+            
             parsed = json.loads(response)
             result: Dict[str, List[str]] = {}
+            
             for item in parsed.get("windows", []):
                 index = item.get("index")
-                queries = item.get("queries", [])
                 if index is None:
                     continue
-                if not isinstance(queries, list):
-                    continue
-                normalized = [q if q.endswith(";") else f"{q};" for q in queries]
-                result[str(index)] = normalized
+                
+                # Convert JSON events to Cypher queries using deterministic function
+                cypher_queries = self.json_to_cypher(item)
+                
+                if cypher_queries:
+                    result[str(index)] = cypher_queries
+            
             return result
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to parse batched LLM response: %s", exc)
@@ -2966,6 +3138,91 @@ class KnowledgeGraphBuilder:
 
         return created
 
+    def ingest_spatial_zones(self, zones: List) -> int:
+        """Create or update spatial co-location zone nodes.
+        
+        Args:
+            zones: List of SpatialCoLocationZone objects
+            
+        Returns:
+            Number of zones created
+        """
+        if not zones:
+            return 0
+
+        logger.info(f"Ingesting {len(zones)} spatial co-location zones...")
+        created = 0
+
+        with self.driver.session() as session:
+            for zone in zones:
+                try:
+                    # Convert entity_ids set to list
+                    entity_ids_list = list(zone.entity_ids) if hasattr(zone, 'entity_ids') else []
+                    
+                    # Create the zone node
+                    session.run(
+                        """
+                        MERGE (z:SpatialZone {id: $id})
+                        SET z.frame_start = $frame_start,
+                            z.frame_end = $frame_end,
+                            z.total_frames = $total_frames,
+                            z.duration_ms = $duration_ms,
+                            z.location_descriptor = $location_descriptor,
+                            z.max_concurrent_entities = $max_concurrent_entities,
+                            z.entity_count = size($entity_ids),
+                            z.entity_ids = $entity_ids,
+                            z.spatial_bounds_x1 = $bounds_x1,
+                            z.spatial_bounds_y1 = $bounds_y1,
+                            z.spatial_bounds_x2 = $bounds_x2,
+                            z.spatial_bounds_y2 = $bounds_y2,
+                            z.center_x = $center_x,
+                            z.center_y = $center_y
+                        """,
+                        {
+                            "id": zone.zone_id,
+                            "frame_start": zone.frame_range[0],
+                            "frame_end": zone.frame_range[1],
+                            "total_frames": zone.total_frames,
+                            "duration_ms": zone.duration_ms,
+                            "location_descriptor": zone.location_descriptor,
+                            "max_concurrent_entities": zone.max_concurrent_entities,
+                            "entity_ids": entity_ids_list,
+                            "bounds_x1": zone.spatial_bounds.x1,
+                            "bounds_y1": zone.spatial_bounds.y1,
+                            "bounds_x2": zone.spatial_bounds.x2,
+                            "bounds_y2": zone.spatial_bounds.y2,
+                            "center_x": zone.spatial_bounds.center[0],
+                            "center_y": zone.spatial_bounds.center[1],
+                        },
+                    )
+                    
+                    # Link entities to this zone
+                    for entity_id in entity_ids_list:
+                        frame_appearances = zone.entity_appearances.get(entity_id, [])
+                        if frame_appearances:
+                            session.run(
+                                """
+                                MATCH (e:Entity {id: $entity_id})
+                                MATCH (z:SpatialZone {id: $zone_id})
+                                MERGE (e)-[r:IN_SPATIAL_ZONE]->(z)
+                                SET r.frame_count = $frame_count,
+                                    r.frames = $frames
+                                """,
+                                {
+                                    "entity_id": entity_id,
+                                    "zone_id": zone.zone_id,
+                                    "frame_count": len(frame_appearances),
+                                    "frames": frame_appearances[:100],  # Limit to avoid huge arrays
+                                },
+                            )
+                    
+                    created += 1
+                except Exception as exc:  # noqa: BLE001
+                    logger.error(f"Failed to ingest spatial zone {zone.zone_id}: {exc}")
+
+        logger.info(f"Successfully ingested {created} spatial co-location zones")
+        return created
+
     def link_scenes_to_locations(self, scenes: Iterable[SceneSegment]) -> int:
         """Attach scenes to their inferred locations."""
 
@@ -3253,7 +3510,7 @@ def run_semantic_uplift(
         except Exception as exc:  # pragma: no cover - defensive
             logger.debug("Progress callback error (%s): %s", event, exc)
 
-    total_steps = 15
+    total_steps = 16  # Increased from 15 (added spatial colocation step)
     emit(
         "semantic.start",
         {
@@ -3300,6 +3557,7 @@ def run_semantic_uplift(
         "num_entities": 0,
         "num_scenes": 0,
         "num_locations": 0,
+        "num_spatial_zones": 0,  # NEW: Co-location zones
         "num_scene_similarity_links": 0,
         "num_state_changes": 0,
         "num_windows": 0,
@@ -3370,6 +3628,42 @@ def run_semantic_uplift(
         )
         logger.info(detail_msg)
         complete_step(step_id, "scene_assembly", detail_msg)
+
+        # NEW: Spatial Co-Location Analysis
+        spatial_zones = []
+        if SPATIAL_COLOCATION_AVAILABLE:
+            step_id = start_step("spatial_colocation", "Analyzing spatial co-location zones")
+            try:
+                # Extract entity appearances from perception log
+                appearances = extract_appearances_from_observations(perception_log, fps=30.0)
+                
+                # Get frame dimensions from first observation
+                frame_width = 1920  # Default
+                frame_height = 1080  # Default
+                if perception_log:
+                    frame_width = perception_log[0].get('frame_width', 1920)
+                    frame_height = perception_log[0].get('frame_height', 1080)
+                
+                # Analyze co-location zones
+                analyzer = SpatialCoLocationAnalyzer(
+                    proximity_threshold_pixels=200.0,
+                    min_frames_for_zone=5,
+                    temporal_merge_gap=30
+                )
+                spatial_zones = analyzer.analyze_colocation_zones(
+                    appearances, frame_width, frame_height
+                )
+                
+                results["num_spatial_zones"] = len(spatial_zones)
+                detail_msg = f"Identified {len(spatial_zones)} co-location zones"
+                logger.info(detail_msg)
+                complete_step(step_id, "spatial_colocation", detail_msg)
+            except Exception as exc:
+                logger.warning(f"Spatial co-location analysis failed: {exc}")
+                results["num_spatial_zones"] = 0
+                complete_step(step_id, "spatial_colocation", "Failed (continuing)")
+        else:
+            results["num_spatial_zones"] = 0
 
         step_id = start_step("scene_similarity", "Computing scene similarity links")
         scene_similarities = SceneAssembler.compute_similarities(
@@ -3599,6 +3893,18 @@ def run_semantic_uplift(
         logger.info(detail_msg)
         complete_step(step_id, "neo4j_ingest_locations", detail_msg)
 
+        # NEW: Ingest spatial co-location zones
+        if spatial_zones:
+            step_id = start_step("neo4j_ingest_spatial_zones", "Ingesting spatial co-location zones")
+            emit(
+                "semantic.progress",
+                {"message": f"Ingesting {len(spatial_zones)} spatial zones"},
+            )
+            graph_builder.ingest_spatial_zones(spatial_zones)
+            detail_msg = f"Ingested {len(spatial_zones)} spatial co-location zones"
+            logger.info(detail_msg)
+            complete_step(step_id, "neo4j_ingest_spatial_zones", detail_msg)
+
         step_id = start_step("neo4j_ingest_scenes", "Ingesting scene segments")
         emit(
             "semantic.progress",
@@ -3677,6 +3983,7 @@ def run_semantic_uplift(
     logger.info(f"Entities tracked: {results['num_entities']}")
     logger.info(f"Scenes segmented: {results['num_scenes']}")
     logger.info(f"Locations inferred: {results['num_locations']}")
+    logger.info(f"Spatial co-location zones: {results['num_spatial_zones']}")  # NEW
     logger.info(f"Scene similarity links: {results['num_scene_similarity_links']}")
     logger.info(f"State changes detected: {results['num_state_changes']}")
     logger.info(f"Temporal windows: {results['num_windows']}")

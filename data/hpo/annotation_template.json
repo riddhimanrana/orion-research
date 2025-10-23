@@ -1,0 +1,20 @@
+[
+  {
+    "agent_id": "entity_XXXX",
+    "patient_id": "entity_YYYY",
+    "state_change_frame": 150,
+    "is_causal": true,
+    "confidence": 1.0,
+    "annotation_source": "human",
+    "notes": "Hand reached and turned on light switch"
+  },
+  {
+    "agent_id": "entity_ZZZZ",
+    "patient_id": "entity_YYYY",
+    "state_change_frame": 150,
+    "is_causal": false,
+    "confidence": 1.0,
+    "annotation_source": "human",
+    "notes": "Person in background, not the cause"
+  }
+]

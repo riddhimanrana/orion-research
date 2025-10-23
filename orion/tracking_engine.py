@@ -37,9 +37,11 @@ from tqdm import tqdm
 try:
     from .model_manager import ModelManager
     from .config import OrionConfig
+    from .class_correction import ClassCorrector
 except ImportError:
     from model_manager import ModelManager  # type: ignore
     from config import OrionConfig  # type: ignore
+    from class_correction import ClassCorrector  # type: ignore
 
 try:
     from .models import AssetManager
@@ -64,6 +66,21 @@ except ImportError:
     hdbscan = None
     HDBSCAN_AVAILABLE = False
     print("Warning: hdbscan not available. Install with: pip install hdbscan")
+
+# Optional async modules
+try:
+    from .async_perception import AsyncPerceptionEngine
+    ASYNC_PERCEPTION_AVAILABLE = True
+except ImportError:
+    AsyncPerceptionEngine = None  # type: ignore
+    ASYNC_PERCEPTION_AVAILABLE = False
+
+try:
+    from .async_entity_describer import AsyncEntityDescriber
+    ASYNC_DESCRIBER_AVAILABLE = True
+except ImportError:
+    AsyncEntityDescriber = None  # type: ignore
+    ASYNC_DESCRIBER_AVAILABLE = False
 
 warnings.filterwarnings('ignore')
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
@@ -92,6 +109,9 @@ class Observation:
     frame_width: int
     frame_height: int
     motion: Optional[MotionData] = None
+    canonical_label: Optional[str] = None  # Corrected class name
+    correction_confidence: float = 0.0  # Confidence in correction
+    was_corrected: bool = False  # Whether correction was applied
     
     def get_bbox_area(self) -> float:
         """Calculate bounding box area"""
@@ -168,6 +188,9 @@ class Entity:
                 'centroid': [float(centroid[0]), float(centroid[1])],
                 'confidence': obs.confidence,
                 'class_name': obs.class_name,
+                'canonical_label': obs.canonical_label or obs.class_name,
+                'correction_confidence': obs.correction_confidence,
+                'was_corrected': obs.was_corrected,
                 'frame_width': obs.frame_width,
                 'frame_height': obs.frame_height,
             }
@@ -191,9 +214,22 @@ class Entity:
             if md is not None
         ]
 
+        # Get canonical label from described observation if available
+        canonical_label = self.class_name
+        was_corrected = False
+        if self.described_from_frame is not None:
+            for obs in self.observations:
+                if obs.frame_number == self.described_from_frame:
+                    canonical_label = obs.canonical_label or self.class_name
+                    was_corrected = obs.was_corrected
+                    break
+        
         return {
             'entity_id': self.id,
-            'class_name': self.class_name,
+            'yolo_class': self.class_name,  # Original YOLO classification
+            'canonical_label': canonical_label,  # Corrected classification
+            'object_class': canonical_label,  # For backward compatibility
+            'was_corrected': was_corrected,
             'description': self.description,
             'first_seen': self.first_seen,
             'last_seen': self.last_seen,
@@ -232,11 +268,21 @@ def motion_to_dict(motion: Optional[MotionData]) -> Optional[Dict[str, Any]]:
 class ObservationCollector:
     """Collects all detections with embeddings from entire video"""
     
-    def __init__(self, config: Optional[OrionConfig] = None):
+    def __init__(self, config: Optional[OrionConfig] = None, use_async: Optional[bool] = None):
         self.config = config or OrionConfig()
         self.asset_manager = AssetManager()
         self.model_manager = ModelManager.get_instance()
         self.observations: List[Observation] = []
+        
+        # Determine if async should be used
+        if use_async is None:
+            use_async = self.config.async_processing.enable_async
+        self.use_async = use_async and ASYNC_PERCEPTION_AVAILABLE
+        
+        if self.use_async:
+            logger.info("Async perception enabled")
+        elif use_async and not ASYNC_PERCEPTION_AVAILABLE:
+            logger.warning("Async perception requested but not available, falling back to sync")
         
     def load_models(self):
         """Load models via ModelManager (lazy loading)"""
@@ -255,7 +301,25 @@ class ObservationCollector:
             logger.info("  Mode: Vision only")
     
     def process_video(self, video_path: str) -> List[Observation]:
-        """Process entire video and collect observations"""
+        """
+        Process entire video and collect observations.
+        
+        Uses async perception if enabled, otherwise falls back to sync processing.
+        """
+        # Use async perception if enabled
+        if self.use_async:
+            logger.info("Using ASYNC perception engine")
+            engine = AsyncPerceptionEngine(
+                config=self.config,
+                async_config=self.config.async_processing
+            )
+            return engine.process_video(video_path)
+        
+        # Otherwise use synchronous processing
+        return self._process_video_sync(video_path)
+    
+    def _process_video_sync(self, video_path: str) -> List[Observation]:
+        """Process entire video and collect observations (synchronous)"""
         logger.info("="*80)
         logger.info("PHASE 1: OBSERVATION COLLECTION")
         logger.info("="*80)
@@ -560,32 +624,109 @@ class EntityTracker:
     
     def _class_based_fallback(self, observations: List[Observation]) -> List[Entity]:
         """
-        Smarter fallback: Group observations by object class
-        Better than treating each as unique, but not as good as embedding clustering
-        """
-        logger.warning("Using class-based fallback clustering")
-        logger.info("Grouping observations by object class (e.g., all 'keyboard' together)")
+        Smart fallback with embedding similarity guards.
         
-        # Group by class
+        Instead of merging ALL observations of same class (breaking object permanence),
+        we use embedding similarity to distinguish between multiple instances.
+        
+        Example: If there are 2 cups, we create 2 separate entities based on
+        embedding similarity, not 1 merged entity.
+        
+        This preserves object permanence while avoiding HDBSCAN's failures.
+        """
+        logger.warning("Using embedding-aware fallback clustering")
+        logger.info("Clustering same-class objects using embedding similarity")
+        
+        # Similarity threshold for grouping (cosine similarity)
+        # Higher = more strict (objects must be more similar to group)
+        # Lower = more lenient (different objects might group together)
+        similarity_threshold = self.config.clustering.state_change_threshold  # typically ~0.85
+        logger.info(f"Embedding similarity threshold: {similarity_threshold}")
+        
+        # Group by class first
         class_groups = defaultdict(list)
         for obs in observations:
             class_groups[obs.class_name].append(obs)
         
-        # Create entities
+        # Within each class, cluster by embedding similarity
         entities = []
         for class_name, obs_list in sorted(class_groups.items()):
-            entity = Entity(
-                id=f"class_{class_name}_{len(entities):03d}",
-                class_name=class_name,
-                observations=sorted(obs_list, key=lambda x: x.timestamp)
+            logger.info(f"Processing {len(obs_list)} observations of class '{class_name}'")
+            
+            # Sub-cluster within this class using embeddings
+            class_entities = self._cluster_by_embedding_similarity(
+                obs_list, 
+                class_name, 
+                similarity_threshold
             )
-            entities.append(entity)
+            entities.extend(class_entities)
         
-        logger.info(f"Created {len(entities)} entities from {len(class_groups)} object classes")
+        logger.info(f"Created {len(entities)} entities from {len(observations)} observations")
+        logger.info(f"Preserved object permanence (multiple instances of same class stay separate)")
         for entity in entities:
             logger.info(f"  {entity.id}: {len(entity.observations)} appearances")
         
         self._attach_motion_history(entities)
+        return entities
+    
+    def _cluster_by_embedding_similarity(
+        self, 
+        observations: List[Observation], 
+        class_name: str,
+        similarity_threshold: float
+    ) -> List[Entity]:
+        """
+        Cluster observations of same class using embedding similarity.
+        
+        Uses a simple greedy algorithm:
+        1. Start with first observation as first entity
+        2. For each new observation:
+           - Compare to existing entities (average embedding)
+           - If similar enough to an entity, add to that entity
+           - Otherwise, create new entity
+        
+        This preserves object permanence while avoiding HDBSCAN complexity.
+        """
+        if not observations:
+            return []
+        
+        # Sort by timestamp for temporal consistency
+        observations = sorted(observations, key=lambda x: x.timestamp)
+        
+        entities: List[Entity] = []
+        entity_counter = 0
+        
+        for obs in observations:
+            # Find best matching entity
+            best_entity = None
+            best_similarity = -1.0
+            
+            for entity in entities:
+                # Compare to average embedding of entity
+                avg_embedding = entity.average_embedding
+                
+                # Cosine similarity (both are normalized)
+                similarity = float(np.dot(obs.embedding, avg_embedding))
+                
+                if similarity > best_similarity:
+                    best_similarity = similarity
+                    best_entity = entity
+            
+            # If sufficiently similar to existing entity, add to it
+            if best_entity and best_similarity >= similarity_threshold:
+                best_entity.observations.append(obs)
+            else:
+                # Create new entity
+                entity_id = f"{class_name}_{entity_counter:03d}"
+                entity = Entity(
+                    id=entity_id,
+                    class_name=class_name,
+                    observations=[obs]
+                )
+                entities.append(entity)
+                entity_counter += 1
+        
+        logger.info(f"  → Clustered {len(observations)} observations into {len(entities)} entities")
         return entities
 
     def _attach_motion_history(self, entities: List[Entity]) -> None:
@@ -609,12 +750,48 @@ class EntityTracker:
 class SmartDescriber:
     """Describes each entity ONCE from its best frame"""
     
-    def __init__(self, config: Optional[OrionConfig] = None):
+    def __init__(self, config: Optional[OrionConfig] = None, use_async: Optional[bool] = None):
         self.config = config or OrionConfig()
         self.model_manager = ModelManager.get_instance()
+        self.corrector = ClassCorrector(config=self.config)
+        
+        # Correction statistics
+        self.correction_stats = {
+            'total_entities': 0,
+            'corrections_applied': 0,
+            'correction_examples': []
+        }
+        
+        # Determine if async should be used
+        if use_async is None:
+            use_async = self.config.async_processing.enable_async
+        self.use_async = use_async and ASYNC_DESCRIBER_AVAILABLE
+        
+        if self.use_async:
+            logger.info("Async entity description enabled")
+        elif use_async and not ASYNC_DESCRIBER_AVAILABLE:
+            logger.warning("Async description requested but not available, falling back to sync")
     
     def describe_entities(self, entities: List[Entity]) -> List[Entity]:
-        """Describe each entity once from best frame"""
+        """
+        Describe each entity once from best frame.
+        
+        Uses async workers if enabled, otherwise synchronous processing.
+        """
+        # Use async description if enabled
+        if self.use_async:
+            logger.info("Using ASYNC entity describer")
+            describer = AsyncEntityDescriber(
+                config=self.config,
+                async_config=self.config.async_processing
+            )
+            return describer.describe_entities(entities)
+        
+        # Otherwise use synchronous processing
+        return self._describe_entities_sync(entities)
+    
+    def _describe_entities_sync(self, entities: List[Entity]) -> List[Entity]:
+        """Describe each entity once from best frame (synchronous)"""
         logger.info("="*80)
         logger.info("PHASE 3: SMART DESCRIPTION GENERATION")
         logger.info("="*80)
@@ -660,6 +837,14 @@ class SmartDescriber:
             logger.info(f"  Skipped {skipped_low_conf} low-confidence entities (< {self.config.detection.low_confidence_threshold})")
         if skipped_errors > 0:
             logger.warning(f"  Skipped {skipped_errors} entities due to errors")
+        
+        # Log correction statistics
+        if self.correction_stats['corrections_applied'] > 0:
+            logger.info(f"\n✓ Applied {self.correction_stats['corrections_applied']} class corrections")
+            logger.info("  Examples:")
+            for ex in self.correction_stats['correction_examples']:
+                logger.info(f"    • {ex['original']} → {ex['corrected']} (conf: {ex['confidence']:.2f})")
+        
         logger.info("="*80 + "\n")
         
         return entities
@@ -689,13 +874,103 @@ class SmartDescriber:
         # Return observation with highest score
         return max(scored_obs, key=lambda x: x[0])[1]
     
+    def _check_semantic_compatibility(
+        self, 
+        yolo_class: str, 
+        vlm_description: str,
+        confidence: float
+    ) -> Tuple[bool, float]:
+        """
+        Check if YOLO class and VLM description are semantically compatible.
+        
+        Uses CLIP text embeddings to measure semantic similarity between:
+        - YOLO class name (e.g., "laptop")
+        - Key nouns extracted from VLM description (e.g., "computer")
+        
+        This handles cases like:
+        - "laptop" (YOLO) vs "computer" (VLM) → High similarity, compatible
+        - "cup" (YOLO) vs "phone" (VLM) → Low similarity, incompatible
+        
+        Args:
+            yolo_class: YOLO detection class
+            vlm_description: VLM-generated description
+            confidence: YOLO confidence score
+            
+        Returns:
+            (is_compatible, similarity_score)
+        """
+        # Extract potential object words from description
+        # Simple heuristic: look for common object nouns
+        description_lower = vlm_description.lower()
+        
+        # Common object nouns to check for
+        common_objects = [
+            'laptop', 'computer', 'notebook', 'screen', 'monitor', 'display',
+            'phone', 'smartphone', 'mobile', 'cellphone', 'device',
+            'keyboard', 'keys', 'mouse', 'trackpad',
+            'cup', 'mug', 'glass', 'bottle',
+            'book', 'paper', 'document', 'notebook',
+            'chair', 'seat', 'desk', 'table',
+            'tv', 'television', 'remote',
+            'person', 'man', 'woman', 'human',
+        ]
+        
+        # Find which object nouns appear in description
+        mentioned_objects = [obj for obj in common_objects if obj in description_lower]
+        
+        if not mentioned_objects:
+            # No clear object mentioned - use simple string matching
+            yolo_lower = yolo_class.lower()
+            return yolo_lower in description_lower, 0.0
+        
+        # Use CLIP to compute semantic similarity
+        try:
+            clip = self.model_manager.clip
+            
+            # Encode YOLO class
+            yolo_embedding = clip.encode_text(f"a {yolo_class}", normalize=True)
+            
+            # Encode each mentioned object and find max similarity
+            max_similarity = 0.0
+            best_match = None
+            
+            for obj in mentioned_objects:
+                obj_embedding = clip.encode_text(f"a {obj}", normalize=True)
+                similarity = float(np.dot(yolo_embedding, obj_embedding))
+                
+                if similarity > max_similarity:
+                    max_similarity = similarity
+                    best_match = obj
+            
+            # Threshold for semantic compatibility
+            # High threshold (0.85) means we're strict about matching
+            # Lower threshold (0.70) is more lenient
+            compatibility_threshold = 0.75
+            
+            is_compatible = max_similarity >= compatibility_threshold
+            
+            if not is_compatible and confidence < 0.7:
+                logger.warning(
+                    f"Semantic mismatch: YOLO='{yolo_class}' (conf={confidence:.2f}), "
+                    f"VLM sees '{best_match}' (similarity={max_similarity:.3f})"
+                )
+            
+            return is_compatible, max_similarity
+            
+        except Exception as e:
+            logger.warning(f"CLIP semantic check failed: {e}")
+            # Fallback to simple string matching
+            yolo_lower = yolo_class.lower()
+            return yolo_lower in description_lower, 0.0
+    
     def _generate_description(self, entity: Entity, observation: Observation) -> str:
         """
-        Generate unbiased description with YOLO verification
+        Generate unbiased description with semantic verification.
         
-        This uses a two-stage approach:
-        1. First, ask FastVLM what it sees (no bias from YOLO class)
-        2. If FastVLM disagrees with YOLO, flag for review
+        This uses a multi-stage approach:
+        1. Ask FastVLM what it sees (no bias from YOLO class)
+        2. Use CLIP embeddings to check semantic compatibility
+        3. Flag potential misclassifications
         """
         # Convert crop to PIL Image
         rgb_crop = cv2.cvtColor(observation.crop, cv2.COLOR_BGR2RGB)
@@ -721,32 +996,82 @@ Be objective and describe exactly what you observe."""
             temperature=self.config.description.temperature
         )
         
-        # STAGE 2: Quick sanity check - does FastVLM agree with YOLO?
-        # Check if the YOLO class appears in the description
-        yolo_class_lower = entity.class_name.lower()
-        description_lower = description.lower()
+        # STAGE 2: Semantic compatibility check using CLIP embeddings
+        is_compatible, similarity = self._check_semantic_compatibility(
+            entity.class_name,
+            description,
+            observation.confidence
+        )
         
-        # Common synonyms for classes
-        synonyms = {
-            'tv': ['monitor', 'screen', 'display', 'television'],
-            'monitor': ['tv', 'screen', 'display', 'television'],
-            'laptop': ['computer', 'notebook'],
-            'cell phone': ['phone', 'smartphone', 'mobile'],
-            'mouse': ['computer mouse', 'peripheral'],
-            'keyboard': ['keys', 'typing'],
-        }
+        if not is_compatible:
+            logger.warning(
+                f"Semantic incompatibility detected for {entity.id}: "
+                f"YOLO='{entity.class_name}', VLM description suggests different object"
+            )
+            
+            # If YOLO confidence is low, trust VLM more
+            if observation.confidence < 0.6:
+                logger.warning(
+                    f"Low YOLO confidence ({observation.confidence:.2f}), "
+                    f"trusting VLM description"
+                )
         
-        # Check if YOLO class or its synonyms appear in description
-        class_mentioned = yolo_class_lower in description_lower
-        if not class_mentioned and yolo_class_lower in synonyms:
-            class_mentioned = any(syn in description_lower for syn in synonyms[yolo_class_lower])
+        # STAGE 3: Apply class correction
+        # Check if correction is needed based on description
+        should_correct = self.corrector.should_correct(
+            entity.class_name,
+            description,
+            observation.confidence,
+            clip_verified=is_compatible
+        )
         
-        if not class_mentioned and observation.confidence < 0.7:
-            # FastVLM doesn't see what YOLO claimed, and YOLO wasn't confident
-            # Flag this as potentially misclassified
-            logger.warning(f"Potential misclassification: YOLO said '{entity.class_name}' "
-                          f"(conf={observation.confidence:.2f}), but FastVLM sees: "
-                          f"{description[:100]}...")
+        logger.debug(
+            f"Correction check for {entity.id} ({entity.class_name}): "
+            f"should_correct={should_correct}, conf={observation.confidence:.2f}, "
+            f"clip_verified={is_compatible}"
+        )
+        
+        if should_correct:
+            canonical_label, corr_conf = self.corrector.extract_corrected_class(
+                entity.class_name,
+                description,
+                use_llm=False  # Use rule-based correction only
+            )
+            
+            logger.debug(
+                f"Extraction result: canonical={canonical_label}, conf={corr_conf:.2f}"
+            )
+            
+            if canonical_label and canonical_label != entity.class_name:
+                # Apply correction to observation
+                observation.canonical_label = canonical_label
+                observation.correction_confidence = corr_conf
+                observation.was_corrected = True
+                
+                # Track statistics
+                self.correction_stats['corrections_applied'] += 1
+                if len(self.correction_stats['correction_examples']) < 5:
+                    self.correction_stats['correction_examples'].append({
+                        'entity_id': entity.id,
+                        'original': entity.class_name,
+                        'corrected': canonical_label,
+                        'confidence': corr_conf
+                    })
+                
+                logger.info(
+                    f"✓ Corrected {entity.id}: '{entity.class_name}' → '{canonical_label}' "
+                    f"(conf: {corr_conf:.2f})"
+                )
+            else:
+                observation.canonical_label = entity.class_name
+                observation.correction_confidence = observation.confidence
+                observation.was_corrected = False
+                logger.debug(f"No correction needed for {entity.id}: same class or no label")
+        else:
+            observation.canonical_label = entity.class_name
+            observation.correction_confidence = observation.confidence
+            observation.was_corrected = False
+            logger.debug(f"Skipping correction for {entity.id}: conditions not met")
         
         return description.strip()
     
@@ -810,7 +1135,7 @@ Be objective and describe exactly what you observe."""
 # MAIN TRACKING ENGINE
 # ============================================================================
 
-def run_tracking_engine(video_path: str, config: Optional[OrionConfig] = None) -> Tuple[List[Entity], List[Observation]]:
+def run_tracking_engine(video_path: str, config: Optional[OrionConfig] = None) -> Tuple[List[Entity], List[Observation], Dict[str, Any]]:
     """
     Main tracking-based perception pipeline
     
@@ -819,7 +1144,7 @@ def run_tracking_engine(video_path: str, config: Optional[OrionConfig] = None) -
         config: Optional configuration (uses default if not provided)
     
     Returns:
-        Tuple of (entities, observations)
+        Tuple of (entities, observations, stats)
     """
     if config is None:
         config = OrionConfig()
@@ -848,17 +1173,29 @@ def run_tracking_engine(video_path: str, config: Optional[OrionConfig] = None) -
     
     elapsed_time = time.time() - start_time
     
+    # Collect statistics
+    stats = {
+        'total_observations': len(observations),
+        'unique_entities': len(entities),
+        'descriptions_generated': len(entities) + sum(len(e.state_changes) for e in entities),
+        'processing_time': elapsed_time,
+        'efficiency_ratio': len(observations) / max(len(entities), 1),
+        'corrections_applied': describer.correction_stats['corrections_applied'],
+        'correction_examples': describer.correction_stats['correction_examples']
+    }
+    
     logger.info("\n" + "="*80)
     logger.info("TRACKING ENGINE COMPLETE")
     logger.info("="*80)
     logger.info(f"Total observations: {len(observations)}")
     logger.info(f"Unique entities: {len(entities)}")
-    logger.info(f"Descriptions generated: {len(entities) + sum(len(e.state_changes) for e in entities)}")
+    logger.info(f"Descriptions generated: {stats['descriptions_generated']}")
+    logger.info(f"Class corrections: {stats['corrections_applied']}")
     logger.info(f"Total time: {elapsed_time:.2f}s")
-    logger.info(f"Efficiency: {len(observations) / max(len(entities), 1):.1f}x fewer descriptions than detections")
+    logger.info(f"Efficiency: {stats['efficiency_ratio']:.1f}x fewer descriptions than detections")
     logger.info("="*80 + "\n")
     
-    return entities, observations
+    return entities, observations, stats
 
 
 # ============================================================================
@@ -885,16 +1222,12 @@ if __name__ == "__main__":
     
     try:
         # Run tracking engine
-        entities, observations = run_tracking_engine(VIDEO_PATH, config)
+        entities, observations, stats = run_tracking_engine(VIDEO_PATH, config)
         
         # Save results
         output = {
             'entities': [e.to_dict() for e in entities],
-            'stats': {
-                'total_observations': len(observations),
-                'unique_entities': len(entities),
-                'efficiency_ratio': len(observations) / max(len(entities), 1)
-            }
+            'stats': stats
         }
         
         output_path = OUTPUT_DIR / 'tracking_results.json'

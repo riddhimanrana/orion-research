@@ -31,23 +31,105 @@ logger = logging.getLogger("CausalInference")
 
 @dataclass
 class CausalConfig:
-    """Configuration for Causal Influence Score calculation"""
+    """
+    Configuration for Causal Influence Score calculation.
     
-    # Weights for CIS components (from TECHNICAL_ARCHITECTURE.md)
+    These weights should be learned from data using HPO (see orion.hpo.cis_optimizer).
+    Default values are provided as starting points but should be optimized.
+    """
+    
+    # === CIS Component Weights ===
+    # CONSTRAINT: Should sum to ~1.0 for interpretability
+    # These determine the relative importance of each factor
+    
     temporal_proximity_weight: float = 0.3
+    """Weight for temporal proximity component (when did it happen?)"""
+    
     spatial_proximity_weight: float = 0.3
-    entity_overlap_weight: float = 0.2
+    """Weight for spatial proximity component (how close?)"""
+    
+    motion_alignment_weight: float = 0.2
+    """Weight for motion alignment component (was it moving toward?)"""
+    
     semantic_similarity_weight: float = 0.2
+    """Weight for semantic similarity component (are they related?)"""
     
-    # Thresholds
-    max_pixel_distance: float = 600.0
-    temporal_decay: float = 4.0
+    # === Threshold Parameters ===
+    # These control when causal links are created
+    
     min_score: float = 0.55
-    top_k_per_event: int = 5
+    """Minimum CIS score to consider a causal relationship (learned via HPO)"""
     
-    # Motion parameters (used for motion score, but not in main CIS)
-    motion_angle_threshold: float = math.pi / 4
+    top_k_per_event: int = 5
+    """Maximum number of causal agents to consider per state change"""
+    
+    # === Distance/Decay Parameters ===
+    # These control how quickly influence drops off with distance/time
+    
+    max_pixel_distance: float = 600.0
+    """Maximum spatial distance for influence (pixels, resolution-dependent)"""
+    
+    temporal_decay: float = 4.0
+    """Temporal decay constant (seconds, affects how long influence persists)"""
+    
+    # === Motion Parameters ===
+    # These control motion-based causality detection
+    
+    motion_angle_threshold: float = math.pi / 4  # 45 degrees
+    """Maximum angle deviation to consider 'moving towards' (radians)"""
+    
     min_motion_speed: float = 5.0
+    """Minimum speed to consider as significant motion (pixels/second)"""
+    
+    # === Semantic Similarity Parameters ===
+    
+    use_semantic_similarity: bool = True
+    """Whether to use embedding similarity in CIS calculation"""
+    
+    semantic_similarity_threshold: float = 0.7
+    """Minimum embedding similarity to consider semantically related"""
+    
+    def __post_init__(self):
+        """Validate configuration"""
+        # Check that weights are reasonable
+        total_weight = (
+            self.temporal_proximity_weight +
+            self.spatial_proximity_weight +
+            self.motion_alignment_weight +
+            self.semantic_similarity_weight
+        )
+        
+        if abs(total_weight - 1.0) > 0.1:
+            logger.warning(
+                f"CIS weights sum to {total_weight:.3f}, not 1.0. "
+                f"Consider normalizing for interpretability."
+            )
+    
+    @classmethod
+    def from_hpo_result(cls, hpo_result_path: str) -> "CausalConfig":
+        """
+        Load configuration from HPO optimization results.
+        
+        Args:
+            hpo_result_path: Path to JSON file from CISOptimizer
+            
+        Returns:
+            CausalConfig with optimized parameters
+        """
+        import json
+        with open(hpo_result_path) as f:
+            result = json.load(f)
+        
+        weights = result["best_weights"]
+        threshold = result["best_threshold"]
+        
+        return cls(
+            temporal_proximity_weight=weights["temporal"],
+            spatial_proximity_weight=weights["spatial"],
+            motion_alignment_weight=weights.get("motion", 0.2),
+            semantic_similarity_weight=weights["semantic"],
+            min_score=threshold
+        )
 
 
 @dataclass
@@ -167,14 +249,14 @@ class CausalInferenceEngine:
         # Component scores
         temporal_score = self._temporal_score(agent, patient)
         spatial_score = self._proximity_score(agent, patient)
-        overlap_score = self._entity_overlap_score(agent, patient)
+        motion_score = self._motion_alignment_score(agent, patient)
         semantic_score = self._embedding_score(agent, patient)
         
-        # Weighted combination
+        # Weighted combination (weights should be learned via HPO)
         cis = (
             self.config.temporal_proximity_weight * temporal_score +
             self.config.spatial_proximity_weight * spatial_score +
-            self.config.entity_overlap_weight * overlap_score +
+            self.config.motion_alignment_weight * motion_score +
             self.config.semantic_similarity_weight * semantic_score
         )
         
@@ -204,13 +286,13 @@ class CausalInferenceEngine:
         normalized = 1.0 - (distance / self.config.max_pixel_distance)
         return normalized ** 2  # Quadratic falloff for sharper locality
     
-    def _motion_score(
+    def _motion_alignment_score(
         self,
         agent: AgentCandidate,
         patient: StateChange
     ) -> float:
         """
-        f_motion: Directed motion function
+        f_motion: Directed motion alignment function
         
         Measures if the agent was moving towards the patient before
         the state change occurred. Higher score for direct approach.
@@ -270,20 +352,31 @@ class CausalInferenceEngine:
         patient: StateChange
     ) -> float:
         """
-        f_embedding: Visual similarity bonus (optional)
+        f_embedding: Visual/semantic similarity component
         
-        Gives slight preference to visually similar objects that might
-        be semantically related (e.g., hand and switch both have similar
-        features in certain contexts).
-        
-        This is a minor component to break ties.
+        Measures semantic relatedness between agent and patient using
+        CLIP embeddings. Higher similarity suggests potential interaction
+        (e.g., hand and cup, person and door).
         
         Returns:
             Score in [0, 1]
         """
+        if not self.config.use_semantic_similarity:
+            return 0.5  # Neutral score if disabled
+        
+        # Get agent embedding
+        if not hasattr(agent, 'visual_embedding') or agent.visual_embedding is None:
+            return 0.5
+        
+        agent_emb = np.array(agent.visual_embedding)
+        
+        # For patient, we don't have embedding stored directly
+        # Instead, use a semantic similarity threshold
+        # This is a simplification - in full implementation, we'd store
+        # patient embeddings from state change detection
+        
         # For now, return neutral score
-        # In full implementation, could use cosine similarity of embeddings
-        # if patient also has visual embeddings stored
+        # TODO: Store patient embeddings during state change detection
         return 0.5
     
     def score_all_agents(
@@ -317,7 +410,7 @@ class CausalInferenceEngine:
                     patient=patient,
                     cis_score=cis,
                     proximity_score=self._proximity_score(agent, patient),
-                    motion_score=self._motion_score(agent, patient),
+                    motion_score=self._motion_alignment_score(agent, patient),
                     temporal_score=self._temporal_score(agent, patient),
                     embedding_score=self._embedding_score(agent, patient)
                 )

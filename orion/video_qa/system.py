@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import ollama
 from neo4j import Driver, GraphDatabase
-from neo4j.exceptions import Neo4jError
+from neo4j.exceptions import Neo4jError, ServiceUnavailable
 
 from ..embedding_model import EmbeddingModel, create_embedding_model
 from ..model_manager import ModelManager
@@ -54,22 +54,82 @@ class VideoQASystem:
     # Connection + model bootstrap
     # ------------------------------------------------------------------
     def connect(self) -> bool:
+        """
+        Connect to Neo4j database.
+        
+        Returns:
+            True if connection successful, False otherwise
+        """
         try:
+            if not self.neo4j_uri:
+                logger.error("No Neo4j URI configured")
+                return False
+            
             self.driver = GraphDatabase.driver(
                 self.neo4j_uri, auth=(self.neo4j_user, self.neo4j_password)
             )
+            
+            # Test connection with a simple query
             with self.driver.session() as session:
-                session.run("RETURN 1")
-            logger.info("✓ Connected to Neo4j for Q&A")
+                result = session.run("RETURN 1")
+                result.single()
+            
+            logger.info("✓ Connected to Neo4j for Q&A at %s", self.neo4j_uri)
             return True
+            
+        except ServiceUnavailable as exc:
+            logger.error("✗ Neo4j service unavailable at %s: %s", self.neo4j_uri, exc)
+            logger.info("  Please ensure Neo4j is running: `neo4j start` or Docker")
+            return False
         except Exception as exc:  # pragma: no cover - connection errors are environment driven
             logger.error("✗ Failed to connect to Neo4j: %s", exc)
+            logger.info("  Check connection settings in .env or config")
             return False
 
     def close(self) -> None:
+        """Close Neo4j driver connection."""
         if self.driver:
             self.driver.close()
             self.driver = None
+    
+    def check_data_available(self) -> Dict[str, Any]:
+        """
+        Check if Neo4j database contains video analysis data.
+        
+        Returns:
+            Dictionary with availability status and counts
+        """
+        if not self.driver and not self.connect():
+            return {
+                "available": False,
+                "error": "Cannot connect to Neo4j",
+                "entities": 0,
+                "scenes": 0,
+                "events": 0
+            }
+        
+        try:
+            with self.driver.session() as session:
+                # Count different node types
+                entity_count = session.run("MATCH (e:Entity) RETURN count(e) as count").single()["count"]
+                scene_count = session.run("MATCH (s:Scene) RETURN count(s) as count").single()["count"]
+                event_count = session.run("MATCH (ev:Event) RETURN count(ev) as count").single()["count"]
+                
+                return {
+                    "available": entity_count > 0 or scene_count > 0,
+                    "entities": entity_count,
+                    "scenes": scene_count,
+                    "events": event_count
+                }
+        except Exception as exc:
+            logger.error("Error checking data availability: %s", exc)
+            return {
+                "available": False,
+                "error": str(exc),
+                "entities": 0,
+                "scenes": 0,
+                "events": 0
+            }
 
     def _ensure_embedding_model(self) -> bool:
         if self.embedding_model is not None:
@@ -102,11 +162,37 @@ class VideoQASystem:
     # Public API
     # ------------------------------------------------------------------
     def ask_question(self, question: str) -> str:
+        """
+        Ask a question about the analyzed video.
+        
+        Args:
+            question: User's question
+            
+        Returns:
+            Answer string (or user-friendly error message)
+        """
         question = question.strip()
         if not question:
             return "Please provide a question."
 
-        context = self.get_video_context(question)
+        # Get context with error handling
+        try:
+            context = self.get_video_context(question)
+        except Exception as exc:
+            logger.error("Error retrieving context: %s", exc, exc_info=True)
+            return (
+                "I'm having trouble accessing the video analysis data. "
+                "Please ensure the video has been analyzed and Neo4j is running."
+            )
+        
+        # Check if we got meaningful context
+        if not context or context in {"No knowledge graph available", "Error retrieving video context", "No video analysis available"}:
+            return (
+                "No video analysis is available yet. "
+                "Please run the pipeline on a video first: "
+                "`python -m orion.run_pipeline --video your_video.mp4`"
+            )
+
         history_block = self._format_history()
 
         prompt = (
@@ -130,9 +216,24 @@ class VideoQASystem:
                 options={"temperature": 0.7},
             )
             answer = response["message"]["content"]
+        except ConnectionError as exc:
+            logger.error("Ollama connection error: %s", exc)
+            return (
+                "Cannot connect to Ollama. Please ensure Ollama is running: "
+                "`ollama serve` or install from https://ollama.ai"
+            )
+        except KeyError as exc:
+            logger.error("Unexpected Ollama response format: %s", exc)
+            return (
+                "Received unexpected response from Ollama. "
+                "Please check your Ollama installation and try again."
+            )
         except Exception as exc:  # pragma: no cover - depends on local Ollama install
-            logger.error("Error generating answer: %s", exc)
-            return f"Error: {exc}"
+            logger.error("Error generating answer: %s", exc, exc_info=True)
+            return (
+                f"Error generating answer: {type(exc).__name__}. "
+                "Please ensure Ollama is running and the model is available."
+            )
 
         self.conversation_history.append({"question": question, "answer": answer})
         history_limit = self.config.conversation_history_size
@@ -141,60 +242,130 @@ class VideoQASystem:
         return answer
 
     def get_video_context(self, question: Optional[str] = None, top_k: int = 5) -> str:
-        if not self.driver and not self.connect():
-            return "No knowledge graph available"
+        """
+        Retrieve video analysis context from Neo4j knowledge graph.
+        
+        Args:
+            question: Optional user question to guide context retrieval
+            top_k: Number of top entities to include
+            
+        Returns:
+            Formatted context string (or error message)
+        """
+        # Check Neo4j connection
+        if not self.driver:
+            if not self.connect():
+                logger.warning("No Neo4j connection available")
+                return "No knowledge graph available"
+        
         if not self.driver:
             return "No knowledge graph available"
 
-        question_type = self._classify_question(question) if question else "general"
+        # Classify question to determine what context to retrieve
+        try:
+            question_type = self._classify_question(question) if question else "general"
+        except Exception as exc:
+            logger.warning("Error classifying question: %s", exc)
+            question_type = "general"
+        
         sections: List[str] = []
+        retrieval_errors = []
 
         try:
             with self.driver.session() as session:
+                # Semantic context (vector search)
                 if self.config.enable_semantic and question:
-                    semantic_ctx = self._retrieve_semantic_context(session, question)
-                    if semantic_ctx:
-                        sections.append(semantic_ctx)
+                    try:
+                        semantic_ctx = self._retrieve_semantic_context(session, question)
+                        if semantic_ctx:
+                            sections.append(semantic_ctx)
+                    except Exception as exc:
+                        logger.warning("Error retrieving semantic context: %s", exc)
+                        retrieval_errors.append("semantic")
 
+                # Entity overview
                 if self.config.enable_overview:
-                    overview_ctx = self._build_overview_context(
-                        session, question, top_k=self.config.overview_top_entities
-                    )
-                    if overview_ctx:
-                        sections.append(overview_ctx)
+                    try:
+                        overview_ctx = self._build_overview_context(
+                            session, question, top_k=self.config.overview_top_entities
+                        )
+                        if overview_ctx:
+                            sections.append(overview_ctx)
+                    except Exception as exc:
+                        logger.warning("Error building overview context: %s", exc)
+                        retrieval_errors.append("overview")
 
+                # Spatial context
                 if self.config.enable_spatial and question_type in {"spatial", "general"}:
-                    spatial_ctx = self._retrieve_spatial_context(session)
-                    if spatial_ctx:
-                        sections.append(spatial_ctx)
+                    try:
+                        spatial_ctx = self._retrieve_spatial_context(session)
+                        if spatial_ctx:
+                            sections.append(spatial_ctx)
+                    except Exception as exc:
+                        logger.warning("Error retrieving spatial context: %s", exc)
+                        retrieval_errors.append("spatial")
 
+                # Scene context
                 if self.config.enable_scene and question_type in {"scene", "general"}:
-                    scene_ctx = self._retrieve_scene_context(session)
-                    if scene_ctx:
-                        sections.append(scene_ctx)
+                    try:
+                        scene_ctx = self._retrieve_scene_context(session)
+                        if scene_ctx:
+                            sections.append(scene_ctx)
+                    except Exception as exc:
+                        logger.warning("Error retrieving scene context: %s", exc)
+                        retrieval_errors.append("scene")
 
+                # Temporal context
                 if self.config.enable_temporal and question_type in {"temporal", "general"}:
-                    temporal_ctx = self._retrieve_temporal_context(session)
-                    if temporal_ctx:
-                        sections.append(temporal_ctx)
+                    try:
+                        temporal_ctx = self._retrieve_temporal_context(session)
+                        if temporal_ctx:
+                            sections.append(temporal_ctx)
+                    except Exception as exc:
+                        logger.warning("Error retrieving temporal context: %s", exc)
+                        retrieval_errors.append("temporal")
 
+                # Causal context
                 if self.config.enable_causal and question_type in {"causal", "general"}:
-                    causal_ctx = self._retrieve_causal_context(session)
-                    if causal_ctx:
-                        sections.append(causal_ctx)
+                    try:
+                        causal_ctx = self._retrieve_causal_context(session)
+                        if causal_ctx:
+                            sections.append(causal_ctx)
+                    except Exception as exc:
+                        logger.warning("Error retrieving causal context: %s", exc)
+                        retrieval_errors.append("causal")
 
+                # Event context
                 if self.config.enable_events and question_type in {"causal", "temporal", "general"}:
-                    event_ctx = self._retrieve_event_context(session)
-                    if event_ctx:
-                        sections.append(event_ctx)
+                    try:
+                        event_ctx = self._retrieve_event_context(session)
+                        if event_ctx:
+                            sections.append(event_ctx)
+                    except Exception as exc:
+                        logger.warning("Error retrieving event context: %s", exc)
+                        retrieval_errors.append("events")
 
         except Neo4jError as exc:
-            logger.error("Error retrieving context from Neo4j: %s", exc)
+            logger.error("Neo4j error retrieving context: %s", exc, exc_info=True)
+            return "Error retrieving video context"
+        except Exception as exc:
+            logger.error("Unexpected error retrieving context: %s", exc, exc_info=True)
             return "Error retrieving video context"
 
-        return "\n\n".join(section for section in sections if section) or "No video analysis available"
+        # Assemble result
+        result = "\n\n".join(section for section in sections if section)
+        
+        # If we had errors but got some context, log it but continue
+        if retrieval_errors and result:
+            logger.info("Retrieved partial context (errors in: %s)", ", ".join(retrieval_errors))
+        
+        return result or "No video analysis available"
 
     def start_interactive_session(self) -> None:
+        """
+        Start an interactive Q&A session in the terminal.
+        Handles errors gracefully and provides helpful feedback.
+        """
         from rich.console import Console
         from rich.markdown import Markdown
         from rich.panel import Panel
@@ -204,13 +375,33 @@ class VideoQASystem:
         # Verify Ollama availability
         try:
             ollama.list()
+        except ConnectionError as exc:
+            console.print(f"[red]✗ Cannot connect to Ollama service[/red]")
+            console.print("[yellow]Please start Ollama: `ollama serve`[/yellow]")
+            console.print("[yellow]Or install from: https://ollama.ai[/yellow]")
+            return
         except Exception as exc:  # pragma: no cover - environment specific
-            console.print(f"[red]\u2717 Ollama not available: {exc}[/red]")
+            console.print(f"[red]✗ Ollama error: {exc}[/red]")
             console.print("[yellow]Install Ollama from: https://ollama.ai[/yellow]")
             return
 
+        # Check if model is available
+        try:
+            models = ollama.list()
+            model_names = [m.get('name', '').split(':')[0] for m in models.get('models', [])]
+            if self.llm_model.split(':')[0] not in model_names:
+                console.print(f"[yellow]⚠ Model '{self.llm_model}' not found locally[/yellow]")
+                console.print(f"[yellow]Pull it with: `ollama pull {self.llm_model}`[/yellow]")
+                console.print("[yellow]Continuing anyway (will download if needed)...[/yellow]")
+        except Exception:
+            # Non-fatal, continue anyway
+            pass
+
+        # Connect to Neo4j
         if not self.connect():
-            console.print("[red]\u2717 Cannot connect to Neo4j. Run the pipeline first![/red]")
+            console.print("[red]✗ Cannot connect to Neo4j[/red]")
+            console.print("[yellow]Please ensure Neo4j is running and the database contains video analysis data[/yellow]")
+            console.print("[yellow]Run pipeline first: `python -m orion.run_pipeline --video your_video.mp4`[/yellow]")
             return
 
         console.print(
@@ -222,6 +413,9 @@ class VideoQASystem:
             )
         )
 
+        error_count = 0
+        max_errors = 3  # Exit after 3 consecutive errors
+
         while True:
             try:
                 question = console.input("\n[bold green]Ask a question:[/bold green] ")
@@ -230,15 +424,25 @@ class VideoQASystem:
                     break
                 if not question.strip():
                     continue
+                    
                 console.print("[dim]Thinking...[/dim]")
                 answer = self.ask_question(question)
                 console.print("\n[bold blue]Answer:[/bold blue]")
                 console.print(Panel(answer, border_style="blue"))
+                
+                # Reset error count on successful interaction
+                error_count = 0
+                
             except KeyboardInterrupt:
                 console.print("\n[yellow]Session ended[/yellow]")
                 break
             except Exception as exc:  # pragma: no cover - console rendering errors
+                error_count += 1
                 console.print(f"[red]Error: {exc}[/red]")
+                
+                if error_count >= max_errors:
+                    console.print(f"[red]Too many errors ({max_errors}). Exiting.[/red]")
+                    break
 
         self.close()
 
@@ -383,6 +587,45 @@ class VideoQASystem:
         return "\n".join(sections)
 
     def _retrieve_spatial_context(self, session) -> str:
+        parts = []
+        
+        # First, retrieve spatial co-location zones
+        zone_query = """
+        MATCH (z:SpatialZone)
+        OPTIONAL MATCH (e:Entity)-[r:IN_SPATIAL_ZONE]->(z)
+        WITH z, collect(DISTINCT e.class) AS entity_classes, count(DISTINCT e) AS entity_count
+        RETURN z.id AS zone_id,
+               z.location_descriptor AS location,
+               z.frame_start AS frame_start,
+               z.frame_end AS frame_end,
+               z.max_concurrent_entities AS max_concurrent,
+               entity_classes,
+               entity_count
+        ORDER BY z.frame_start
+        LIMIT 5
+        """
+        try:
+            zone_records = session.run(zone_query).data()
+            if zone_records:
+                parts.append("**Spatial Co-Location Zones:**")
+                for record in zone_records:
+                    location = record.get("location", "unknown")
+                    entity_classes = record.get("entity_classes", [])
+                    entity_count = record.get("entity_count", 0)
+                    max_concurrent = record.get("max_concurrent", 0)
+                    frame_start = record.get("frame_start", 0)
+                    frame_end = record.get("frame_end", 0)
+                    
+                    if entity_classes:
+                        parts.append(
+                            f"\n- {location} (frames {frame_start}-{frame_end}): "
+                            f"{entity_count} entities ({', '.join(entity_classes[:5])}), "
+                            f"up to {max_concurrent} concurrent"
+                        )
+        except Exception as e:
+            logger.debug(f"Could not retrieve spatial zones: {e}")
+        
+        # Then retrieve spatial relationships
         query = """
         MATCH (e:Entity)-[r:SPATIAL_REL]->(other:Entity)
         RETURN e.class AS class,
@@ -391,18 +634,20 @@ class VideoQASystem:
         LIMIT 10
         """
         records = session.run(query).data()
-        if not records:
-            return ""
-        parts = ["**Spatial Relationships:**"]
-        for record in records:
-            entity_class = record.get("class", "unknown")
-            zone = record.get("zone", "unknown")
-            parts.append(f"\n- {entity_class} (located in {zone}):")
-            for rel in (record.get("relationships") or [])[:3]:
-                other = rel.get("other", "unknown")
-                rel_type = rel.get("relationship", "related to")
-                parts.append(f"  - {rel_type} {other}")
-        return "\n".join(parts)
+        if records:
+            if parts:
+                parts.append("\n")
+            parts.append("**Entity Spatial Relationships:**")
+            for record in records:
+                entity_class = record.get("class", "unknown")
+                zone = record.get("zone", "unknown")
+                parts.append(f"\n- {entity_class} (located in {zone}):")
+                for rel in (record.get("relationships") or [])[:3]:
+                    other = rel.get("other", "unknown")
+                    rel_type = rel.get("relationship", "related to")
+                    parts.append(f"  - {rel_type} {other}")
+        
+        return "\n".join(parts) if parts else ""
 
     def _retrieve_scene_context(self, session) -> str:
         query = """

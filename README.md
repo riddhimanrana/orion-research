@@ -1,247 +1,63 @@
-# Orion: Intelligent Video Understanding Pipeline
+# Orion - Video Understanding & Causal Inference
 
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Status: Production](https://img.shields.io/badge/Status-Production-brightgreen)](https://github.com/riddhimanrana/orion-research)
+Video analysis system with learnable causality detection.
 
-A comprehensive video understanding system that analyzes video content using object detection, entity tracking, and knowledge graphs. Ask questions about your videos and get intelligent answers.
+## Structure
 
-## What It Does
-
-Video → Intelligence
-
-1. **Detect Objects** - YOLO11x identifies 80+ object classes
-2. **Understand Visuals** - CLIP + FastVLM generate descriptions
-3. **Track Entities** - Hungarian algorithm tracks objects across frames
-4. **Build Knowledge Graph** - Neo4j stores relationships (temporal, spatial, causal)
-5. **Answer Questions** - Query videos in natural language via Ollama LLM
+```
+orion-research/
+├── orion/                    # Core package
+│   ├── hpo/                  # CIS hyperparameter optimization
+│   │   ├── cis_optimizer.py  # Bayesian optimization
+│   │   └── tao_data_loader.py # TAO-Amodal loader
+│   └── evaluation/           # VSGR benchmarks
+├── data/
+│   ├── benchmarks/ground_truth/  # VSGR causal labels
+│   ├── examples/video.mp4    # Test video
+│   ├── aspire_train.json     # TAO-Amodal annotations
+│   └── aspire_test.json      # TAO-Amodal test set
+├── scripts/
+│   └── train_cis.py          # Train CIS weights
+├── hpo_results/              # Trained weights
+└── docs/
+    └── CIS_TRAINING_GUIDE.md # Complete training guide
+```
 
 ## Quick Start
 
+### 1. Analyze Video
 ```bash
-# One-time setup (prompts for configuration)
-orion init
-
-# Analyze a video
-orion analyze video.mp4
-
-# Ask questions
-orion qa
+orion analyze data/examples/video.mp4
 ```
 
-## Pre-Installation Requirements
+### 2. Train CIS Weights (Optional)
 
-**REQUIRED** - Install these first (in order):
-
-### 1. Conda - Python Environment Manager
-
-Conda isolates Orion from your system Python. Install one:
-
-- **[Miniconda](https://docs.conda.io/projects/miniconda/en/latest/)** (5 min, ~500MB) - Recommended, lightweight
-- **[Anaconda](https://www.anaconda.com/download)** (10 min, ~3GB) - Full version with extra tools
-
-After installation, verify:
+Make causality detection more accurate using VSGR ground truth:
 
 ```bash
-conda --version
-```
-### 2. Docker - Service Containers (Optional but Strongly Recommended)
+# Quick test (2 videos, 10 trials, ~30 seconds)
+python scripts/train_cis.py --trials 10 --max-videos 2
 
-Automatically starts Neo4j and Ollama. Without Docker, you'll need to start them manually.
+# Full training (all videos, 200 trials, ~30 minutes)
+python scripts/train_cis.py --trials 200
 
-- [Install Docker Desktop](https://www.docker.com/products/docker-desktop)
-- Supports: macOS, Linux, Windows
-- Verify: `docker --version`
-
-**No Docker?** → `orion init` will show you how to install and run Neo4j and Ollama manually (takes ~10 min more).
-
-## Installation
-
-### 1. Clone Repository
-
-```bash
-git clone https://github.com/riddhimanrana/orion-research
-cd orion-research
+# Results auto-saved to: hpo_results/cis_weights.json
+# Orion will automatically use these weights!
 ```
 
-### 2. Create Conda Environment
+See **[`docs/CIS_TRAINING_GUIDE.md`](docs/CIS_TRAINING_GUIDE.md)** for complete documentation.
 
-```bash
-conda create -n orion python=3.10
-conda activate orion
-```
-
-### 3. Install Orion
+## Requirements
 
 ```bash
 pip install -e .
+pip install optuna  # For CIS training
 ```
 
-### 4. Initialize (First Time Only)
+## Key Components
 
-```bash
-orion init
-```
+- **CIS Optimizer**: `orion/hpo/cis_optimizer.py` - Bayesian optimization
+- **Causal Inference**: `orion/causal_inference.py` - CIS formula
+- **VSGR Loader**: `orion/evaluation/benchmarks/vsgr_aspire_loader.py`
+- **Training Guide**: `CIS_TRAINING_GUIDE.md` - Complete walkthrough
 
-This runs a 3-step initialization:
-
-#### Step 1: Pre-flight Check
-
-- Verifies Neo4j and Ollama are running
-- If missing: Shows you exactly how to install and start them
-- Suggests Docker (easiest) or manual installation
-- Won't proceed until services are ready
-
-#### Step 2: Download Models
-
-- Detects your hardware (Apple Silicon / NVIDIA GPU / CPU)
-- Downloads vision models (YOLO11x, FastVLM, CLIP)
-- Prepares runtime backend (~5-15 minutes depending on internet)
-
-#### Step 3: Interactive Setup
-
-- Prompts for Neo4j credentials
-- Configures Ollama URL
-- Tests all connections
-- Saves configuration to `~/.orion/config.json`
-
-### 5. Verify Setup
-
-```bash
-orion status
-```
-
-Should show all services connected ✓
-
-## Usage
-
-### Analyze Videos
-
-```bash
-# Standard analysis (balanced)
-orion analyze video.mp4
-
-# Quick mode (faster, less accurate)
-orion analyze video.mp4 --fast
-
-# High quality (slower, more accurate)
-orion analyze video.mp4 --accurate
-```
-
-### Ask Questions
-
-```bash
-orion qa
-
-# Examples:
-# > What objects appeared in the video?
-# > Where was the person located?
-# > What events happened?
-```
-
-### Check Status
-
-```bash
-orion status
-```
-
-### Configure Settings
-
-```bash
-# View configuration
-orion config show
-
-# Update a setting
-orion config set neo4j.uri bolt://my-server:7687
-
-# Reset to defaults
-orion config reset
-```
-
-## Hardware Support
-
-- **Apple Silicon (M1/M2/M3+)** - Auto-detected, uses MLX backend (recommended)
-- **NVIDIA GPU (CUDA)** - Auto-detected, uses CUDA backend  
-- **CPU** - Works but slow (~30-60s per frame)
-
-Orion automatically selects the best option during `orion init`.
-
-## Troubleshooting
-
-### Neo4j Connection Failed
-
-```bash
-# Check if running
-docker ps | grep neo4j
-
-# Restart it
-docker restart orion-neo4j
-
-# Check logs
-docker logs orion-neo4j
-```
-
-### Ollama Not Responding
-
-```bash
-# Check if running
-curl http://localhost:11434/api/tags
-
-# Restart it
-docker restart orion-ollama
-```
-
-### Models Not Downloading
-
-```bash
-# Check internet, then re-run
-orion init
-```
-
-### Reset Everything
-
-```bash
-orion config reset
-orion init
-```
-
-## Documentation
-
-- **[TECHNICAL_ARCHITECTURE.md](TECHNICAL_ARCHITECTURE.md)** - System design
-- **[KNOWLEDGE_GRAPH_SCHEMA.md](KNOWLEDGE_GRAPH_SCHEMA.md)** - Database schema
-
-## Performance
-
-**Processing 1-minute video:**
-
-- Total time: ~110 seconds
-- Perception: 60s (detection + descriptions)
-- Tracking & Graph: 50s (entity tracking + relationships)
-
-**Optimizations:**
-
-- 15x fewer LLM calls via batching
-- 90%+ accuracy on spatial relationships
-- Efficient Neo4j operations
-
-## Supported Platforms
-
-- macOS (Intel & Apple Silicon)
-- Linux (Ubuntu/Debian)
-- Windows (WSL2)
-
-## License
-
-MIT - see [LICENSE](LICENSE) file
-
-## Citation
-
-If you use Orion in research:
-
-```bibtex
-@software{orion2025,
-  title={Orion: Intelligent Video Understanding Pipeline},
-  author={Rana, Riddhiman},
-  year={2025}
-}
-```

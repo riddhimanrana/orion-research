@@ -18,7 +18,9 @@ __pycache__/
 
 /data/testing/
 
-# /orion-old
+/orion-old
+/data/vsgr_aspire
+
 
 # Distribution / packaging
 .Python
