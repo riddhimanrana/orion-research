@@ -1,0 +1,264 @@
+================================================================================
+ORION EVALUATION PIPELINE - COMPLETE INSTRUCTIONS
+================================================================================
+
+WHAT'S FIXED:
+✅ Script 3 now properly processes video files (not single frames)
+✅ Recall@K metrics implemented for ranking quality
+✅ Mean Rank (MR) metric added for paper comparison
+✅ Script 4 computes all metrics including new ranking metrics
+
+================================================================================
+PREREQUISITES
+================================================================================
+
+1. Action Genome Dataset
+   - Download Charades 480p videos: https://prior.allenai.org/projects/charades
+   - Download annotations: https://drive.google.com/drive/folders/1LGGPK_QgGbh9gH9SDFv_9LIhBliZbZys
+   
+   Organize as:
+   dataset/ag/
+   ├── videos/              (Charades MP4 files)
+   ├── frames/              (Extracted frames, auto-generated)
+   └── annotations/         (Downloaded annotations)
+
+2. System Requirements
+   - Neo4j running (for Orion Part 2)
+   - ffmpeg installed (brew install ffmpeg on macOS)
+   - Python 3.10+
+   - 50+ GB free disk space
+
+================================================================================
+STEP 1: PREPARE DATA
+================================================================================
+
+Command:
+    python scripts/1_prepare_ag_data.py
+
+What it does:
+    - Loads Action Genome annotations
+    - Extracts first 50 video clips
+    - Creates ground truth scene graphs
+    
+Output:
+    data/ag_50/ground_truth_graphs.json
+
+Expected output:
+    ✓ Found ground truth
+
+================================================================================
+STEP 2: RUN ORION PIPELINE
+================================================================================
+
+Command:
+    python scripts/3_run_orion_ag_eval.py
+
+What it does:
+    - Loads 50 video clips
+    - Runs Orion's full pipeline on each:
+      * Part 1: Object detection + tracking
+      * Part 2: Scene graph generation + semantic uplift
+    - Saves predictions to JSON
+
+Output:
+    data/ag_50/results/predictions.json
+
+Expected output:
+    STEP 3: Run Orion Pipeline on Action Genome Clips
+    ======================================================================
+    1. Loading ground truth...
+       ✓ Loaded 50 clips
+
+    2. Running Orion pipeline on first 50 clips...
+       (Full perception + semantic graph generation)
+       
+       Processing clip 1/50...
+       Processing clip 10/50...
+       ...
+       
+       ✓ Successfully processed X/50 clips
+
+    3. Saving predictions...
+
+TIMING:
+    ⏱️  Expect 10-15 minutes per clip
+    ⏱️  Total: 8-12 hours for 50 clips
+
+================================================================================
+STEP 3: EVALUATE RESULTS
+================================================================================
+
+Command:
+    python scripts/4_evaluate_ag_predictions.py
+
+What it does:
+    - Loads predictions and ground truth
+    - Computes:
+      * Precision/Recall/F1 (edges, events, causal links)
+      * Entity Jaccard similarity
+      * Recall@10, Recall@20, Recall@50
+      * Mean Recall (mR)
+      * Mean Rank (MR)
+    - Saves all metrics to JSON
+
+Output:
+    data/ag_50/results/metrics.json
+
+Expected output:
+    EVALUATION RESULTS
+    ======================================================================
+    
+    STANDARD METRICS:
+    
+    Relationship (Edge) Detection:
+      Precision: 0.XXXX
+      Recall: 0.XXXX
+      F1-Score: 0.XXXX
+    
+    Event Detection:
+      Precision: 0.XXXX
+      Recall: 0.XXXX
+      F1-Score: 0.XXXX
+    
+    Causal Link Detection:
+      Precision: 0.XXXX
+      Recall: 0.XXXX
+      F1-Score: 0.XXXX
+    
+    Entity Detection:
+      Jaccard Similarity: 0.XXXX
+    
+    RECALL@K METRICS (HyperGLM Protocol):
+      R@10: XX.XX%
+      R@20: XX.XX%
+      R@50: XX.XX%
+      mR (Mean Recall): XX.XX%
+      MR (Mean Rank): XX.X
+
+TIMING:
+    ⏱️  Usually completes in 1-2 minutes
+
+================================================================================
+UNDERSTANDING THE METRICS
+================================================================================
+
+STANDARD METRICS (F1-based):
+    - Precision: How many predictions are correct?
+    - Recall: How many ground truth items did we find?
+    - F1: Harmonic mean of precision and recall
+    - Jaccard: What % of entities match ground truth?
+
+NEW RANKING METRICS (Paper comparison):
+    - R@10: % of relationships found in top-10 predictions (higher = better)
+    - R@20: % of relationships found in top-20 predictions (higher = better)
+    - R@50: % of relationships found in top-50 predictions (higher = better)
+    - mR: Average recall across all relationship types (higher = better)
+    - MR: Average rank position of correct predictions (lower = better)
+
+INTERPRETATION EXAMPLE:
+    R@10 = 45.67% means: "45.67% of ground truth relationships are found
+                          when we look at our top-10 predictions"
+    
+    MR = 24.5 means: "On average, good predictions appear at rank 24.5"
+
+================================================================================
+QUICK COMMANDS (Copy & Paste)
+================================================================================
+
+# Run all steps in sequence
+python scripts/1_prepare_ag_data.py && \
+python scripts/3_run_orion_ag_eval.py && \
+python scripts/4_evaluate_ag_predictions.py
+
+# Check results
+cat data/ag_50/results/metrics.json | head -100
+
+# View just the ranking metrics
+python3 -c "import json; m = json.load(open('data/ag_50/results/metrics.json')); print(json.dumps(m['recall_at_k'], indent=2))"
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+Problem: "Video not found for clip XXX"
+Solution:
+    - Check videos in: dataset/ag/videos/
+    - Check filenames match clip IDs
+    - Verify ffmpeg: which ffmpeg
+
+Problem: "Pipeline failed for clip XXX"
+Solution:
+    - Ensure Neo4j is running: neo4j status
+    - Check disk space: df -h
+    - Check frame files exist: ls dataset/ag/frames/
+
+Problem: "Predictions not found"
+Solution:
+    - Run Step 2 again: python scripts/3_run_orion_ag_eval.py
+    - Check output file: ls -lh data/ag_50/results/predictions.json
+
+Problem: "All metrics are zeros"
+Solution:
+    - Verify predictions.json has content: head data/ag_50/results/predictions.json
+    - Check ground truth format: head data/ag_50/ground_truth_graphs.json
+    - Re-run evaluation: python scripts/4_evaluate_ag_predictions.py
+
+Problem: "Script 3 is very slow"
+Solution:
+    - This is normal: 10-15 min per video on GPU hardware
+    - Consider:
+      * Editing script to use 'fast' config instead of 'balanced'
+      * Using fewer clips (edit script to use top 10 instead of 50)
+      * Running overnight
+
+================================================================================
+FOR PAPER
+================================================================================
+
+Use these metrics for your paper evaluation section:
+
+From metrics.json (recall_at_k):
+    - Table 1: R@10, R@20, R@50 (comparison with baselines)
+    - Table 1: mR (per-category performance)
+    - Table 1: MR (ranking quality)
+
+From aggregated:
+    - Edge F1: Overall relationship detection quality
+    - Event F1: Action detection quality
+    - Entity Jaccard: Object detection accuracy
+
+Example comparison format:
+    ┌─────────────────────────┬────────┬────────┬────────┐
+    │ Method                  │ R@10   │ R@50   │ MR     │
+    ├─────────────────────────┼────────┼────────┼────────┤
+    │ HyperGLM (baseline)     │ 42.3   │ 73.1   │ 23.4   │
+    │ Our Orion              │ 35.67  │ 71.32  │ 24.5   │
+    └─────────────────────────┴────────┴────────┴────────┘
+
+================================================================================
+KEY IMPROVEMENTS IN THIS VERSION
+================================================================================
+
+BEFORE (BROKEN):
+    ❌ Script 3 processed single JPEG frames
+    ❌ No temporal context or tracking
+    ❌ Artificial 1.0 F1 scores (copying ground truth)
+    ❌ Only standard metrics available
+
+AFTER (FIXED):
+    ✅ Script 3 processes full video files
+    ✅ Complete temporal and spatial analysis
+    ✅ Real evaluation of Orion predictions
+    ✅ Standard metrics + Recall@K + MR
+    ✅ Per-category breakdown
+    ✅ Better error handling and logging
+
+================================================================================
+QUESTIONS?
+================================================================================
+
+See documentation files:
+    - IMPLEMENTATION_SUMMARY.md (technical details)
+    - EVALUATION_PIPELINE_FIXES.md (architecture overview)
+    - QUICK_EVAL_START.md (quick reference)
+

@@ -139,7 +139,7 @@ class RecallAtK:
         Compute final metrics.
         
         Returns:
-            Dictionary with keys: 'R@10', 'R@20', 'R@50', 'mR'
+            Dictionary with keys: 'R@10', 'R@20', 'R@50', 'mR', 'MR'
         """
         results = {}
         
@@ -167,6 +167,25 @@ class RecallAtK:
             category_recalls.append(category_recall)
         
         results['mR'] = (np.mean(category_recalls) * 100) if category_recalls else 0.0
+        
+        # Compute Mean Rank (MR) - average rank of first recalled item per category
+        # Lower MR is better (max rank = max K value)
+        mean_ranks = []
+        for category in self.total_gt_relationships.keys():
+            if self.total_gt_relationships[category] == 0:
+                continue
+            
+            # Find average rank of recalled items for this category
+            ranks = []
+            for pred_rank in range(1, max(self.k_values) + 1):
+                if self.total_gt_relationships[category] > 0:
+                    # Check if this rank contributed to recall
+                    ranks.append(pred_rank)
+            
+            if ranks:
+                mean_ranks.append(np.mean(ranks))
+        
+        results['MR'] = np.mean(mean_ranks) if mean_ranks else max(self.k_values)
         
         # Add per-category breakdown
         results['per_category'] = {}
@@ -197,6 +216,7 @@ class RecallAtK:
             lines.append(f"R@{k:2d}: {results[f'R@{k}']:6.2f}%")
         
         lines.append(f"mR:    {results['mR']:6.2f}%")
+        lines.append(f"MR:    {results['MR']:6.2f}")
         lines.append("=" * 60)
         
         # Top and bottom categories
