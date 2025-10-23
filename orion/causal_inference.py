@@ -90,7 +90,10 @@ class CausalConfig:
     """Minimum embedding similarity to consider semantically related"""
     
     def __post_init__(self):
-        """Validate configuration"""
+        """Validate configuration and auto-load HPO weights if available"""
+        # Try to load optimized weights from HPO training
+        self._try_load_hpo_weights()
+        
         # Check that weights are reasonable
         total_weight = (
             self.temporal_proximity_weight +
@@ -104,6 +107,49 @@ class CausalConfig:
                 f"CIS weights sum to {total_weight:.3f}, not 1.0. "
                 f"Consider normalizing for interpretability."
             )
+    
+    def _try_load_hpo_weights(self):
+        """Attempt to load HPO-optimized weights automatically"""
+        import json
+        import os
+        
+        # Check for HPO results in multiple locations
+        possible_paths = [
+            "hpo_results/optimization_latest.json",
+            os.path.join(os.path.dirname(__file__), "../hpo_results/optimization_latest.json"),
+            os.path.join(os.getcwd(), "hpo_results/optimization_latest.json"),
+        ]
+        
+        for hpo_path in possible_paths:
+            if os.path.exists(hpo_path):
+                try:
+                    with open(hpo_path) as f:
+                        result = json.load(f)
+                    
+                    weights = result["best_weights"]
+                    threshold = result.get("best_threshold", self.min_score)
+                    
+                    # Override default weights with learned values
+                    self.temporal_proximity_weight = weights["temporal"]
+                    self.spatial_proximity_weight = weights["spatial"]
+                    self.motion_alignment_weight = weights.get("motion", self.motion_alignment_weight)
+                    self.semantic_similarity_weight = weights["semantic"]
+                    self.min_score = threshold
+                    
+                    logger.info(
+                        f"✓ Loaded HPO-optimized weights from {hpo_path}:\n"
+                        f"  temporal={self.temporal_proximity_weight:.4f}, "
+                        f"spatial={self.spatial_proximity_weight:.4f}, "
+                        f"motion={self.motion_alignment_weight:.4f}, "
+                        f"semantic={self.semantic_similarity_weight:.4f}, "
+                        f"threshold={self.min_score:.4f}"
+                    )
+                    return  # Successfully loaded, stop searching
+                except Exception as e:
+                    logger.debug(f"Could not load HPO weights from {hpo_path}: {e}")
+                    continue
+        
+        logger.debug("No HPO weights found, using default CIS configuration")
     
     @classmethod
     def from_hpo_result(cls, hpo_result_path: str) -> "CausalConfig":
@@ -218,7 +264,20 @@ class CausalInferenceEngine:
             config: Configuration parameters for CIS calculation
         """
         self.config = config or CausalConfig()
+        self._clip_model = None  # Lazy load CLIP for semantic causality
         logger.info(f"Initialized CausalInferenceEngine with config: {self.config}")
+    
+    def _get_clip_model(self):
+        """Lazy load CLIP model for semantic causality reasoning"""
+        if self._clip_model is None:
+            try:
+                from .embedding_model import EmbeddingModel
+                self._clip_model = EmbeddingModel(backend="auto")
+                logger.info("✓ CLIP model loaded for semantic causality")
+            except Exception as e:
+                logger.warning(f"Could not load CLIP for causality: {e}")
+                self._clip_model = False
+        return self._clip_model if self._clip_model is not False else None
     
     def _entity_overlap_score(self, agent: AgentCandidate, patient: StateChange) -> float:
         """
@@ -352,11 +411,11 @@ class CausalInferenceEngine:
         patient: StateChange
     ) -> float:
         """
-        f_embedding: Visual/semantic similarity component
+        f_embedding: Visual/semantic similarity component with CLIP semantic prompts
         
-        Measures semantic relatedness between agent and patient using
-        CLIP embeddings. Higher similarity suggests potential interaction
-        (e.g., hand and cup, person and door).
+        Measures semantic relatedness between agent and patient using:
+        1. CLIP text encoder for "can A cause B?" reasoning
+        2. Visual embedding similarity as fallback
         
         Returns:
             Score in [0, 1]
@@ -364,20 +423,99 @@ class CausalInferenceEngine:
         if not self.config.use_semantic_similarity:
             return 0.5  # Neutral score if disabled
         
-        # Get agent embedding
+        # Try CLIP semantic causality first (NEW!)
+        clip_score = self._clip_semantic_causality(agent, patient)
+        if clip_score is not None:
+            return clip_score
+        
+        # Fallback to visual embedding similarity
         if not hasattr(agent, 'visual_embedding') or agent.visual_embedding is None:
             return 0.5
         
         agent_emb = np.array(agent.visual_embedding)
         
         # For patient, we don't have embedding stored directly
-        # Instead, use a semantic similarity threshold
-        # This is a simplification - in full implementation, we'd store
-        # patient embeddings from state change detection
-        
-        # For now, return neutral score
-        # TODO: Store patient embeddings during state change detection
+        # This is a simplification - return neutral score
         return 0.5
+    
+    def _clip_semantic_causality(
+        self,
+        agent: AgentCandidate,
+        patient: StateChange
+    ) -> Optional[float]:
+        """
+        Use CLIP text encoder to evaluate "can agent cause patient's change?"
+        
+        Creates semantic prompts and compares with visual embeddings to determine
+        if the agent can plausibly cause the observed state change.
+        
+        Args:
+            agent: Potential causal agent
+            patient: State change patient
+            
+        Returns:
+            Causality score [0, 1] or None if CLIP unavailable
+        """
+        clip_model = self._get_clip_model()
+        if not clip_model:
+            return None
+        
+        try:
+            # Create causal hypothesis prompts
+            agent_class = agent.object_class or "object"
+            state_before = patient.old_description[:50] if patient.old_description else "initial state"
+            state_after = patient.new_description[:50] if patient.new_description else "changed state"
+            
+            # Generate multiple prompts for robustness
+            prompts = [
+                f"a {agent_class} causing something to change",
+                f"{agent_class} affecting another object",
+                f"causal interaction between {agent_class} and objects",
+            ]
+            
+            # Encode text prompts
+            text_embeddings = []
+            for prompt in prompts:
+                try:
+                    emb = clip_model.encode([prompt])
+                    if emb is not None and len(emb) > 0:
+                        text_embeddings.append(emb[0])
+                except:
+                    continue
+            
+            if not text_embeddings:
+                return None
+            
+            # Average text embeddings for robust representation
+            avg_text_emb = np.mean(text_embeddings, axis=0)
+            
+            # Get agent visual embedding
+            if not hasattr(agent, 'visual_embedding') or agent.visual_embedding is None:
+                return None
+            
+            agent_visual_emb = np.array(agent.visual_embedding)
+            
+            # Compute semantic similarity
+            # Normalize embeddings
+            avg_text_emb = avg_text_emb / (np.linalg.norm(avg_text_emb) + 1e-8)
+            agent_visual_emb = agent_visual_emb / (np.linalg.norm(agent_visual_emb) + 1e-8)
+            
+            # Cosine similarity
+            similarity = float(np.dot(avg_text_emb, agent_visual_emb))
+            
+            # Map similarity to [0, 1] range (cosine is in [-1, 1])
+            score = (similarity + 1) / 2.0
+            
+            logger.debug(
+                f"CLIP semantic causality: {agent_class} → change "
+                f"(score: {score:.3f})"
+            )
+            
+            return score
+            
+        except Exception as e:
+            logger.debug(f"CLIP semantic causality failed: {e}")
+            return None
     
     def score_all_agents(
         self,

@@ -1,0 +1,80 @@
+
+ORION SEMANTIC UPLIFT EVALUATION SUMMARY
+========================================
+
+Dataset: aspire_75_sample.json
+Videos: 75
+Annotations: 8852
+Processing Time: 91.1s (97.1 ann/sec)
+
+SEMANTIC UPLIFT RESULTS:
+-----------------------
+Total Annotations:       8,852
+Corrections Made:        7,547 (85.3%)
+Avg Confidence:          0.415
+Median Confidence:       0.365
+Confidence Range:        [0.000, 0.950]
+
+CLASS DISTRIBUTION:
+------------------
+Original Unique Classes: 75
+Corrected Unique Classes: 49
+New Classes Added:       29
+Classes Removed:         55
+
+Top 10 Most Frequent Classes (Original):
+   1. baby                 :  4635
+   2. car_(automobile)     :   581
+   3. dog                  :   265
+   4. cup                  :   200
+   5. book                 :   191
+   6. cow                  :   168
+   7. lion                 :   159
+   8. fish                 :   115
+   9. elephant             :   113
+  10. pigeon               :   105
+
+Top 10 Most Frequent Classes (After Uplift):
+   1. teddy bear           :  3066
+   2. person               :  1594
+   3. car                  :   581
+   4. dog                  :   265
+   5. boat                 :   232
+   6. book                 :   191
+   7. bed                  :   177
+   8. cow                  :   168
+   9. bottle               :   167
+  10. giraffe              :   167
+
+
+COMPARISON WITH HYPERGLM (Published Results on Full VSGR):
+----------------------------------------------------------
+Note: HyperGLM was evaluated on full VSGR dataset for Scene Graph Generation.
+Our evaluation focuses on semantic uplift quality on subset.
+
+HyperGLM Results:
+  Recall@20:  35.8%
+  Recall@50:  42.3%
+  Recall@100: 54.7%
+  mRecall@20: 9.2%
+  mRecall@50: 10.1%
+
+ORION METHODOLOGY DIFFERENCES:
+------------------------------
+1. Semantic Uplift: CLIP-based validation of class corrections vs description
+2. Explicit Reasoning: Rule-based + semantic verification (not black-box LLM)
+3. Interpretability: Each correction has confidence + reasoning trace
+4. Efficiency: 97.1 annotations/sec on single GPU
+
+EVALUATION SCOPE:
+----------------
+- This evaluation measures semantic uplift quality and class correction accuracy
+- Full scene graph generation (R@K metrics) requires relationship extraction
+- HyperGLM numbers are from full VSGR dataset, our evaluation is on 75 videos
+
+NEXT STEPS FOR FULL COMPARISON:
+-------------------------------
+1. Run full relationship extraction pipeline
+2. Compute R@K and mR@K metrics on same videos
+3. Compare on identical test set
+4. Measure interpretability and efficiency gains

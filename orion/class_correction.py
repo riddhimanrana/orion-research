@@ -2,12 +2,13 @@
 Class Correction System
 =======================
 
-Fast, deterministic correction of YOLO misclassifications with optional LLM.
+Fast, deterministic correction of YOLO misclassifications with optional LLM and CLIP.
 
 Pipeline:
 1) CLIP/threshold heuristics (trust high confidence)
 2) FastVLM description rules + synonyms → canonical_label (e.g., 'knob')
-3) Optional LLM refinement (off by default)
+3) Optional CLIP semantic matching for verification
+4) Optional LLM refinement (off by default)
 
 We keep both a canonical_label and a mapped COCO class for compatibility.
 
@@ -19,6 +20,8 @@ import logging
 import re
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
+
 from .config import OrionConfig
 
 logger = logging.getLogger('orion.class_correction')
@@ -27,18 +30,7 @@ logger = logging.getLogger('orion.class_correction')
 class ClassCorrector:
     """Corrects YOLO misclassifications using FastVLM descriptions"""
     
-    # Common YOLO misclassifications and their typical actual classes
-    COMMON_CORRECTIONS = {
-        'hair drier': ['knob', 'handle', 'dial', 'button', 'switch'],
-        'potted plant': ['star', 'decoration', 'ornament', 'light'],
-        'cell phone': ['remote', 'card', 'label', 'tag'],
-        'refrigerator': ['cabinet', 'door', 'wall', 'panel'],
-        'suitcase': ['tire', 'wheel', 'cushion', 'bag'],
-        'backpack': ['bag', 'case', 'container'],
-        'bottle': ['cylinder', 'tube', 'container'],
-        'cat': ['dog', 'animal', 'pet'],
-        'dog': ['cat', 'animal', 'pet'],
-    }
+    # REMOVED: Rule-based corrections - we use pure semantic validation now
     
     # Valid COCO classes (80 classes from YOLO)
     VALID_CLASSES = {
@@ -60,7 +52,143 @@ class ClassCorrector:
     def __init__(self, config: Optional[OrionConfig] = None, model_manager: Optional[object] = None, llm_model: str = "gemma3:4b"):
         self.config = config or OrionConfig()
         self.llm_model = llm_model
-        self.model_manager = model_manager  # Unused for now, reserved for CLIP verify
+        self.model_manager = model_manager
+        self._clip_model = None  # Lazy load for verification
+        self._sentence_model = None  # Lazy load sentence transformer
+        self._class_embeddings_cache = None  # Precomputed class embeddings
+        self._semantic_validator = None  # Lazy load for description-class validation
+    
+    def _get_clip_model(self):
+        """Lazy load CLIP model for semantic verification"""
+        if self._clip_model is None:
+            try:
+                from .embedding_model import EmbeddingModel
+                self._clip_model = EmbeddingModel(backend="auto")
+                logger.info("CLIP model loaded for semantic verification")
+            except Exception as e:
+                logger.warning(f"Could not load CLIP model: {e}")
+                self._clip_model = False  # Mark as failed
+        return self._clip_model if self._clip_model is not False else None
+    
+    def _get_sentence_model(self):
+        """Lazy load Sentence Transformer for semantic matching"""
+        if self._sentence_model is None:
+            try:
+                from sentence_transformers import SentenceTransformer
+                self._sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
+                logger.info("✓ Sentence Transformer loaded for semantic class correction")
+            except Exception as e:
+                logger.warning(f"Could not load Sentence Transformer: {e}")
+                self._sentence_model = False
+        return self._sentence_model if self._sentence_model is not False else None
+    
+    def _get_class_embeddings(self):
+        """Precompute embeddings for all valid COCO classes"""
+        if self._class_embeddings_cache is not None:
+            return self._class_embeddings_cache
+        
+        model = self._get_sentence_model()
+        if not model:
+            return None
+        
+        try:
+            # Create class descriptions for better matching
+            class_texts = [f"a {cls}" for cls in sorted(self.VALID_CLASSES)]
+            embeddings = model.encode(class_texts, show_progress_bar=False)
+            self._class_embeddings_cache = {
+                cls: emb for cls, emb in zip(sorted(self.VALID_CLASSES), embeddings)
+            }
+            logger.debug(f"Precomputed embeddings for {len(self._class_embeddings_cache)} classes")
+            return self._class_embeddings_cache
+        except Exception as e:
+            logger.warning(f"Could not precompute class embeddings: {e}")
+            return None
+    
+    def validate_correction_with_description(
+        self,
+        description: str,
+        original_class: str,
+        proposed_class: str,
+        threshold: float = 0.25
+    ) -> Tuple[bool, float]:
+        """
+        Validate that proposed class makes sense given the description.
+        Uses semantic similarity to prevent bad corrections like "tire" → "car".
+        
+        Args:
+            description: Rich description from VLM
+            original_class: Original YOLO classification
+            proposed_class: Proposed corrected class
+            threshold: Minimum similarity threshold for validation (lowered from 0.5 to 0.25)
+            
+        Returns:
+            (is_valid, similarity_score)
+        """
+        model = self._get_sentence_model()
+        if not model:
+            # No validator available, allow correction
+            return True, 1.0
+        
+        try:
+            # Encode description and proposed class
+            desc_embedding = model.encode(description, show_progress_bar=False)
+            
+            # Check for part-of relationships FIRST
+            # e.g., "car tire" means subject is "tire", not "car"
+            desc_lower = description.lower()
+            part_indicators = [
+                f"{proposed_class} tire", f"{proposed_class} wheel", f"{proposed_class} door",
+                f"{proposed_class} handle", f"{proposed_class} knob", f"{proposed_class} button",
+                f"part of a {proposed_class}", f"attached to a {proposed_class}",
+                f"on the {proposed_class}", f"of the {proposed_class}", f"of a {proposed_class}"
+            ]
+            
+            # If description mentions proposed_class as a modifier/container, REJECT
+            if any(indicator in desc_lower for indicator in part_indicators):
+                logger.warning(
+                    f"⚠ Rejected correction '{original_class}' → '{proposed_class}' "
+                    f"(detected as part-of relationship)"
+                )
+                return False, 0.0
+            
+            proposed_text = f"This is a {proposed_class}"
+            original_text = f"This is a {original_class}"
+            
+            # Encode both classes
+            class_embeddings = model.encode([proposed_text, original_text], show_progress_bar=False)
+            proposed_emb = class_embeddings[0]
+            original_emb = class_embeddings[1]
+            
+            # Compute cosine similarity
+            def cosine_sim(a, b):
+                return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+            
+            proposed_sim = cosine_sim(desc_embedding, proposed_emb)
+            original_sim = cosine_sim(desc_embedding, original_emb)
+            
+            # Validation logic:
+            # 1. Proposed class should be MORE similar to description than original
+            # 2. Allow moderate semantic drift (descriptions don't perfectly match class names)
+            is_valid = (
+                proposed_sim > (original_sim + 0.05)  # Must be better than original by at least 5%
+            )
+            
+            if not is_valid:
+                logger.debug(
+                    f"⚠ Rejected correction '{original_class}' → '{proposed_class}' "
+                    f"(proposed: {proposed_sim:.3f} vs original: {original_sim:.3f}, diff: {proposed_sim - original_sim:.3f})"
+                )
+            else:
+                logger.info(
+                    f"✓ Validated correction '{original_class}' → '{proposed_class}' "
+                    f"(proposed: {proposed_sim:.3f} vs original: {original_sim:.3f}, diff: {proposed_sim - original_sim:.3f})"
+                )
+            
+            return is_valid, proposed_sim
+            
+        except Exception as e:
+            logger.debug(f"Validation failed: {e}, allowing correction")
+            return True, 1.0
     
     def should_correct(
         self,
@@ -97,6 +225,25 @@ class ClassCorrector:
         if yolo_lower in desc_lower:
             return False
         
+        # Check for part-of relationships that shouldn't be corrected
+        # e.g., "tire" in a car context, "handle" on a suitcase
+        part_of_indicators = {
+            'tire': ['car', 'vehicle', 'wheel', 'tread', 'rim'],
+            'wheel': ['bicycle', 'car', 'vehicle', 'spoke', 'rim'],
+            'handle': ['door', 'suitcase', 'bag', 'drawer'],
+            'knob': ['door', 'cabinet', 'drawer', 'oven'],
+        }
+        
+        if yolo_class in part_of_indicators:
+            # Check if description suggests this is actually a part of something
+            indicators = part_of_indicators[yolo_class]
+            if any(ind in desc_lower for ind in indicators):
+                # This might be a part, not a standalone object
+                # Flag for potential non-correction or LLM review
+                logger.debug(f"Detected '{yolo_class}' in part-of context: {indicators}")
+                # Return False to avoid bad mapping (e.g., tire → car)
+                return False
+        
         # Check for synonyms
         synonyms = {
             'tv': ['monitor', 'screen', 'display'],
@@ -121,52 +268,221 @@ class ClassCorrector:
         
         return False
     
+    def verify_with_clip(
+        self,
+        description: str,
+        yolo_class: str,
+        candidate_classes: List[str]
+    ) -> Tuple[Optional[str], float]:
+        """
+        Use CLIP text embeddings to find best matching class
+        
+        Args:
+            description: Object description from VLM
+            yolo_class: Original YOLO classification
+            candidate_classes: List of candidate classes to check
+            
+        Returns:
+            (best_class, confidence_score)
+        """
+        clip_model = self._get_clip_model()
+        if not clip_model:
+            return None, 0.0
+        
+        try:
+            # Generate embeddings for description and candidate classes
+            texts = [description[:200]] + [f"a {cls}" for cls in candidate_classes]  # Limit desc length
+            embeddings = clip_model.encode(texts)
+            
+            if embeddings is None or len(embeddings) < 2:
+                return None, 0.0
+            
+            # Compute cosine similarity (embeddings are already normalized)
+            desc_emb = embeddings[0]
+            candidate_embs = embeddings[1:]
+            
+            similarities = []
+            for i, cand_emb in enumerate(candidate_embs):
+                # Cosine similarity (already normalized embeddings)
+                sim = float(np.dot(desc_emb, cand_emb))
+                similarities.append((candidate_classes[i], sim))
+            
+            # Find best match
+            best_class, best_sim = max(similarities, key=lambda x: x[1])
+            
+            # Only return if significantly better than YOLO class
+            yolo_sim = next((sim for cls, sim in similarities if cls == yolo_class), 0.0)
+            
+            if best_sim > yolo_sim + 0.1 and best_sim > 0.6:  # Threshold for confidence
+                logger.info(f"CLIP verification: '{yolo_class}' → '{best_class}' (sim: {best_sim:.3f} vs {yolo_sim:.3f})")
+                return best_class, best_sim
+            
+        except Exception as e:
+            logger.debug(f"CLIP verification failed: {e}")
+        
+        return None, 0.0
+    
+    def semantic_class_match(
+        self,
+        description: str,
+        yolo_class: str,
+        top_k: int = 5,
+        threshold: float = 0.2  # Lowered - trust the embeddings more
+    ) -> Tuple[Optional[str], float]:
+        """
+        Use Sentence Transformers to find best matching class based on description.
+        Pure semantic approach - NO RULES.
+        
+        Args:
+            description: Object description from VLM
+            yolo_class: Original YOLO classification
+            top_k: Number of top matches to consider
+            threshold: Minimum similarity threshold
+            
+        Returns:
+            (best_class, confidence_score)
+        """
+        model = self._get_sentence_model()
+        class_embeddings = self._get_class_embeddings()
+        
+        if not model or not class_embeddings:
+            return None, 0.0
+        
+        try:
+            # First, check if description contains likely object nouns
+            desc_words = description.lower().split()
+            desc_lower = description.lower()
+            
+            # Check for direct class mentions - BUT verify it's the main subject, not a part
+            for cls in self.VALID_CLASSES:
+                cls_words = cls.lower().split()
+                for cls_word in cls_words:
+                    if cls_word in desc_words:
+                        # Check if this is describing a part vs the whole thing
+                        # e.g., "car tire" means tire is the subject, not car
+                        part_indicators = [
+                            f"{cls_word} tire", f"{cls_word} wheel", f"{cls_word} door",
+                            f"{cls_word} handle", f"{cls_word} knob", f"{cls_word} button",
+                            f"part of", f"attached to", f"on the {cls_word}", f"of the {cls_word}"
+                        ]
+                        
+                        # If any part indicator is present, don't treat as direct match
+                        if any(indicator in desc_lower for indicator in part_indicators):
+                            logger.debug(f"Skipping direct match for '{cls}' - detected as part-of")
+                            continue
+                        
+                        # Direct match found and it's the main subject
+                        logger.info(f"✓ Direct match: found '{cls}' in description")
+                        return cls, 0.95
+            
+            # Check for contextual keywords that override similarity
+            # e.g., "computer monitor" should be "laptop" not "tv"
+            contextual_overrides = {
+                'laptop': ['computer', 'notebook computer'],
+                'cell phone': ['smartphone', 'phone'],
+                'remote': ['remote control'],
+            }
+            
+            for cls, keywords in contextual_overrides.items():
+                for kw in keywords:
+                    if kw in desc_lower and cls != yolo_class:
+                        logger.info(f"✓ Contextual override: '{yolo_class}' → '{cls}' (keyword: '{kw}')")
+                        return cls, 0.85
+            
+            # Encode description and compare with all COCO classes
+            desc_embedding = model.encode(description, show_progress_bar=False)
+            
+            # Compute similarities with all classes
+            similarities = []
+            for cls, cls_emb in class_embeddings.items():
+                # Cosine similarity
+                sim = float(np.dot(desc_embedding, cls_emb) / 
+                           (np.linalg.norm(desc_embedding) * np.linalg.norm(cls_emb)))
+                similarities.append((cls, sim))
+            
+            # Sort by similarity
+            similarities.sort(key=lambda x: x[1], reverse=True)
+            top_matches = similarities[:top_k]
+            
+            # Get best match
+            best_class, best_sim = top_matches[0]
+            
+            # Get YOLO class similarity for comparison
+            yolo_sim = next((sim for cls, sim in similarities if cls == yolo_class), 0.0)
+            
+            # Accept if best class is different AND better than YOLO (even slightly)
+            if best_class != yolo_class and best_sim > (yolo_sim + 0.03):  # Just 3% better
+                logger.info(
+                    f"✓ Semantic match: '{yolo_class}' → '{best_class}' "
+                    f"(sim: {best_sim:.3f}, YOLO sim: {yolo_sim:.3f})"
+                )
+                logger.debug(f"Top matches: {[(c, f'{s:.3f}') for c, s in top_matches]}")
+                
+                return best_class, best_sim
+            
+            # YOLO class is best match
+            return None, 0.0
+            
+        except Exception as e:
+            logger.debug(f"Semantic class matching failed: {e}")
+            return None, 0.0
+    
     def extract_corrected_class(
         self,
         yolo_class: str,
         description: str,
-        use_llm: Optional[bool] = None
+        use_llm: Optional[bool] = None,
+        use_clip: bool = True,
+        validate_with_description: bool = True
     ) -> Tuple[Optional[str], float]:
         """
-        Extract the corrected class from description
+        Pure semantic correction using VLM description and embedding similarity.
+        
+        NO RULES - just find the best COCO class that matches the rich description.
         
         Args:
             yolo_class: Original YOLO class
-            description: FastVLM description
-            use_llm: Whether to use LLM for extraction
+            description: Rich VLM description
+            use_llm: Ignored (kept for API compatibility)
+            use_clip: Ignored (kept for API compatibility)
+            validate_with_description: Always True
             
         Returns:
             (corrected_class, confidence)
         """
-        # First try simple keyword matching
-        corrected, conf = self._keyword_extraction(description, yolo_class)
+        # Primary: Semantic matching with all COCO classes
+        semantic_corrected, semantic_conf = self.semantic_class_match(description, yolo_class)
         
-        if corrected and conf > 0.7:
-            return corrected, conf
+        if semantic_corrected and semantic_conf > 0.3:  # Lower threshold - trust embeddings
+            logger.info(
+                f"✓ Semantic uplift: '{yolo_class}' → '{semantic_corrected}' "
+                f"(confidence: {semantic_conf:.3f})"
+            )
+            return semantic_corrected, semantic_conf
         
-        # If keyword matching failed and LLM available, try LLM
-        if use_llm is None:
-            use_llm = bool(self.config.correction.use_llm)
-        if use_llm:
-            try:
-                llm_corrected, llm_conf = self._llm_extraction(description, yolo_class)
-                if llm_corrected and llm_conf > conf:
-                    return llm_corrected, llm_conf
-            except Exception as e:
-                logger.warning(f"LLM extraction failed: {e}")
+        # Fallback: Keyword extraction from description
+        keyword_class, keyword_conf = self._keyword_extraction(description, yolo_class)
         
-        # Return keyword result or None
-        return corrected, conf
+        if keyword_class and keyword_conf > 0.5:
+            logger.info(
+                f"✓ Keyword uplift: '{yolo_class}' → '{keyword_class}' "
+                f"(confidence: {keyword_conf:.3f})"
+            )
+            return keyword_class, keyword_conf
+        
+        # No correction - keep original
+        logger.debug(f"No semantic correction for '{yolo_class}'")
+        return yolo_class, 0.0
     
     def _keyword_extraction(
         self,
         description: str,
         yolo_class: str
     ) -> Tuple[Optional[str], float]:
-        """Extract class using keyword matching"""
+        """Extract class using keyword matching with improved pattern matching"""
         desc_lower = description.lower()
         
-        # Look for "appears to be a/an X" patterns
+        # Enhanced patterns for object identification
         patterns = [
             r'appears to be (?:a|an) ([a-z\s]+)',
             r'looks like (?:a|an) ([a-z\s]+)',
@@ -174,6 +490,9 @@ class ClassCorrector:
             r'(?:is|are) (?:a|an) ([a-z\s]+)',
             r'depicts (?:a|an) ([a-z\s]+)',
             r'shows (?:a|an) ([a-z\s]+)',
+            r'which (?:appears to be|looks like|seems to be) (?:a|an) ([a-z\s]+)',
+            r'could be (?:a|an) ([a-z\s]+)',
+            r'represents (?:a|an) ([a-z\s]+)',
         ]
         
         for pattern in patterns:
@@ -182,20 +501,15 @@ class ClassCorrector:
                 # Clean up the match
                 candidate = match.strip()
                 
+                # Skip overly generic matches
+                if candidate in ['object', 'item', 'thing', 'piece', 'part']:
+                    continue
+                
                 # Try to map to COCO class
                 mapped = self._map_to_coco_class(candidate)
                 if mapped and mapped != yolo_class:
                     logger.info(f"Keyword extraction: '{yolo_class}' → '{mapped}' (from: '{candidate}')")
                     return mapped, 0.8
-        
-        # Look for common misclassification corrections
-        if yolo_class in self.COMMON_CORRECTIONS:
-            for actual_class in self.COMMON_CORRECTIONS[yolo_class]:
-                if actual_class in desc_lower:
-                    mapped = self._map_to_coco_class(actual_class)
-                    if mapped:
-                        logger.info(f"Common correction: '{yolo_class}' → '{mapped}'")
-                        return mapped, 0.7
         
         return None, 0.0
     
@@ -211,12 +525,16 @@ class ClassCorrector:
         if text.endswith('s') and text[:-1] in self.VALID_CLASSES:
             return text[:-1]
         
-        # Common mappings
+        # Common mappings - IMPROVED to avoid bad mappings
         mappings = {
-            'knob': 'bottle',  # Represent as small cylindrical for compatibility
-            'handle': 'bottle',
-            'dial': 'bottle',
-            'button': 'bottle',
+            # Hardware parts -> reasonable approximations
+            'knob': 'remote',  # Small handheld object
+            'handle': 'remote',  # Better than mapping to bottle
+            'dial': 'remote',
+            'button': 'remote',
+            'switch': 'remote',
+            
+            # Electronics
             'remote control': 'remote',
             'monitor': 'tv',
             'screen': 'tv',
@@ -225,11 +543,20 @@ class ClassCorrector:
             'computer': 'laptop',
             'phone': 'cell phone',
             'smartphone': 'cell phone',
-            'tire': 'car',  # Part of car
-            'wheel': 'bicycle',  # Part of bicycle
-            'cushion': 'couch',  # Part of couch
+            
+            # Vehicle parts -> DON'T map to full vehicle (causes issues)
+            # 'tire': None,  # Don't auto-correct, needs context
+            # 'wheel': None,  # Don't auto-correct, needs context
+            
+            # Furniture parts
+            'cushion': 'couch',
             'pillow': 'couch',
+            
+            # Containers
             'bag': 'backpack',
+            'container': 'bottle',
+            
+            # Home items
             'cabinet': 'refrigerator',
             'decoration': 'vase',
             'ornament': 'vase',
@@ -250,24 +577,36 @@ class ClassCorrector:
     def _canonical_from_description(self, description: str, yolo_class: str) -> Optional[str]:
         """Extract a fine-grained canonical label from the description (non-COCO allowed)."""
         text = description.lower()
-        # High-precision patterns for parts and small objects
-        candidates = [
-            'knob', 'door knob', 'handle', 'door handle', 'dial', 'button', 'switch',
-            'hinge', 'latch', 'doorknob', 'lever',
+        
+        # High-precision patterns for parts and small objects (ordered by priority)
+        # First check for complete object descriptions
+        if yolo_class == 'cell phone':
+            if any(term in text for term in ['remote control', 'remote']):
+                return 'remote'
+        
+        if yolo_class == 'potted plant':
+            for term in ['decoration', 'ornament', 'star']:
+                if term in text:
+                    return 'decoration' if 'decorat' in text else term
+        
+        # Hardware and door components (high priority for hair drier misclassifications)
+        hardware_parts = [
+            ('door knob', 'knob'), ('doorknob', 'knob'), ('knob', 'knob'),
+            ('door handle', 'handle'), ('handle', 'handle'),
+            ('dial', 'dial'), ('switch', 'switch'),
+            ('hinge', 'hinge'), ('latch', 'latch'), ('lever', 'lever'),
         ]
-        for c in candidates:
-            if c in text:
-                # Normalize variants
-                if c in ('door knob', 'doorknob'):
-                    return 'knob'
-                if c in ('door handle',):
-                    return 'handle'
-                return c
-        # Fallback from common corrections
+        
+        for pattern, canonical in hardware_parts:
+            if pattern in text:
+                return canonical
+        
+        # Fallback: check common corrections
         if yolo_class in self.COMMON_CORRECTIONS:
             for alt in self.COMMON_CORRECTIONS[yolo_class]:
                 if alt in text:
                     return alt
+        
         return None
     
     def _llm_extraction(

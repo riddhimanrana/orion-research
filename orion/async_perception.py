@@ -40,11 +40,13 @@ try:
     from .model_manager import ModelManager
     from .tracking_engine import Observation, motion_to_dict
     from .motion_tracker import MotionTracker, MotionData
+    from .class_correction import ClassCorrector
 except ImportError:
     from config import OrionConfig, AsyncConfig  # type: ignore
     from model_manager import ModelManager  # type: ignore
     from tracking_engine import Observation, motion_to_dict  # type: ignore
     from motion_tracker import MotionTracker, MotionData  # type: ignore
+    from class_correction import ClassCorrector  # type: ignore
 
 logger = logging.getLogger("AsyncPerception")
 
@@ -137,6 +139,7 @@ class AsyncPerceptionEngine:
         
         self.model_manager = ModelManager.get_instance()
         self.motion_tracker = MotionTracker()
+        self.class_corrector = ClassCorrector()  # Initialize class corrector
         
         # Queues for async coordination
         self.detection_queue: asyncio.Queue[Optional[DetectionTask]] = asyncio.Queue(

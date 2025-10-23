@@ -1234,6 +1234,240 @@ def create_temporal_windows(
 
 
 # ============================================================================
+# MODULE 2B: SEMANTIC EVENT ANALYSIS
+# ============================================================================
+
+
+class SemanticEventAnalyzer:
+    """
+    Embeds event descriptions and state changes for semantic similarity analysis.
+    Enables deduplication, semantic search, and event grouping.
+    """
+    
+    def __init__(self):
+        self._sentence_model = None
+        self._event_embeddings_cache = {}
+        logger.info("SemanticEventAnalyzer initialized")
+    
+    def _get_sentence_model(self):
+        """Lazy load Sentence Transformer"""
+        if self._sentence_model is None:
+            try:
+                from sentence_transformers import SentenceTransformer
+                self._sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
+                logger.info("✓ Sentence Transformer loaded for event embedding")
+            except Exception as e:
+                logger.warning(f"Could not load Sentence Transformer: {e}")
+                self._sentence_model = False
+        return self._sentence_model if self._sentence_model is not False else None
+    
+    def embed_state_change(
+        self, 
+        old_desc: str, 
+        new_desc: str,
+        entity_class: Optional[str] = None
+    ) -> Optional[np.ndarray]:
+        """
+        Embed a state transition description
+        
+        Args:
+            old_desc: Previous state description
+            new_desc: New state description
+            entity_class: Optional entity class for context
+            
+        Returns:
+            Embedding vector or None if model unavailable
+        """
+        model = self._get_sentence_model()
+        if not model:
+            return None
+        
+        try:
+            # Create semantic description of the change
+            if entity_class:
+                transition_text = f"{entity_class} changed from {old_desc} to {new_desc}"
+            else:
+                transition_text = f"changed from {old_desc} to {new_desc}"
+            
+            # Limit text length
+            transition_text = transition_text[:200]
+            
+            # Generate embedding
+            embedding = model.encode(transition_text, show_progress_bar=False)
+            return embedding
+            
+        except Exception as e:
+            logger.debug(f"Failed to embed state change: {e}")
+            return None
+    
+    def embed_event_description(self, description: str) -> Optional[np.ndarray]:
+        """
+        Embed an event description for semantic search
+        
+        Args:
+            description: Event description text
+            
+        Returns:
+            Embedding vector or None
+        """
+        model = self._get_sentence_model()
+        if not model:
+            return None
+        
+        try:
+            # Cache check
+            if description in self._event_embeddings_cache:
+                return self._event_embeddings_cache[description]
+            
+            # Generate embedding
+            embedding = model.encode(description, show_progress_bar=False)
+            
+            # Cache for reuse
+            self._event_embeddings_cache[description] = embedding
+            
+            # Limit cache size
+            if len(self._event_embeddings_cache) > 500:
+                # Remove oldest entry
+                self._event_embeddings_cache.pop(next(iter(self._event_embeddings_cache)))
+            
+            return embedding
+            
+        except Exception as e:
+            logger.debug(f"Failed to embed event description: {e}")
+            return None
+    
+    def find_similar_events(
+        self,
+        query_description: str,
+        event_descriptions: List[str],
+        top_k: int = 5,
+        threshold: float = 0.8
+    ) -> List[Tuple[int, float]]:
+        """
+        Find semantically similar events
+        
+        Args:
+            query_description: Event to match against
+            event_descriptions: List of candidate events
+            top_k: Number of top matches to return
+            threshold: Minimum similarity threshold
+            
+        Returns:
+            List of (index, similarity_score) tuples
+        """
+        model = self._get_sentence_model()
+        if not model or not event_descriptions:
+            return []
+        
+        try:
+            # Embed query
+            query_emb = self.embed_event_description(query_description)
+            if query_emb is None:
+                return []
+            
+            # Embed all candidates
+            candidate_embs = []
+            for desc in event_descriptions:
+                emb = self.embed_event_description(desc)
+                if emb is not None:
+                    candidate_embs.append(emb)
+                else:
+                    candidate_embs.append(np.zeros_like(query_emb))
+            
+            # Compute similarities
+            similarities = []
+            for idx, cand_emb in enumerate(candidate_embs):
+                # Cosine similarity
+                sim = float(
+                    np.dot(query_emb, cand_emb) / 
+                    (np.linalg.norm(query_emb) * np.linalg.norm(cand_emb) + 1e-8)
+                )
+                if sim >= threshold:
+                    similarities.append((idx, sim))
+            
+            # Sort by similarity
+            similarities.sort(key=lambda x: x[1], reverse=True)
+            
+            return similarities[:top_k]
+            
+        except Exception as e:
+            logger.debug(f"Failed to find similar events: {e}")
+            return []
+    
+    def deduplicate_events(
+        self,
+        event_descriptions: List[str],
+        threshold: float = 0.85
+    ) -> List[int]:
+        """
+        Find duplicate events based on semantic similarity
+        
+        Args:
+            event_descriptions: List of event descriptions
+            threshold: Similarity threshold for duplicates
+            
+        Returns:
+            List of indices to keep (duplicates removed)
+        """
+        if not event_descriptions:
+            return []
+        
+        model = self._get_sentence_model()
+        if not model:
+            return list(range(len(event_descriptions)))
+        
+        try:
+            # Embed all events
+            embeddings = []
+            for desc in event_descriptions:
+                emb = self.embed_event_description(desc)
+                if emb is not None:
+                    embeddings.append(emb)
+                else:
+                    embeddings.append(np.zeros(384))  # Model default dim
+            
+            # Find duplicates
+            keep_indices = []
+            seen = set()
+            
+            for i, emb_i in enumerate(embeddings):
+                if i in seen:
+                    continue
+                    
+                # Mark as kept
+                keep_indices.append(i)
+                
+                # Find similar events
+                for j in range(i + 1, len(embeddings)):
+                    if j in seen:
+                        continue
+                    
+                    emb_j = embeddings[j]
+                    sim = float(
+                        np.dot(emb_i, emb_j) / 
+                        (np.linalg.norm(emb_i) * np.linalg.norm(emb_j) + 1e-8)
+                    )
+                    
+                    if sim >= threshold:
+                        seen.add(j)
+                        logger.debug(
+                            f"Duplicate event detected (sim={sim:.3f}): "
+                            f"'{event_descriptions[i][:50]}...' ≈ '{event_descriptions[j][:50]}...'"
+                        )
+            
+            logger.info(
+                f"✓ Deduplicated events: {len(event_descriptions)} → "
+                f"{len(keep_indices)} ({len(event_descriptions) - len(keep_indices)} removed)"
+            )
+            
+            return keep_indices
+            
+        except Exception as e:
+            logger.warning(f"Event deduplication failed: {e}")
+            return list(range(len(event_descriptions)))
+
+
+# ============================================================================
 # MODULE 3B: CAUSAL INFLUENCE SCORING
 # ============================================================================
 
@@ -1254,12 +1488,31 @@ class CausalInfluenceScorer:
             and AgentCandidate is not None
             and CISStateChange is not None
         ):
-            self.causal_config = CausalConfig()
+            # Try to load HPO-optimized weights
+            from pathlib import Path
+            hpo_result_path = Path("hpo_results/optimization_latest.json")
+            if hpo_result_path.exists():
+                try:
+                    self.causal_config = CausalConfig.from_hpo_result(str(hpo_result_path))
+                    logger.info(f"Loaded HPO-optimized CIS weights from {hpo_result_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to load HPO weights: {e}. Using defaults.")
+                    self.causal_config = CausalConfig()
+            else:
+                self.causal_config = CausalConfig()
+                logger.info("No HPO optimization results found. Using default CIS weights.")
+            
             self.engine = CausalInferenceEngine(self.causal_config)
             logger.info(
                 "Causal inference engine enabled (top_k=%d, min_score=%.2f)",
                 self.causal_config.top_k_per_event,
                 self.causal_config.min_score,
+            )
+            logger.info(
+                f"CIS weights - temporal: {self.causal_config.temporal_proximity_weight:.4f}, "
+                f"spatial: {self.causal_config.spatial_proximity_weight:.4f}, "
+                f"motion: {self.causal_config.motion_alignment_weight:.4f}, "
+                f"semantic: {self.causal_config.semantic_similarity_weight:.4f}"
             )
         else:
             logger.warning(

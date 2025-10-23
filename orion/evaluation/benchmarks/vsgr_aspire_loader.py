@@ -69,9 +69,12 @@ class VSGRASpireLoader:
         Initialize VSGRASpire loader
         
         Args:
-            aspire_root: Root directory containing ASPIRe annotations
+            aspire_root: Root directory containing ASPIRe annotations OR direct JSON file path
         """
         self.aspire_root = Path(aspire_root)
+        
+        # Check if it's a direct JSON file
+        self.is_direct_file = self.aspire_root.suffix == '.json'
         
         # Category mapping
         self.categories = {}
@@ -86,12 +89,16 @@ class VSGRASpireLoader:
         Returns:
             Dictionary with videos, tracks, images, annotations
         """
-        ann_file = self.aspire_root / f"aspire_{split}.json"
+        # If direct file provided, use it
+        if self.is_direct_file:
+            ann_file = self.aspire_root
+        else:
+            ann_file = self.aspire_root / f"aspire_{split}.json"
             
         if not ann_file.exists():
             raise FileNotFoundError(f"Annotation file not found: {ann_file}")
         
-        logger.info(f"Loading VSGR ASPIRe {split} split from {ann_file}")
+        logger.info(f"Loading VSGR ASPIRe data from {ann_file}")
         
         with open(ann_file, 'r') as f:
             data = json.load(f)

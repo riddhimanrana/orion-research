@@ -1,0 +1,144 @@
+{
+  "semantic_uplift": {
+    "total_annotations": 8852,
+    "corrections_made": 7547,
+    "correction_rate": 0.8525756891098057,
+    "avg_confidence": 0.4154840802155196,
+    "median_confidence": 0.3649229407310486,
+    "min_confidence": 0.0,
+    "max_confidence": 0.95
+  },
+  "class_distribution": {
+    "original_unique_classes": 75,
+    "corrected_unique_classes": 49,
+    "top_10_original": [
+      [
+        "baby",
+        4635
+      ],
+      [
+        "car_(automobile)",
+        581
+      ],
+      [
+        "dog",
+        265
+      ],
+      [
+        "cup",
+        200
+      ],
+      [
+        "book",
+        191
+      ],
+      [
+        "cow",
+        168
+      ],
+      [
+        "lion",
+        159
+      ],
+      [
+        "fish",
+        115
+      ],
+      [
+        "elephant",
+        113
+      ],
+      [
+        "pigeon",
+        105
+      ]
+    ],
+    "top_10_corrected": [
+      [
+        "teddy bear",
+        3066
+      ],
+      [
+        "person",
+        1594
+      ],
+      [
+        "car",
+        581
+      ],
+      [
+        "dog",
+        265
+      ],
+      [
+        "boat",
+        232
+      ],
+      [
+        "book",
+        191
+      ],
+      [
+        "bed",
+        177
+      ],
+      [
+        "cow",
+        168
+      ],
+      [
+        "bottle",
+        167
+      ],
+      [
+        "giraffe",
+        167
+      ]
+    ],
+    "new_classes_introduced": 29,
+    "classes_removed": 55
+  },
+  "metadata": {
+    "num_videos": 75,
+    "num_images": 2775,
+    "num_annotations": 8852,
+    "num_corrections": 7547,
+    "correction_rate": 0.8525756891098057,
+    "elapsed_seconds": 91.13578009605408,
+    "annotations_per_second": 97.12979897324944,
+    "pipeline": "orion_semantic_uplift",
+    "dataset": "aspire_75_sample.json",
+    "correction_examples": [
+      {
+        "original": "baby",
+        "corrected": "teddy bear",
+        "description": "a baby",
+        "confidence": 0.4755406081676483
+      },
+      {
+        "original": "paddle",
+        "corrected": "boat",
+        "description": "a paddle",
+        "confidence": 0.6135318875312805
+      },
+      {
+        "original": "kayak",
+        "corrected": "boat",
+        "description": "a kayak",
+        "confidence": 0.6172168254852295
+      },
+      {
+        "original": "paddle",
+        "corrected": "boat",
+        "description": "a paddle, positioned on the left",
+        "confidence": 0.5266505479812622
+      },
+      {
+        "original": "baby",
+        "corrected": "teddy bear",
+        "description": "a baby",
+        "confidence": 0.4755406081676483
+      }
+    ]
+  }
+}

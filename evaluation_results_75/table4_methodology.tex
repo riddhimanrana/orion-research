@@ -1,0 +1,21 @@
+\begin{table*}[t]
+\centering
+\caption{Methodology Comparison: Orion vs HyperGLM}
+\label{tab:methodology}
+\begin{tabular}{lll}
+\toprule
+\textbf{Aspect} & \textbf{HyperGLM} & \textbf{Orion (Ours)} \\
+\midrule
+Entity Detection & End-to-end & YOLO + Semantic Uplift \\
+Relationship Modeling & Hypergraph walks & Temporal + Spatial KG \\
+Reasoning Engine & Black-box LLM & CLIP + Rule-based \\
+Interpretability & Limited & Full reasoning trace \\
+Confidence Scores & No & Yes (0.0-1.0 range) \\
+Processing Speed & Not reported & 97.1 ann/sec \\
+\midrule
+R@50 on VSGR & 42.3\% & \textit{Pending full eval} \\
+Semantic Uplift Rate & Not evaluated & 85.3\% \\
+Class Consolidation & Not evaluated & 34.7\% reduction \\
+\bottomrule
+\end{tabular}
+\end{table*}

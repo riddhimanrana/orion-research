@@ -1,0 +1,21 @@
+{
+  "title": "Comparison (%) on ASPIRE for Scene Graph Generation",
+  "note": "*Evaluated on 100-sample subset; HyperGLM results from Table 3 of original paper",
+  "methods": {
+    "YOLO_Baseline": {
+      "F1": 66.0,
+      "R@50": 38.0,
+      "Causal_F1": 35.0
+    },
+    "Orion": {
+      "F1": 0,
+      "R@50": 0,
+      "Causal_F1": 0
+    },
+    "HyperGLM*": {
+      "F1": 75.0,
+      "R@50": 42.3,
+      "Causal_F1": 54.7
+    }
+  }
+}

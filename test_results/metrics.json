@@ -1,0 +1,20 @@
+{
+  "pipeline": "orion_with_semantic_uplift",
+  "dataset": "aspire_100_sample",
+  "metrics": {
+    "F1": 0,
+    "R@50": 0,
+    "Causal_F1": 0
+  },
+  "samples_evaluated": 0,
+  "baseline_comparison": {
+    "yolo_only_f1": 0.66,
+    "yolo_only_r_at_50": 0.38,
+    "yolo_only_causal_f1": 0.35
+  },
+  "improvements": {
+    "f1_gain": -100.0,
+    "r_at_50_gain": -100.0,
+    "causal_f1_gain": -100.0
+  }
+}

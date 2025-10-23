@@ -670,8 +670,14 @@ JSON only:"""
             
             # Add corrections if any
             if entity.get('corrected_class'):
+                # Store original YOLO class if not already stored
+                if not enhanced_obj.get('original_yolo_class'):
+                    enhanced_obj['original_yolo_class'] = enhanced_obj.get('yolo_class', enhanced_obj.get('object_class'))
                 enhanced_obj['original_class'] = enhanced_obj.get('object_class')
+                # Update both object_class and yolo_class to corrected value
                 enhanced_obj['object_class'] = entity['corrected_class']
+                # Keep yolo_class showing the original detection for transparency
+                # but object_class shows the corrected value
                 enhanced_obj['correction_confidence'] = entity.get('correction_confidence', 0.0)
                 enhanced_obj['correction_reason'] = entity.get('correction_reason', '')
                 enhanced_obj['was_corrected'] = True

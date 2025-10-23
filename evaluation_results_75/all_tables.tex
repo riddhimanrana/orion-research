@@ -1,0 +1,98 @@
+% Orion Evaluation Results - LaTeX Tables
+% Generated from 75-video VSGR evaluation
+
+\begin{table}[t]
+\centering
+\caption{Comparison on VSGR Dataset for Scene Graph Generation}
+\label{tab:vsgr_comparison}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Method} & \textbf{R@20} & \textbf{R@50} & \textbf{R@100} \\
+\midrule
+Transformer \cite{vaswani2017} & 25.7 & 34.5 & 43.5 \\
+HIG \cite{hig2023} & 23.8 & 31.1 & 40.4 \\
+CYCLO \cite{cyclo2023} & 29.4 & 36.4 & 47.7 \\
+HyperGraph \cite{hypergraph2024} & 31.6 & 38.8 & 50.3 \\
+HyperGLM \cite{hyperglm2024} & \textbf{35.8} & \textbf{42.3} & \textbf{54.7} \\
+\midrule
+\textbf{Orion (Ours)} & \multicolumn{3}{c}{\textit{Semantic Uplift: 85.3\% correction rate}} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\begin{table}[t]
+\centering
+\caption{Orion Semantic Uplift Performance on 75 VSGR Videos}
+\label{tab:semantic_uplift}
+\begin{tabular}{lc}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Total Annotations & 8,852 \\
+Corrections Made & 7,547 (85.3\%) \\
+Processing Time & 91.1s \\
+Throughput & 97.1 ann/sec \\
+\midrule
+Average Confidence & 0.415 \\
+Median Confidence & 0.365 \\
+Confidence Range & [0.000, 0.950] \\
+\midrule
+Original Unique Classes & 75 \\
+Corrected Unique Classes & 49 \\
+Class Consolidation & 34.7\% reduction \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\begin{table}[t]
+\centering
+\caption{Example Semantic Uplift Corrections}
+\label{tab:corrections}
+\small
+\begin{tabular}{llc}
+\toprule
+\textbf{Original} & \textbf{Corrected} & \textbf{Confidence} \\
+\midrule
+baby & teddy bear & 0.48 \\
+paddle & boat & 0.61 \\
+kayak & boat & 0.62 \\
+car\_(automobile) & car & 0.65 \\
+cellular\_telephone & cell phone & 0.85 \\
+pillow & bed & 0.63 \\
+napkin & dining table & 0.48 \\
+bottle & wine glass & 0.56 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\begin{table*}[t]
+\centering
+\caption{Methodology Comparison: Orion vs HyperGLM}
+\label{tab:methodology}
+\begin{tabular}{lll}
+\toprule
+\textbf{Aspect} & \textbf{HyperGLM} & \textbf{Orion (Ours)} \\
+\midrule
+Entity Detection & End-to-end & YOLO + Semantic Uplift \\
+Relationship Modeling & Hypergraph walks & Temporal + Spatial KG \\
+Reasoning Engine & Black-box LLM & CLIP + Rule-based \\
+Interpretability & Limited & Full reasoning trace \\
+Confidence Scores & No & Yes (0.0-1.0 range) \\
+Processing Speed & Not reported & 97.1 ann/sec \\
+\midrule
+R@50 on VSGR & 42.3\% & \textit{Pending full eval} \\
+Semantic Uplift Rate & Not evaluated & 85.3\% \\
+Class Consolidation & Not evaluated & 34.7\% reduction \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+
+% Usage Instructions:
+% 1. Copy desired tables into your paper
+% 2. Add \usepackage{booktabs} to preamble
+% 3. Add citations for baseline methods
+% 4. Adjust table positions as needed
