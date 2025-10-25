@@ -20,7 +20,7 @@ import numpy as np
 sys.path.insert(0, '.')
 
 from orion.async_perception import AsyncPerceptionEngine
-from orion.config_manager import ConfigManager
+from orion.settings import ConfigManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

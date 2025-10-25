@@ -1134,7 +1134,7 @@ def main(argv: list[str] | None = None) -> None:
         print_banner()
 
     if args.command == "analyze":
-        from .run_pipeline import run_pipeline as run_pipeline_main
+        from .pipeline import VideoPipeline
 
         VideoQASystem = _import_video_qa()
 
@@ -1174,20 +1174,25 @@ def main(argv: list[str] | None = None) -> None:
         console.print(Panel(params_table, title="[bold]Analysis Configuration[/bold]", border_style="cyan"))
         console.print("\n")
 
-        results = run_pipeline_main(
-            video_path=args.video,
-            output_dir=args.output,
-            neo4j_uri=neo4j_uri,
-            neo4j_user=neo4j_user,
-            neo4j_password=neo4j_password,
-            clear_db=not args.keep_db,
-            part1_config=config,
-            part2_config=config,
-            skip_part1=args.skip_perception,
-            skip_part2=args.skip_graph,
-            verbose=args.verbose,
-            runtime=backend,
-            use_progress_ui=not args.verbose,
+        # Create config for new VideoPipeline
+        pipeline_config = {
+            "video_path": args.video,
+            "perception": {"mode": config},
+            "semantic": {"mode": config},
+            "neo4j": {
+                "uri": neo4j_uri,
+                "user": neo4j_user,
+                "password": neo4j_password,
+                "clear_db": not args.keep_db,
+            }
+        }
+        
+        # Create and run pipeline
+        pipeline = VideoPipeline.from_config(pipeline_config)
+        results = pipeline.run(
+            skip_perception=args.skip_perception,
+            skip_semantic=False,
+            skip_graph=args.skip_graph
         )
 
         # Display comprehensive results

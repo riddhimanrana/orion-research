@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from orion.motion_tracker import (
+from orion.perception.tracker import (
     MotionTracker,
     MotionData,
     calculate_distance,

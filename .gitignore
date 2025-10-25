@@ -23,6 +23,10 @@ __pycache__/
 
 /orion-old
 
+/data/ag_50/
+
+/dataset
+
 
 # Distribution / packaging
 .Python

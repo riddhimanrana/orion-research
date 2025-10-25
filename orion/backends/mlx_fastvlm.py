@@ -31,10 +31,11 @@ def _resolve_default_model_path() -> str:
     - fp16 weights for the language model
     """
     try:
-        from ..models import ModelManager
-        manager = ModelManager()
-        manager.ensure_asset("fastvlm-0.5b-mlx")
-        return str(manager.get_asset_dir("fastvlm-0.5b-mlx"))
+        from ..managers.asset_manager import AssetManager
+
+        asset_manager = AssetManager()
+        asset_path = asset_manager.ensure_asset("fastvlm-0.5b-mlx")
+        return str(asset_path)
     except Exception as exc:
         logger.warning("Falling back to default MLX model path: %s", exc)
         return APPLE_MLX_MODEL_PATH
@@ -215,6 +216,26 @@ class FastVLMMLXWrapper:
                     os.unlink(temp_path)
                 except:
                     pass
+
+    def generate(
+        self,
+        image: ImageInput,
+        prompt: str,
+        *,
+        max_tokens: int = 256,
+        temperature: float = 0.2,
+        top_p: Optional[float] = None,
+        **kwargs,
+    ) -> str:
+        """Alias for generate_description() for compatibility."""
+        return self.generate_description(
+            image=image,
+            prompt=prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            **kwargs
+        )
 
     def batch_generate(
         self,

@@ -38,6 +38,13 @@ MODEL_REMAPPING = {"llava-qwen2": "llava_bunny", "bunny-llama": "llava_bunny", "
 MAX_FILE_SIZE_GB = 5
 
 
+def _get_peak_memory() -> float:
+    """Compatibility wrapper for peak memory reporting across MLX versions."""
+    if hasattr(mx, "get_peak_memory"):
+        return mx.get_peak_memory()
+    return mx.metal.get_peak_memory()
+
+
 @dataclass
 class GenerationResult:
     text: str
@@ -1088,7 +1095,7 @@ def stream_generate(
             generation_tokens=n + 1,
             prompt_tps=prompt_tps,
             generation_tps=(n + 1) / (time.perf_counter() - tic),
-            peak_memory=mx.metal.get_peak_memory() / 1e9,
+            peak_memory=_get_peak_memory() / 1e9,
         )
 
     detokenizer.finalize()
@@ -1100,7 +1107,7 @@ def stream_generate(
         generation_tokens=n + 1,
         prompt_tps=prompt_tps,
         generation_tps=(n + 1) / (time.perf_counter() - tic),
-        peak_memory=mx.metal.get_peak_memory() / 1e9,
+    peak_memory=_get_peak_memory() / 1e9,
     )
 
 
