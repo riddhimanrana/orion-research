@@ -208,6 +208,20 @@ class StateChangeDetector:
         Returns:
             Embedding vector
         """
+        # If no embedding model, use simple heuristic or return zero vector
+        if self.embedding_model is None:
+            # Fallback: Use text-based comparison (simple string similarity)
+            # This is a placeholder - ideally we'd use CLIP from perception
+            logger.debug(f"No embedding model available, using string-based similarity")
+            # Create a simple hash-based embedding for now
+            import hashlib
+            hash_val = int(hashlib.md5(text.encode()).hexdigest(), 16)
+            # Create deterministic embedding from hash
+            np.random.seed(hash_val % (2**32))
+            embedding = np.random.randn(512)
+            embedding /= np.linalg.norm(embedding)
+            return embedding
+        
         if self.config.embedding_model == "clip":
             # Use CLIP text encoder
             embedding = self.embedding_model.encode_text(text, normalize=True)

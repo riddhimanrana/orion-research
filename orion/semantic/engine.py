@@ -113,35 +113,62 @@ class SemanticEngine:
         
         start_time = time.time()
         
+        # Log input statistics
+        logger.info(f"\nInput: {perception_result.total_detections} detections across {perception_result.total_frames} frames")
+        
         # Step 1: Track entities across time
         logger.info("\n[1/8] Consolidating semantic entities...")
+        step_start = time.time()
         entities = self.entity_tracker.consolidate_entities(perception_result)
-        logger.info(f"  Consolidated {len(entities)} semantic entities")
+        elapsed = time.time() - step_start
+        logger.info(f"  ✓ Consolidated {len(entities)} semantic entities ({elapsed:.2f}s)")
+        
+        if self.config.verbose and len(entities) > 0:
+            class_counts = Counter(e.object_class for e in entities)
+            logger.info(f"    Classes detected: {dict(class_counts)}")
+            logger.info(f"    Avg detections/entity: {perception_result.total_detections/len(entities):.1f}")
         
         # Step 1b: Generate temporal descriptions (NEW - critical for state changes)
         logger.info("\n[1b/8] Generating temporal descriptions...")
+        step_start = time.time()
         self.description_generator.generate_temporal_descriptions(entities)
-        logger.info(f"  Generated temporal descriptions for {len(entities)} entities")
+        elapsed = time.time() - step_start
+        total_descriptions = sum(len(e.descriptions) for e in entities)
+        logger.info(f"  ✓ Generated {total_descriptions} temporal descriptions ({elapsed:.2f}s)")
+        
+        if self.config.verbose and len(entities) > 0:
+            avg_desc = total_descriptions / len(entities)
+            logger.info(f"    Avg descriptions/entity: {avg_desc:.1f}")
         
         # Step 2: Detect spatial zones (NEW - Phase 2)
         logger.info("\n[2/8] Detecting spatial zones...")
+        step_start = time.time()
         spatial_zones = self._detect_spatial_zones(entities)
-        logger.info(f"  Detected {len(spatial_zones)} spatial zones")
+        elapsed = time.time() - step_start
+        logger.info(f"  ✓ Detected {len(spatial_zones)} spatial zones ({elapsed:.2f}s)")
         
         # Step 3: Detect state changes
         logger.info("\n[3/8] Detecting state changes...")
+        step_start = time.time()
         state_changes = self.state_detector.detect_changes(entities)
-        logger.info(f"  Detected {len(state_changes)} state changes")
+        elapsed = time.time() - step_start
+        logger.info(f"  ✓ Detected {len(state_changes)} state changes ({elapsed:.2f}s)")
+        
+        if self.config.verbose and state_changes:
+            logger.info(f"    State changes will be used for temporal windowing")
         
         # Step 4: Assemble scenes
         logger.info("\n[4/8] Assembling scenes...")
+        step_start = time.time()
         # Create temporal windows first (needed for scenes)
         windows = self.window_manager.create_windows(state_changes)
         scenes = self.scene_assembler.assemble_scenes(windows)
-        logger.info(f"  Assembled {len(scenes)} scenes from {len(windows)} windows")
+        elapsed = time.time() - step_start
+        logger.info(f"  ✓ Assembled {len(scenes)} scenes from {len(windows)} windows ({elapsed:.2f}s)")
         
         # Step 5: Compute causal links
         logger.info("\n[5/8] Computing causal influence scores...")
+        step_start = time.time()
         # Build embedding lookup
         embeddings = {
             e.entity_id: e.average_embedding
@@ -152,7 +179,8 @@ class SemanticEngine:
             state_changes,
             embeddings,
         )
-        logger.info(f"  Identified {len(causal_links)} causal links")
+        elapsed = time.time() - step_start
+        logger.info(f"  ✓ Identified {len(causal_links)} causal links ({elapsed:.2f}s)")
         
         # Add causal links to windows
         for link in causal_links:
@@ -162,10 +190,15 @@ class SemanticEngine:
                 if link.agent_id in change_ids and link.patient_id in change_ids:
                     window.causal_links.append(link)
         
+        if self.config.verbose and causal_links:
+            logger.info(f"    Added causal links to scenes")
+        
         # Step 6: Compose events
         logger.info("\n[6/8] Composing events...")
+        step_start = time.time()
         events = self.event_composer.compose_events(windows)
-        logger.info(f"  Composed {len(events)} events")
+        elapsed = time.time() - step_start
+        logger.info(f"  ✓ Composed {len(events)} events ({elapsed:.2f}s)")
         
         # Link events to scenes
         for event in events:
@@ -178,6 +211,7 @@ class SemanticEngine:
         graph_stats = {}
         if self.config.enable_graph_ingestion and self.graph_builder:
             logger.info("\n[7/8] Ingesting into knowledge graph...")
+            step_start = time.time()
             try:
                 locations = {
                     scene.scene_id: scene.location_profile
@@ -191,12 +225,14 @@ class SemanticEngine:
                     locations,
                     causal_links,
                 )
-                logger.info(f"  Created {graph_stats.get('entities', 0)} entity nodes")
-                logger.info(f"  Created {graph_stats.get('events', 0)} event nodes")
+                elapsed = time.time() - step_start
+                logger.info(f"  ✓ Created {graph_stats.get('entities', 0)} entity nodes, "
+                           f"{graph_stats.get('events', 0)} event nodes ({elapsed:.2f}s)")
             except Exception as e:
                 logger.error(f"  Graph ingestion failed: {e}")
         else:
             logger.info("\n[7/8] Skipping knowledge graph ingestion (disabled)")
+
         
         # Step 8: Package results
         logger.info("\n[8/8] Packaging results...")
