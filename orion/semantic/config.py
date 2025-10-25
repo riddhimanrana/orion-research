@@ -474,7 +474,7 @@ def get_balanced_semantic_config() -> SemanticConfig:
             cis_threshold=0.55,
             learning_rate=0.05,
         ),
-        enable_graph_ingestion=True,
+        enable_graph_ingestion=False,  # Pipeline handles graph ingestion separately
     )
 
 
@@ -505,6 +505,6 @@ def get_accurate_semantic_config() -> SemanticConfig:
             learning_rate=0.03,
             enable_learning=True,
         ),
-        enable_graph_ingestion=True,
+        enable_graph_ingestion=False,  # Pipeline handles graph ingestion separately
         verbose=True,
     )

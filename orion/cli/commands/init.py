@@ -73,25 +73,78 @@ def handle_init(args: argparse.Namespace) -> None:
     import os
     from pathlib import Path
     
-    # Generate or load Neo4j password
+    # Check if user wants to reset configuration
+    force_reset = getattr(args, "reset", False)
+    
+    # Determine if we need a new password or use existing
+    settings = None
     neo4j_password = None
     password_was_generated = False
+    password_is_new = False
     
+    # Try to load existing settings
     try:
         settings = OrionSettings.load()
-        console.print(f"[green]✓ Configuration loaded from {settings.config_path()}[/green]")
-        # Get existing password
-        neo4j_password = settings.get_neo4j_password()
+        console.print(f"[green]✓ Configuration found at {settings.config_path()}[/green]")
+        
+        # Check if password exists
+        try:
+            neo4j_password = settings.get_neo4j_password()
+            
+            # If reset flag OR user wants to reconfigure
+            if force_reset:
+                console.print("[yellow]⚠ Reset flag detected - reconfiguring password[/yellow]\n")
+                password_is_new = True
+            else:
+                console.print("[dim]Existing Neo4j password found in configuration[/dim]")
+                if prompt_user("Would you like to reconfigure the Neo4j password?", default=False):
+                    console.print()
+                    password_is_new = True
+                else:
+                    console.print("[yellow]Using existing Neo4j password[/yellow]\n")
+        except Exception:
+            # Config exists but no password set, ask user
+            console.print("[yellow]⚠ No Neo4j password found in configuration[/yellow]\n")
+            password_is_new = True
     except Exception as e:
         console.print(f"[dim]Creating new configuration...[/dim]")
-        # Generate secure password for new setup
-        neo4j_password = generate_secure_password(16)
-        password_was_generated = True
+        password_is_new = True
+        settings = None
+    
+    # If we need a new password, ask the user
+    if password_is_new:
+        console.print("[bold cyan]Neo4j Password Setup[/bold cyan]\n")
+        choice = prompt_user("Would you like to generate a random password?", default=True)
         
+        if choice:
+            neo4j_password = generate_secure_password(16)
+            password_was_generated = True
+            console.print(f"[green]✓ Generated secure password[/green]")
+            console.print(f"[dim]Password: {neo4j_password}[/dim]\n")
+        else:
+            # Custom password
+            console.print("\n[cyan]Enter your Neo4j password (min 8 characters):[/cyan]")
+            import getpass
+            while True:
+                neo4j_password = getpass.getpass("Password: ")
+                if len(neo4j_password) < 8:
+                    console.print("[yellow]⚠ Password must be at least 8 characters[/yellow]")
+                    continue
+                password_confirm = getpass.getpass("Confirm: ")
+                if neo4j_password != password_confirm:
+                    console.print("[yellow]⚠ Passwords don't match, try again[/yellow]")
+                    continue
+                break
+            console.print("[green]✓ Password set[/green]\n")
+    
+    # Create or update settings with password
+    if settings is None:
         settings = OrionSettings()
-        settings.set_neo4j_password(neo4j_password)
-        settings.save()
-        console.print(f"[green]✓ Configuration created at {settings.config_path()}[/green]")
+    settings.set_neo4j_password(neo4j_password)
+    settings.save()
+    
+    if password_is_new:
+        console.print(f"[green]✓ Configuration saved to {settings.config_path()}[/green]\n")
     
     console.print(f"  • Neo4j URI: {settings.neo4j_uri}")
     console.print(f"  • Neo4j User: {settings.neo4j_user}")
@@ -145,9 +198,38 @@ def handle_init(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     if not docker_ok:
-        console.print("\n[red]✗ Docker is not installed.[/red]")
-        console.print("Please install Docker Desktop and then run this command again.")
-        sys.exit(1)
+        console.print("\n[red]✗ Docker CLI not available.[/red]")
+        
+        # Check if it's a PATH issue on macOS
+        import platform
+        from pathlib import Path
+        
+        if platform.system() == "Darwin":
+            docker_app = Path("/Applications/Docker.app")
+            if docker_app.exists():
+                console.print("\n[yellow]ℹ Docker Desktop is installed, but the CLI is not in your PATH.[/yellow]")
+                console.print("\n[cyan]To fix this, try one of the following:[/cyan]")
+                console.print("  1. Restart your terminal or IDE")
+                console.print("  2. Or run: [bold]eval \"$(docker-machine env default)\"[/bold]")
+                console.print("  3. Or add Docker to your PATH manually")
+                console.print("\nIf you just installed Docker Desktop, a restart is recommended.\n")
+                
+                # Optionally allow retry instead of exiting
+                if prompt_user("Would you like to retry Docker detection?"):
+                    docker_ok, docker_msg = auto_config.detector.detect_docker()
+                    if docker_ok:
+                        console.print(f"[green]✓ Docker is now available![/green]")
+                    else:
+                        console.print(f"[red]✗ {docker_msg}[/red]")
+                        sys.exit(1)
+                else:
+                    sys.exit(1)
+            else:
+                console.print("Please install Docker Desktop from https://www.docker.com/products/docker-desktop and then run this command again.")
+                sys.exit(1)
+        else:
+            console.print("Please install Docker and ensure the 'docker' command is in your PATH.")
+            sys.exit(1)
 
     if not is_docker_daemon_running():
         console.print("\n[red]✗ Docker daemon is not running.[/red]")
@@ -161,6 +243,55 @@ def handle_init(args: argparse.Namespace) -> None:
     
     console.print("--- Setting up Neo4j ---")
     setup_neo4j(neo4j_password)
+    
+    # Verify Neo4j connection with the password
+    console.print("\n[dim]Verifying Neo4j connection (this may take a moment)...[/dim]")
+    import time
+    import logging
+    
+    # Temporarily suppress Neo4j driver logging during retries
+    neo4j_logger = logging.getLogger("neo4j")
+    original_level = neo4j_logger.level
+    neo4j_logger.setLevel(logging.CRITICAL)
+    
+    max_retries = 30
+    retry_count = 0
+    neo4j_verified = False
+    
+    while retry_count < max_retries and not neo4j_verified:
+        try:
+            from neo4j import GraphDatabase
+            
+            driver = GraphDatabase.driver(
+                settings.neo4j_uri,
+                auth=(settings.neo4j_user, neo4j_password),
+                connection_timeout=5
+            )
+            driver.verify_connectivity()
+            driver.close()
+            neo4j_verified = True
+            # Restore logging level
+            neo4j_logger.setLevel(original_level)
+            console.print("[green]✓ Neo4j authentication successful[/green]")
+        except Exception as e:
+            retry_count += 1
+            if retry_count < max_retries:
+                # Show a simple progress indicator instead of error messages
+                dots = "." * (retry_count % 4)
+                console.print(f"\r[dim]  Waiting for Neo4j to start{dots:4s}[/dim]", end="")
+                time.sleep(1)
+            else:
+                # Restore logging level
+                neo4j_logger.setLevel(original_level)
+                console.print(f"\n[red]✗ Neo4j connection failed after {max_retries} attempts[/red]")
+                console.print(f"[yellow]Error: {str(e)}[/yellow]")
+                if prompt_user("\n[yellow]Continue anyway?[/yellow]", default=False):
+                    neo4j_verified = True
+                else:
+                    sys.exit(1)
+    
+    if neo4j_verified and retry_count > 0:
+        console.print()  # New line after progress dots
 
     console.print("\n--- Setting up Ollama ---")
     setup_ollama()
@@ -192,7 +323,30 @@ def handle_init(args: argparse.Namespace) -> None:
     except Exception:
         sys.exit(1)
 
-    console.print(f"[green]✓ Runtime '{backend}' assets are ready.[/green]\n")
+    console.print(f"[green]✓ Runtime '{backend}' assets are ready.[/green]")
+    
+    # Ensure YOLO11x is downloaded regardless of runtime
+    # (needed for object detection in all pipelines)
+    # Download it directly via HuggingFace since it's not runtime-specific
+    console.print("\n[dim]Ensuring YOLO11x detector is available...[/dim]")
+    try:
+        from huggingface_hub import snapshot_download
+        
+        yolo_dir = manager.cache_dir / "yolo11x"
+        yolo_dir.mkdir(parents=True, exist_ok=True)
+        yolo_path = yolo_dir / "yolo11x.pt"
+        
+        if not yolo_path.exists():
+            console.print("[cyan]Downloading YOLO11x from Ultralytics via HuggingFace...[/cyan]")
+            snapshot_download(
+                repo_id="ultralytics/YOLO11",
+                local_dir=str(yolo_dir),
+                allow_patterns=["yolo11x.pt"],
+            )
+        console.print("[green]✓ YOLO11x detector ready.[/green]\n")
+    except Exception as e:
+        console.print(f"[yellow]⚠ Warning: YOLO11x download failed: {e}[/yellow]")
+        console.print("[dim]  (You can install it manually or retry later)[/dim]\n")
 
     # ═══════════════════════════════════════════════════════════
     # STEP 6: Test Connections
@@ -246,14 +400,17 @@ def handle_init(args: argparse.Namespace) -> None:
 
     console.print("\n[bold green]✅ Orion initialization complete![/bold green]")
     
-    # Show Neo4j credentials if password was newly generated
+    # Show Neo4j credentials and configuration info
+    console.print("\n[bold cyan]📝 Neo4j Configuration[/bold cyan]")
+    console.print(f"[bold]Browser URL:[/bold] http://localhost:7474")
+    console.print(f"[bold]Connection URI:[/bold] neo4j://localhost:7687")
+    console.print(f"[bold]Username:[/bold] neo4j")
     if password_was_generated:
-        console.print("\n[bold cyan]📝 Neo4j Credentials[/bold cyan]")
-        console.print(f"[bold]URL:[/bold] http://localhost:7474")
-        console.print(f"[bold]Username:[/bold] neo4j")
-        console.print(f"[bold]Password:[/bold] {neo4j_password}")
-        console.print("[dim]  • Save this password - it's stored in ~/.orion/config.json[/dim]")
-        console.print("[dim]  • Use these credentials to access Neo4j Browser[/dim]")
+        console.print(f"[bold]Password:[/bold] {neo4j_password} [yellow](auto-generated)[/yellow]")
+    else:
+        console.print(f"[dim]Password:[/dim] [green]✓ Set (stored in ~/.orion/config.json)[/green]")
+    console.print("[dim]  • Credentials are encrypted and stored in ~/.orion/config.json[/dim]")
+    console.print("[dim]  • Log in to Neo4j Browser to manage the database[/dim]")
     
     console.print("\n[bold cyan]Next steps:[/bold cyan]")
     console.print("  1. Check system status: [bold]orion status[/bold]")
