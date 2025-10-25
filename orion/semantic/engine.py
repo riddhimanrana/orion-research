@@ -32,6 +32,7 @@ from orion.semantic.scene_assembler import SceneAssembler
 from orion.semantic.temporal_windows import TemporalWindowManager
 from orion.semantic.causal_scorer import CausalInfluenceScorer
 from orion.semantic.event_composer import EventComposer
+from orion.semantic.temporal_description_generator import TemporalDescriptionGenerator
 from orion.graph.builder import GraphBuilder
 from orion.semantic.spatial_utils import (
     extract_spatial_features,
@@ -65,6 +66,11 @@ class SemanticEngine:
         
         # Initialize components
         self.entity_tracker = SemanticEntityTracker(self.config.state_change)
+        self.description_generator = TemporalDescriptionGenerator(
+            clip_model=None,  # Will use CLIP from perception if available
+            sample_interval=2.0,  # Sample descriptions every 2 seconds
+            min_samples_per_entity=3,  # At least 3 descriptions per entity
+        )
         self.state_detector = StateChangeDetector(
             embedding_model=None,  # Will use CLIP embeddings from perception
             config=self.config.state_change,
@@ -111,6 +117,11 @@ class SemanticEngine:
         logger.info("\n[1/8] Consolidating semantic entities...")
         entities = self.entity_tracker.consolidate_entities(perception_result)
         logger.info(f"  Consolidated {len(entities)} semantic entities")
+        
+        # Step 1b: Generate temporal descriptions (NEW - critical for state changes)
+        logger.info("\n[1b/8] Generating temporal descriptions...")
+        self.description_generator.generate_temporal_descriptions(entities)
+        logger.info(f"  Generated temporal descriptions for {len(entities)} entities")
         
         # Step 2: Detect spatial zones (NEW - Phase 2)
         logger.info("\n[2/8] Detecting spatial zones...")
