@@ -12,10 +12,10 @@
 
 | Dataset | Domain | Purpose | Metrics |
 |---------|--------|---------|---------|
-| **Action Genome** | Structured indoor videos, annotated triplets | Quantitative SGG/SGA evaluation | Triplet F1, Causal F1, Entity Continuity, Recall@K |
-| **VSGR (ASPIRe)** | Egocentric procedural videos | Generalization + qualitative reasoning | Visual grounding, Graph consistency, Captioning metrics |
+| **Action Genome** | Third-person indoor videos, annotated triplets | Quantitative SGG/SGA evaluation | Triplet F1, Causal F1, Entity Continuity, Recall@K |
+| **EASG (Ego4D)** | First-person egocentric manipulation videos | Cross-domain + egocentric validation | Triplet F1, Action understanding, Interaction graphs |
 
-**Decision**: Start with ASPIRe subset only (sufficient for procedural reasoning evaluation). Add AeroEye later if needed for cross-domain testing.
+**Decision**: Action Genome provides established benchmark comparison. EASG validates Orion on egocentric data (hands, objects, manipulation) which is Orion's target domain.
 
 ---
 
@@ -43,7 +43,7 @@ research/
 ├── datasets/                        # Dataset loaders & evaluators
 │   ├── __init__.py
 │   ├── action_genome.py             # Action Genome loader + GT matching
-│   ├── vsgr.py                      # VSGR/ASPIRe loader
+│   ├── easg.py                      # EASG (Ego4D) loader + egocentric evaluation
 │   └── utils.py                     # IoU matching, entity alignment
 │
 ├── baselines/                       # Baseline implementations
@@ -86,7 +86,7 @@ research/
     │   ├── heuristic.json
     │   ├── llm_vot.json
     │   └── hyperglm.json
-    ├── vsgr_aspire/
+    ├── easg/
     │   └── ...
     └── tables/                      # Generated LaTeX tables
         └── comparison.tex
@@ -114,21 +114,21 @@ research/
 - Causal F1 (for future relation prediction)
 - Runtime (FPS)
 
-### 2. VSGR (ASPIRe) Evaluation
+### 2. EASG (Ego4D) Evaluation
 
-**Input**: ASPIRe egocentric procedural videos
+**Input**: EASG egocentric manipulation videos from Ego4D
 
 **Process**:
 1. Run same Orion pipeline
-2. Evaluate against VSGR relation annotations
-3. Compute visual grounding accuracy
-4. Generate and evaluate captions (BLEU/METEOR/CIDEr)
+2. Evaluate against EASG scene graph annotations
+3. Focus on hand-object interactions and manipulation actions
+4. Compute action understanding metrics
 
 **Output Metrics**:
-- Visual grounding accuracy
+- Triplet F1 (egocentric context)
+- Hand-object interaction accuracy
+- Action prediction accuracy
 - Graph consistency score
-- Captioning metrics (BLEU-4, METEOR, CIDEr)
-- Cross-domain transfer (if AeroEye added)
 
 ---
 
@@ -185,7 +185,7 @@ def llm_vot_baseline(video_path):
 
 ### 3. HyperGLM Baseline (`research/baselines/hyperglm/`)
 
-**Strategy**: Full implementation from VSGR paper
+**Strategy**: Full implementation from HyperGLM paper (not EASG-specific)
 
 **Components** (must implement from scratch):
 

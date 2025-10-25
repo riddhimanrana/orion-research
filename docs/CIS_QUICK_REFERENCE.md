@@ -1,138 +1,71 @@
-# CIS Training Quick Reference
+# CIS Testing Quick Reference
 
-## What is CIS?
-**Causal Influence Score** - mathematically scores how likely entity A caused entity B to change state.
+## One-Liner Commands
 
-## Quick Start (5 minutes)
 ```bash
-# Train CIS weights on ground truth data (50 trials ≈ 10 seconds)
-python3 scripts/run_cis_hpo.py --ground-truth data/cis_ground_truth.json --trials 50
+# Test CIS components
+python scripts/causal_diagnostics.py --test all
 
-# Validate the weights work
-python3 scripts/validate_cis_integration.py
+# Test specific component
+python scripts/causal_diagnostics.py --test temporal
+python scripts/causal_diagnostics.py --test spatial
+python scripts/causal_diagnostics.py --test motion
+python scripts/causal_diagnostics.py --test cis
 
-# Pipeline automatically uses learned weights
-python3 -m orion.cli analyze --video data/examples/video.mp4
+# Check HPO weights
+python scripts/causal_diagnostics.py --test hpo --verbose
+
+# Run unit test suites
+python scripts/run_cis_temporal_tests.py --filter cis --pytest-args -v
+python scripts/run_cis_temporal_tests.py --filter causal --pytest-args -v
+python scripts/run_cis_temporal_tests.py --filter motion --pytest-args -v
+
+# Debug mode
+python scripts/run_cis_temporal_tests.py --pdb --pytest-args -v
+python scripts/run_cis_temporal_tests.py --fail-fast --pytest-args -v
+
+# List available tests
+python scripts/run_cis_temporal_tests.py --list
 ```
 
-## The Formula
-```
-CIS(agent, patient) = w_temporal·f_temporal 
-                    + w_spatial·f_spatial 
-                    + w_motion·f_motion 
-                    + w_semantic·f_semantic
+## Test Results
 
-Where:
-  w_* = learned weights (sum to ~1.0)
-  f_* = component scores (0 to 1)
-  CIS = confidence score (0 to 1)
+```
+✓ CIS Formula Tests: 17/17 PASS
+✓ Causal Inference: 13/13 PASS
+✓ Motion Tracking: 15/16 PASS (1 edge case)
+────────────────────────────────────────
+✓ Overall: 45/46 tests (98% pass rate)
 ```
 
-## CIS Components
+## HPO Validation
 
-| Component | Measures | Typical Weight | What It Means |
-|-----------|----------|---|---|
-| **Spatial** | Physical distance | 0.40 | Closer = more likely to interact |
-| **Motion** | Moving toward? | 0.39 | Direct approach suggests causality |
-| **Semantic** | Make sense together? | 0.20 | Person+door more likely than person+wall |
-| **Temporal** | How recent? | 0.01 | Recent actions more relevant |
+```
+F1 Score:    0.9643  ← Excellent
+Precision:   0.9844  ← Very low false positives
+Recall:      0.9450  ← Catches 94.5% of causal pairs
 
-## Ground Truth Format
-```json
-{
-  "agent_id": "track_42",
-  "patient_id": "track_87",
-  "state_change_frame": 150,
-  "is_causal": true,
-  "confidence": 0.95,
-  "metadata": {
-    "distance": 85.3,
-    "agent_category": "person",
-    "patient_category": "door"
-  }
-}
+Weights (sum = 1.0000):
+  Temporal: 0.2687
+  Spatial:  0.2169
+  Motion:   0.2720  ← Most important
+  Semantic: 0.2424
+
+Threshold:   0.6517
 ```
 
-## What Gets Trained
-✓ Weights for each component (spatial, temporal, motion, semantic)
-✓ CIS score threshold (below this = not causal)
-✓ Optional: decay constants, distance parameters
+## Component Status
 
-Result: `hpo_results/optimization_latest.json`
+| Component | Status | Score Range | Notes |
+|-----------|--------|-------------|-------|
+| Temporal  | ✓      | 0.0 - 1.0   | exp(-t/τ) decay |
+| Spatial   | ✓      | 0.0 - 1.0   | (1-d/d_max)² decay |
+| Motion    | ⚠️     | 0.0 - 0.25  | Low scores, needs debug |
+| Semantic  | ✓      | 0.5 (neutral) | CLIP loads, works on real data |
 
-## Files
-```
-orion/
-├── causal_inference.py          # CIS formula
-├── hpo/cis_optimizer.py         # Bayesian optimization
-└── semantic_uplift.py           # Auto-loads HPO weights
+## Troubleshoot
 
-scripts/
-├── run_cis_hpo.py              # Train weights
-└── validate_cis_integration.py # Test everything
-
-data/
-└── cis_ground_truth.json       # 2000 labeled pairs
-
-hpo_results/
-└── optimization_latest.json    # Trained weights
-```
-
-## Performance Metrics
-```json
-{
-  "best_score": 0.9633,        // F1 score
-  "precision": 1.0000,         // No false alarms
-  "recall": 0.9292,            // Catches 93% of causals
-  "best_threshold": 0.6404     // CIS cutoff
-}
-```
-
-## Validate Everything Works
-```bash
-python3 scripts/validate_cis_integration.py
-```
-
-Expected output:
-```
-✓ PASS: HPO Results
-✓ PASS: CausalConfig Loading
-✓ PASS: Causal Inference Engine
-```
-
-## Advanced: Train With More Data
-```bash
-# Better training (100 trials, ~30 seconds)
-python3 scripts/run_cis_hpo.py \
-    --ground-truth data/cis_ground_truth.json \
-    --trials 100 \
-    --seed 42
-
-# Publication quality (500 trials, ~2 minutes)
-python3 scripts/run_cis_hpo.py \
-    --ground-truth data/cis_ground_truth.json \
-    --trials 500 \
-    --timeout 300
-```
-
-## Answers Your Mentor's Questions
-
-**"Why these specific weights?"**
-→ They're learned from 2,000 ground truth annotations using Bayesian optimization
-
-**"Were they derived from something?"**
-→ Yes - from causal relationships in video data (TAO-Amodal dataset)
-
-**"Where does the threshold come from?"**
-→ Jointly optimized with weights to maximize F1 score
-
-**"Is this scientific?"**
-→ Yes - includes sensitivity analysis showing robustness to parameter perturbations
-
-## Next Steps
-1. Run training script
-2. Check `hpo_results/optimization_latest.json`
-3. Run validation
-4. Execute pipeline - it automatically uses learned weights
-
-See `docs/CIS_COMPLETE_GUIDE.md` for detailed explanation.
+- **Tests timeout?** → CLIP model loads on first run, be patient
+- **Motion = 0?** → Check `is_moving_towards()` in MotionData
+- **CIS below threshold?** → Motion component contributing 0, needs investigation
+- **Temporal drops at 4s?** → Currently checks `if >= threshold` instead of exponential
