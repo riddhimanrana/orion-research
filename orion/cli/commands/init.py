@@ -145,9 +145,38 @@ def handle_init(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     if not docker_ok:
-        console.print("\n[red]✗ Docker is not installed.[/red]")
-        console.print("Please install Docker Desktop and then run this command again.")
-        sys.exit(1)
+        console.print("\n[red]✗ Docker CLI not available.[/red]")
+        
+        # Check if it's a PATH issue on macOS
+        import platform
+        from pathlib import Path
+        
+        if platform.system() == "Darwin":
+            docker_app = Path("/Applications/Docker.app")
+            if docker_app.exists():
+                console.print("\n[yellow]ℹ Docker Desktop is installed, but the CLI is not in your PATH.[/yellow]")
+                console.print("\n[cyan]To fix this, try one of the following:[/cyan]")
+                console.print("  1. Restart your terminal or IDE")
+                console.print("  2. Or run: [bold]eval \"$(docker-machine env default)\"[/bold]")
+                console.print("  3. Or add Docker to your PATH manually")
+                console.print("\nIf you just installed Docker Desktop, a restart is recommended.\n")
+                
+                # Optionally allow retry instead of exiting
+                if prompt_user("Would you like to retry Docker detection?"):
+                    docker_ok, docker_msg = auto_config.detector.detect_docker()
+                    if docker_ok:
+                        console.print(f"[green]✓ Docker is now available![/green]")
+                    else:
+                        console.print(f"[red]✗ {docker_msg}[/red]")
+                        sys.exit(1)
+                else:
+                    sys.exit(1)
+            else:
+                console.print("Please install Docker Desktop from https://www.docker.com/products/docker-desktop and then run this command again.")
+                sys.exit(1)
+        else:
+            console.print("Please install Docker and ensure the 'docker' command is in your PATH.")
+            sys.exit(1)
 
     if not is_docker_daemon_running():
         console.print("\n[red]✗ Docker daemon is not running.[/red]")
@@ -192,7 +221,30 @@ def handle_init(args: argparse.Namespace) -> None:
     except Exception:
         sys.exit(1)
 
-    console.print(f"[green]✓ Runtime '{backend}' assets are ready.[/green]\n")
+    console.print(f"[green]✓ Runtime '{backend}' assets are ready.[/green]")
+    
+    # Ensure YOLO11x is downloaded regardless of runtime
+    # (needed for object detection in all pipelines)
+    # Download it directly via HuggingFace since it's not runtime-specific
+    console.print("\n[dim]Ensuring YOLO11x detector is available...[/dim]")
+    try:
+        from huggingface_hub import snapshot_download
+        
+        yolo_dir = manager.cache_dir / "yolo11x"
+        yolo_dir.mkdir(parents=True, exist_ok=True)
+        yolo_path = yolo_dir / "yolo11x.pt"
+        
+        if not yolo_path.exists():
+            console.print("[cyan]Downloading YOLO11x from Ultralytics via HuggingFace...[/cyan]")
+            snapshot_download(
+                repo_id="ultralytics/YOLO11",
+                local_dir=str(yolo_dir),
+                allow_patterns=["yolo11x.pt"],
+            )
+        console.print("[green]✓ YOLO11x detector ready.[/green]\n")
+    except Exception as e:
+        console.print(f"[yellow]⚠ Warning: YOLO11x download failed: {e}[/yellow]")
+        console.print("[dim]  (You can install it manually or retry later)[/dim]\n")
 
     # ═══════════════════════════════════════════════════════════
     # STEP 6: Test Connections

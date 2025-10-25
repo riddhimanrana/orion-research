@@ -97,7 +97,17 @@ class ServiceDetector:
             return False, f"Failed: {str(e)}", None
 
     def detect_docker(self) -> Tuple[bool, str]:
-        """Detect Docker availability"""
+        """
+        Detect Docker availability.
+        
+        On macOS, also checks for Docker Desktop installation if CLI is not in PATH.
+        
+        Returns:
+            (is_available, status_message)
+        """
+        import platform
+        
+        # First, try to run docker --version (standard check)
         try:
             subprocess.run(
                 ["docker", "--version"],
@@ -105,9 +115,24 @@ class ServiceDetector:
                 timeout=self.timeout,
                 check=True
             )
-            return True, "Docker available"
+            return True, "Docker CLI available"
+        except FileNotFoundError:
+            # Docker CLI not found in PATH, check if it's installed
+            pass
         except Exception as e:
-            return False, f"Docker not available: {str(e)}"
+            return False, f"Docker error: {str(e)}"
+        
+        # On macOS, check for Docker Desktop installation
+        if platform.system() == "Darwin":
+            docker_app_path = Path("/Applications/Docker.app")
+            if docker_app_path.exists():
+                # Docker Desktop is installed but CLI not in PATH
+                return False, (
+                    "Docker Desktop installed but CLI not in PATH. "
+                    "Run: eval \"$(docker-machine env default)\" or restart your terminal."
+                )
+        
+        return False, "Docker CLI not found in PATH"
 
 
 class AutoConfiguration:
