@@ -351,33 +351,50 @@ class CausalInferenceEngine:
         f_motion: Directed motion alignment function
         
         Measures if the agent was moving towards the patient before
-        the state change occurred. Higher score for direct approach.
+        the state change occurred. Higher score for direct approach,
+        lower (or zero) for moving away.
+        
+        Score breakdown:
+        - 0.0: Not moving or moving away from patient
+        - 0.5: Perpendicular/tangential motion
+        - 1.0: Direct approach toward patient
         
         Returns:
             Score in [0, 1]
         """
-        if agent.motion_data is None:
+        if agent.motion_data is None or agent.motion_data.speed < self.config.min_motion_speed:
             return 0.0
         
-        # Check if moving towards patient
-        is_towards = agent.motion_data.is_moving_towards(
-            patient.centroid,
-            self.config.motion_angle_threshold
-        )
+        # Calculate vector from agent to patient
+        dx = patient.centroid[0] - agent.motion_data.centroid[0]
+        dy = patient.centroid[1] - agent.motion_data.centroid[1]
+        distance = math.hypot(dx, dy)
         
-        if not is_towards:
-            return 0.0
+        if distance == 0.0:
+            return 1.0  # Already at patient
         
-        # Score based on speed (faster = stronger influence)
-        # Normalize by a reasonable max speed (e.g., 200 px/s)
+        # Calculate dot product of velocity and agent->patient direction
+        dot_product = agent.motion_data.velocity[0] * dx + agent.motion_data.velocity[1] * dy
+        
+        # Normalize by speed and distance to get cosine of angle
+        cos_angle = dot_product / (agent.motion_data.speed * distance)
+        cos_angle = max(-1.0, min(1.0, cos_angle))
+        
+        # Convert to score: cos(0°)=1 (approaching) → 1.0
+        #                  cos(90°)=0 (perpendicular) → 0.5
+        #                  cos(180°)=-1 (leaving) → 0.0
+        # Formula: (cos_angle + 1) / 2 maps [-1, 1] to [0, 1]
+        direction_score = (cos_angle + 1.0) / 2.0
+        
+        # Scale by speed (faster = stronger influence, capped at 1.0)
         max_speed = 200.0
         speed_factor = min(agent.motion_data.speed / max_speed, 1.0)
         
-        # Also consider if speed is above minimum threshold
-        if agent.motion_data.speed < self.config.min_motion_speed:
-            return 0.0
+        # Combined score: direction matters more than speed
+        # 70% direction, 30% speed scaling
+        motion_score = direction_score * (0.7 + 0.3 * speed_factor)
         
-        return speed_factor
+        return max(0.0, min(1.0, motion_score))
     
     def _temporal_score(
         self,
@@ -395,12 +412,11 @@ class CausalInferenceEngine:
         """
         time_diff = abs(patient.timestamp - agent.timestamp)
         
-        if time_diff >= self.config.temporal_decay:
-            return 0.0
-        
-        # Exponential decay
+        # Exponential decay - smooth function with no hard threshold
+        # At time_diff = decay_constant, score ≈ 0.3679 (e^-1)
+        # At time_diff = 2*decay_constant, score ≈ 0.1353 (e^-2)
         decay_factor = math.exp(-time_diff / self.config.temporal_decay)
-        return decay_factor
+        return max(0.0, min(1.0, decay_factor))
     
     def _embedding_score(
         self,

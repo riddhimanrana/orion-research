@@ -101,7 +101,9 @@ class TestCISComponents:
     def test_temporal_score_far_future(self) -> None:
         agent = make_agent(timestamp=0.0)
         patient = make_state_change(timestamp=100.0)
-        assert self.engine._temporal_score(agent, patient) == pytest.approx(0.0)
+        # With pure exponential decay (no threshold), score approaches 0 but never reaches it
+        # exp(-100/4) = exp(-25) ≈ 1.39e-11, which is effectively 0
+        assert self.engine._temporal_score(agent, patient) == pytest.approx(0.0, abs=1e-10)
 
     def test_proximity_score_zero_distance(self) -> None:
         agent = make_agent(centroid=(10.0, 10.0))
