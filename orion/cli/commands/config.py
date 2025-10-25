@@ -61,7 +61,27 @@ def handle_config(args: argparse.Namespace, settings: OrionSettings) -> int:
             console.print(f"[bold]Connection URI:[/bold] {settings.neo4j_uri}")
             console.print(f"[bold]Username:[/bold] {settings.neo4j_user}")
             console.print(f"[bold]Password:[/bold] {password}")
-            console.print("\n[dim]Use these credentials to access Neo4j Browser[/dim]\n")
+            console.print(f"\n[dim]Encoded in config:[/dim] {settings.neo4j_password_encoded}")
+            console.print("\n[dim]Use these credentials to access Neo4j Browser[/dim]")
+            
+            # Test the connection
+            console.print("\n[cyan]Testing connection...[/cyan]")
+            try:
+                from neo4j import GraphDatabase
+                driver = GraphDatabase.driver(
+                    settings.neo4j_uri,
+                    auth=(settings.neo4j_user, password),
+                    connection_timeout=5
+                )
+                driver.verify_connectivity()
+                driver.close()
+                console.print("[green]✓ Connection successful![/green]\n")
+            except Exception as e:
+                console.print(f"[red]✗ Connection failed: {e}[/red]")
+                console.print("\n[yellow]Troubleshooting tips:[/yellow]")
+                console.print("  1. Check if Neo4j is running: [bold]orion services neo4j status[/bold]")
+                console.print("  2. Reset password: [bold]orion config reset-password[/bold]")
+                console.print("  3. Restart Neo4j: [bold]orion services neo4j restart[/bold]\n")
             return 0
         except Exception as e:
             console.print(f"[red]Error: {e}[/red]")

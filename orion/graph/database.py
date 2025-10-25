@@ -34,9 +34,20 @@ class Neo4jManager:
         # Use centralized config if credentials not provided
         if uri is None or user is None or password is None:
             config = ConfigManager.get_config()
-            uri = uri or config.neo4j.uri
-            user = user or config.neo4j.user
-            password = password or config.neo4j.password
+            uri = uri if uri is not None else config.neo4j.uri
+            user = user if user is not None else config.neo4j.user
+            # For password, try to get from OrionSettings first, then fall back to env var
+            if password is None:
+                try:
+                    from orion.settings import OrionSettings
+                    settings = OrionSettings.load()
+                    password = settings.get_neo4j_password()
+                except Exception:
+                    # Fall back to environment variable
+                    try:
+                        password = config.neo4j.password
+                    except Exception:
+                        password = "password"  # Ultimate fallback
 
         self.uri = uri
         self.user = user
