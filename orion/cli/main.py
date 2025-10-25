@@ -135,6 +135,11 @@ For more help: orion <command> --help
         "--runtime",
         help="Select runtime backend to prepare (auto or torch; defaults to config)",
     )
+    init_parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Reset configuration and reconfigure password (ignores existing config)",
+    )
 
     # ═══════════════════════════════════════════════════════════
     # CONFIG COMMANDS
@@ -147,6 +152,7 @@ For more help: orion <command> --help
     config_subparsers.add_parser("path", help="Print the configuration file path")
     config_subparsers.add_parser("reset", help="Reset configuration to defaults")
     config_subparsers.add_parser("credentials", help="Show Neo4j credentials")
+    config_subparsers.add_parser("reset-password", help="Reset Neo4j password (interactive)")
 
     config_set_parser = config_subparsers.add_parser("set", help="Update a configuration value")
     config_set_parser.add_argument("key", help="Configuration key (e.g., neo4j.uri)")

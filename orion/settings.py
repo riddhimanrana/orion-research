@@ -20,16 +20,21 @@ class SettingsError(RuntimeError):
 
 
 def _encode_password(password: str) -> str:
-    """Simple obfuscation for password storage (not encryption, just base64)."""
-    return base64.b64encode(password.encode()).decode()
+    """Encode password for storage using base64."""
+    if not password:
+        return ""
+    return base64.b64encode(password.encode('utf-8')).decode('utf-8')
 
 
 def _decode_password(encoded: str) -> str:
-    """Decode obfuscated password."""
+    """Decode password from storage."""
+    if not encoded:
+        return ""
     try:
-        return base64.b64decode(encoded.encode()).decode()
+        return base64.b64decode(encoded.encode('utf-8')).decode('utf-8')
     except Exception:
-        return encoded  # Return as-is if not encoded
+        # If decoding fails, return as-is (might be unencoded legacy password)
+        return encoded
 
 
 def generate_secure_password(length: int = 16) -> str:

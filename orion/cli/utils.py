@@ -100,8 +100,8 @@ def is_container_running(container_name: str) -> bool:
     return output is not None and output != ""
 
 
-def prompt_user(question: str) -> bool:
+def prompt_user(question: str, default: bool = True) -> bool:
     """Prompt the user for a yes/no answer."""
     from rich.prompt import Confirm
 
-    return Confirm.ask(question, default=True)
+    return Confirm.ask(question, default=default)
