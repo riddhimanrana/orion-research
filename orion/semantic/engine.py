@@ -64,17 +64,27 @@ class SemanticEngine:
         """
         self.config = config or SemanticConfig()
         
-        # Initialize components
+        # Get shared model manager
+        from orion.managers.model_manager import ModelManager
+        self.model_manager = ModelManager.get_instance()
+        
+        # Initialize components with shared models
         self.entity_tracker = SemanticEntityTracker(self.config.state_change)
+        
+        # Pass CLIP and FastVLM to description generator
         self.description_generator = TemporalDescriptionGenerator(
-            clip_model=None,  # Will use CLIP from perception if available
-            sample_interval=2.0,  # Sample descriptions every 2 seconds
-            min_samples_per_entity=3,  # At least 3 descriptions per entity
+            clip_model=self.model_manager.clip,  # Use shared CLIP instance
+            vlm_model=self.model_manager.fastvlm,  # Use shared FastVLM instance
+            sample_interval=1.0,  # Sample descriptions every 1 second to increase coverage
+            min_samples_per_entity=2,  # At least 2 descriptions per entity (relaxed)
         )
+        
+        # Pass CLIP to state detector for text embeddings
         self.state_detector = StateChangeDetector(
-            embedding_model=None,  # Will use CLIP embeddings from perception
+            embedding_model=self.model_manager.clip,  # Use shared CLIP instance
             config=self.config.state_change,
         )
+        
         self.scene_assembler = SceneAssembler(self.config.temporal_window)
         self.window_manager = TemporalWindowManager(self.config.temporal_window)
         self.causal_scorer = CausalInfluenceScorer(self.config.causal)
@@ -161,7 +171,10 @@ class SemanticEngine:
         logger.info("\n[4/8] Assembling scenes...")
         step_start = time.time()
         # Create temporal windows first (needed for scenes)
-        windows = self.window_manager.create_windows(state_changes)
+        windows = self.window_manager.create_windows(
+            state_changes,
+            total_duration=perception_result.duration_seconds,
+        )
         scenes = self.scene_assembler.assemble_scenes(windows)
         elapsed = time.time() - step_start
         logger.info(f"  ✓ Assembled {len(scenes)} scenes from {len(windows)} windows ({elapsed:.2f}s)")

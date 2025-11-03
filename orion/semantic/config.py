@@ -28,8 +28,13 @@ class StateChangeConfig:
     """State change detection configuration"""
     
     # Detection threshold
-    embedding_similarity_threshold: float = 0.85
-    """Cosine similarity threshold for detecting state changes (0-1)"""
+    embedding_similarity_threshold: float = 0.70
+    """Normalized similarity threshold for detecting state changes (0-1).
+    Values below this threshold indicate a state change.
+    Note: Cosine similarity is normalized from [-1,1] to [0,1] internally.
+    Default 0.70 means descriptions must be <70% similar (in [0,1] space) to flag a change.
+    Lower values = stricter detection (only flag big changes).
+    Higher values = more sensitive (flag smaller differences)."""
     
     # Embedding model
     embedding_model: Literal["clip", "sentence-transformer"] = "clip"
@@ -38,6 +43,10 @@ class StateChangeConfig:
     # Temporal constraints
     min_time_between_changes: float = 0.5
     """Minimum seconds between consecutive state changes"""
+
+    # Motion sensitivity
+    motion_displacement_threshold: float = 40.0
+    """Minimum centroid displacement (in pixels) to classify a motion change"""
     
     def __post_init__(self):
         """Validate state change config"""
@@ -58,6 +67,12 @@ class StateChangeConfig:
                 f"min_time_between_changes must be >= 0, got {self.min_time_between_changes}"
             )
         
+        if self.motion_displacement_threshold < 0:
+            raise ValueError(
+                "motion_displacement_threshold must be >= 0, "
+                f"got {self.motion_displacement_threshold}"
+            )
+
         logger.debug(
             f"StateChangeConfig validated: threshold={self.embedding_similarity_threshold}, "
             f"model={self.embedding_model}"
@@ -125,7 +140,7 @@ class EventCompositionConfig:
     max_tokens: int = 200
     """Maximum tokens per event description"""
     
-    timeout_seconds: float = 30.0
+    timeout_seconds: float = 120.0
     """LLM request timeout"""
     
     # Event filtering
@@ -428,7 +443,7 @@ def get_fast_semantic_config() -> SemanticConfig:
     """
     return SemanticConfig(
         state_change=StateChangeConfig(
-            embedding_similarity_threshold=0.80,
+            embedding_similarity_threshold=0.65,
             min_time_between_changes=0.3,
         ),
         temporal_window=TemporalWindowConfig(
@@ -457,7 +472,7 @@ def get_balanced_semantic_config() -> SemanticConfig:
     """
     return SemanticConfig(
         state_change=StateChangeConfig(
-            embedding_similarity_threshold=0.85,
+            embedding_similarity_threshold=0.70,
             min_time_between_changes=0.5,
         ),
         temporal_window=TemporalWindowConfig(
@@ -486,7 +501,7 @@ def get_accurate_semantic_config() -> SemanticConfig:
     """
     return SemanticConfig(
         state_change=StateChangeConfig(
-            embedding_similarity_threshold=0.90,
+            embedding_similarity_threshold=0.75,
             min_time_between_changes=1.0,
         ),
         temporal_window=TemporalWindowConfig(

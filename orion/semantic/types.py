@@ -58,6 +58,10 @@ class StateChange:
     # Similarity metrics
     similarity_score: float  # 0-1, cosine similarity
     change_magnitude: float = field(init=False)  # 1.0 - similarity
+
+    # Classification
+    change_type: "ChangeType" = field(default=ChangeType.UNKNOWN)
+    is_fallback: bool = False
     
     # Spatial information
     centroid_before: Optional[Tuple[float, float]] = None
@@ -85,6 +89,15 @@ class StateChange:
         
         if self.similarity_score < 0 or self.similarity_score > 1:
             raise ValueError(f"similarity_score must be in [0, 1], got {self.similarity_score}")
+
+        # Ensure change_type is a ChangeType enum for downstream code
+        if not isinstance(self.change_type, ChangeType):
+            try:
+                self.change_type = ChangeType(self.change_type)  # type: ignore[arg-type]
+            except Exception as exc:  # pragma: no cover - defensive casting
+                raise ValueError(
+                    f"change_type must be a ChangeType enum value, got {self.change_type}"
+                ) from exc
     
     def to_dict(self) -> dict:
         """Convert to serializable dictionary"""
@@ -100,6 +113,8 @@ class StateChange:
             "change_magnitude": float(self.change_magnitude),
             "displacement": float(self.displacement),
             "velocity": float(self.velocity),
+            "change_type": self.change_type.value,
+            "is_fallback": self.is_fallback,
         }
 
 
@@ -121,12 +136,15 @@ class TemporalWindow:
     causal_links: List["CausalLink"] = field(default_factory=list)
     average_change_magnitude: float = 0.0
     significance_score: float = 0.0
+    fallback_generated: bool = False
     
     def add_state_change(self, change: StateChange) -> None:
         """Add state change and track active entity"""
         self.state_changes.append(change)
         self.active_entities.add(change.entity_id)
         self.end_time = max(self.end_time, change.timestamp_after)
+        if change.is_fallback:
+            self.fallback_generated = True
     
     @property
     def duration(self) -> float:
@@ -136,6 +154,9 @@ class TemporalWindow:
     @property
     def is_significant(self) -> bool:
         """Window has enough changes to warrant composition"""
+        if self.fallback_generated:
+            return len(self.state_changes) >= 1
+
         MIN_CHANGES = 2
         return len(self.state_changes) >= MIN_CHANGES and self.significance_score >= 0.5
     

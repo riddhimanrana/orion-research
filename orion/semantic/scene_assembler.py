@@ -63,7 +63,16 @@ class SceneAssembler:
         
         if not windows:
             logger.warning("No windows to assemble into scenes")
-            return []
+            # Create a default scene as fallback
+            logger.info("  Creating default scene as fallback...")
+            default_scene = SceneSegment(
+                start_time=0.0,
+                end_time=10.0,  # Default 10 second scene
+                scene_id="scene_default",
+            )
+            logger.info("  ✓ Created 1 default scene")
+            logger.info("="*80 + "\n")
+            return [default_scene]
         
         logger.info(f"Assembling {len(windows)} temporal windows into scenes...")
         
@@ -164,10 +173,14 @@ class SceneAssembler:
             reverse=True
         )[:5]
         
+        # Create LocationProfile with proper fields
         return LocationProfile(
-            scene_type=scene_type,
-            dominant_entities={e[0] for e in dominant_entities},
-            confidence_score=1.0 / (1.0 + len(scene.temporal_windows)),
+            location_id=f"location_{scene.start_time}",
+            signature=f"{scene_type}|{len(dominant_entities)}entities",
+            label=scene_type.capitalize(),
+            object_classes=[e[0] for e in dominant_entities],
+            zone_ids=[],
+            scene_ids=[],
         )
     
     def get_scene_at_time(self, timestamp: float) -> List[SceneSegment]:

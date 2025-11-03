@@ -170,7 +170,9 @@ class CLIPEmbedder:
             images=image,
             text=text,
             return_tensors="pt",
-            padding=True
+            padding=True,
+            truncation=True,
+            max_length=77,
         )
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
         
@@ -205,7 +207,9 @@ class CLIPEmbedder:
         inputs = self.processor(
             text=text,
             return_tensors="pt",
-            padding=True
+            padding=True,
+            truncation=True,
+            max_length=77,
         )
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
         
