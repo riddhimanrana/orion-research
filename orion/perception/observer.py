@@ -26,6 +26,14 @@ from orion.perception.config import DetectionConfig
 
 logger = logging.getLogger(__name__)
 
+# Optional 3D perception imports
+try:
+    from orion.perception.perception_3d import Perception3DEngine
+    PERCEPTION_3D_AVAILABLE = True
+except ImportError:
+    PERCEPTION_3D_AVAILABLE = False
+    logger.warning("3D perception not available (Perception3DEngine import failed)")
+
 
 class FrameObserver:
     """
@@ -41,6 +49,9 @@ class FrameObserver:
         config: DetectionConfig,
         target_fps: float = 4.0,
         show_progress: bool = True,
+        enable_3d: bool = False,
+        depth_model: str = "midas",
+        enable_occlusion: bool = False,
     ):
         """
         Initialize observer.
@@ -50,15 +61,36 @@ class FrameObserver:
             config: Detection configuration
             target_fps: Target frames per second for processing
             show_progress: Show progress bar
+            enable_3d: Enable 3D perception (depth, occlusion)
+            depth_model: Depth model to use ("zoe" or "midas")
+            enable_occlusion: Enable occlusion detection (requires enable_3d=True)
         """
         self.yolo = yolo_model
         self.config = config
         self.target_fps = target_fps
         self.show_progress = show_progress
         
+        # Initialize 3D perception engine if requested
+        self.perception_engine = None
+        if enable_3d and PERCEPTION_3D_AVAILABLE:
+            try:
+                self.perception_engine = Perception3DEngine(
+                    enable_depth=True,
+                    enable_hands=False,  # Hand tracking disabled (future work with HOT3D)
+                    enable_occlusion=enable_occlusion,
+                    depth_model=depth_model,
+                )
+                logger.info(f"3D perception enabled: depth={depth_model}, occlusion={enable_occlusion}")
+            except Exception as e:
+                logger.warning(f"Failed to initialize 3D perception: {e}")
+                self.perception_engine = None
+        elif enable_3d:
+            logger.warning("3D perception requested but not available")
+        
         logger.debug(
             f"FrameObserver initialized: model={config.model}, "
-            f"conf_thresh={config.confidence_threshold}, target_fps={target_fps}"
+            f"conf_thresh={config.confidence_threshold}, target_fps={target_fps}, "
+            f"3d_enabled={self.perception_engine is not None}"
         )
     
     def process_video(self, video_path: str) -> List[Dict]:
@@ -173,6 +205,43 @@ class FrameObserver:
             verbose=False,
         )
         
+        # Run 3D perception if enabled
+        perception_3d = None
+        if self.perception_engine is not None:
+            # Convert YOLO results to format expected by PerceptionEngine
+            yolo_detections = []
+            for result in results:
+                boxes = result.boxes
+                for i in range(len(boxes)):
+                    bbox_xyxy = boxes.xyxy[i].cpu().numpy().astype(int).tolist()
+                    x1, y1, x2, y2 = bbox_xyxy
+                    
+                    # Filter by minimum size
+                    width = x2 - x1
+                    height = y2 - y1
+                    if width < self.config.min_object_size or height < self.config.min_object_size:
+                        continue
+                    
+                    confidence = float(boxes.conf[i])
+                    class_id = int(boxes.cls[i])
+                    class_name = result.names[class_id]
+                    
+                    yolo_detections.append({
+                        'entity_id': f'det_{frame_number}_{i}',
+                        'class': class_name,
+                        'confidence': confidence,
+                        'bbox': (x1, y1, x2, y2),
+                    })
+            
+            # Process with 3D perception
+            try:
+                perception_3d = self.perception_engine.process_frame(
+                    frame, yolo_detections, frame_number, timestamp
+                )
+            except Exception as e:
+                logger.warning(f"3D perception failed on frame {frame_number}: {e}")
+                perception_3d = None
+        
         detections = []
         
         for result in results:
@@ -220,6 +289,26 @@ class FrameObserver:
                     "frame_height": frame_height,
                     "spatial_zone": spatial_zone,
                 }
+                
+                # Add 3D information if available
+                if perception_3d is not None and perception_3d.entities:
+                    # Find matching entity by class and bbox proximity
+                    for entity_3d in perception_3d.entities:
+                        if entity_3d.class_label == class_name:
+                            # Check if bboxes are close (simple matching)
+                            e_x1, e_y1, e_x2, e_y2 = entity_3d.bbox_2d_px
+                            if abs(e_x1 - x1) < 20 and abs(e_y1 - y1) < 20:
+                                detection["depth_mm"] = entity_3d.depth_mean_mm
+                                detection["centroid_3d_mm"] = entity_3d.centroid_3d_mm
+                                detection["visibility_state"] = entity_3d.visibility_state.value
+                                detection["occlusion_ratio"] = entity_3d.occlusion_ratio
+                                detection["occluded_by"] = entity_3d.occluded_by
+                                break
+                
+                # Add hand information if available
+                if perception_3d is not None and perception_3d.hands:
+                    detection["hands_detected"] = len(perception_3d.hands)
+                    detection["hands"] = [h.to_dict() for h in perception_3d.hands]
                 
                 detections.append(detection)
         

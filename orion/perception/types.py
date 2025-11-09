@@ -13,7 +13,7 @@ Date: October 2025
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Any
 
 import numpy as np
 
@@ -363,3 +363,149 @@ class PerceptionResult:
         """Compute statistics"""
         self.total_detections = len(self.raw_observations)
         self.unique_entities = len(self.entities)
+
+
+# ============================================================================
+# Phase 1: 3D Perception Types (Depth, Hands, 3D Coordinates)
+# ============================================================================
+
+class HandPose(Enum):
+    """Hand pose classification."""
+    OPEN = "open"
+    CLOSED = "closed"
+    PINCH = "pinch"
+    POINT = "point"
+    UNKNOWN = "unknown"
+
+
+class VisibilityState(Enum):
+    """Entity visibility state for occlusion tracking."""
+    FULLY_VISIBLE = "fully_visible"
+    PARTIALLY_OCCLUDED = "partially_occluded"
+    HAND_OCCLUDED = "hand_occluded"
+    OFF_SCREEN = "off_screen"
+    UNKNOWN = "unknown"
+
+
+@dataclass
+class CameraIntrinsics:
+    """Camera calibration parameters for 3D backprojection."""
+    
+    fx: float  # focal length x (pixels)
+    fy: float  # focal length y (pixels)
+    cx: float  # principal point x (pixels)
+    cy: float  # principal point y (pixels)
+    width: int  # image width
+    height: int  # image height
+    
+    @classmethod
+    def auto_estimate(cls, width: int, height: int) -> "CameraIntrinsics":
+        """Auto-estimate camera intrinsics for typical smartphone/egocentric cameras."""
+        fov_deg = 65.0  # typical phone FOV
+        fov_rad = fov_deg * np.pi / 180.0
+        fx = width / (2.0 * np.tan(fov_rad / 2.0))
+        fy = fx  # square pixels
+        cx = width / 2.0
+        cy = height / 2.0
+        return cls(fx, fy, cx, cy, width, height)
+
+
+@dataclass
+class Hand:
+    """Hand detection with 3D landmarks from MediaPipe."""
+    
+    id: str
+    landmarks_2d: List[Tuple[float, float]]  # 21 joints normalized
+    landmarks_3d: List[Tuple[float, float, float]]  # 21 joints in mm
+    palm_center_3d: Tuple[float, float, float]  # (X, Y, Z) in mm
+    pose: HandPose
+    confidence: float
+    handedness: str  # "Left" or "Right"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "id": self.id,
+            "landmarks_2d": self.landmarks_2d,
+            "landmarks_3d": self.landmarks_3d,
+            "palm_center_3d": self.palm_center_3d,
+            "pose": self.pose.value,
+            "confidence": self.confidence,
+            "handedness": self.handedness,
+        }
+
+
+@dataclass
+class EntityState3D:
+    """Enhanced entity state with 3D information from depth estimation."""
+    
+    entity_id: str
+    frame_number: int
+    timestamp: float
+    class_label: str
+    class_confidence: float
+    bbox_2d_px: Tuple[int, int, int, int]  # (x1, y1, x2, y2)
+    centroid_2d_px: Tuple[float, float]
+    
+    # 3D information from depth
+    centroid_3d_mm: Optional[Tuple[float, float, float]] = None  # (X, Y, Z)
+    bbox_3d_mm: Optional[Tuple[Tuple[float, float, float], Tuple[float, float, float]]] = None
+    depth_mean_mm: Optional[float] = None
+    depth_variance_mm2: Optional[float] = None
+    
+    # Visibility & occlusion
+    visibility_state: VisibilityState = VisibilityState.UNKNOWN
+    occlusion_ratio: float = 0.0  # 0=fully visible, 1=fully occluded
+    occluded_by: Optional[str] = None  # "hand" or entity_id
+    
+    # Metadata
+    embedding: Optional[np.ndarray] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "entity_id": self.entity_id,
+            "frame_number": self.frame_number,
+            "timestamp": self.timestamp,
+            "class_label": self.class_label,
+            "class_confidence": self.class_confidence,
+            "bbox_2d_px": self.bbox_2d_px,
+            "centroid_2d_px": self.centroid_2d_px,
+            "centroid_3d_mm": self.centroid_3d_mm,
+            "bbox_3d_mm": self.bbox_3d_mm,
+            "depth_mean_mm": self.depth_mean_mm,
+            "depth_variance_mm2": self.depth_variance_mm2,
+            "visibility_state": self.visibility_state.value,
+            "occlusion_ratio": self.occlusion_ratio,
+            "occluded_by": self.occluded_by,
+            "metadata": self.metadata,
+        }
+
+
+@dataclass
+class OcclusionInfo:
+    """Occlusion information for an entity."""
+    
+    entity_id: str
+    occlusion_ratio: float
+    visibility_state: VisibilityState
+    occluded_by: Optional[str] = None
+
+
+@dataclass
+class Perception3DResult:
+    """Phase 1 3D perception output (depth, hands, 3D entities)."""
+    
+    frame_number: int
+    timestamp: float
+    
+    # 3D perception data
+    entities: List[EntityState3D]
+    hands: List[Hand]
+    depth_map: Optional[np.ndarray] = None
+    camera_intrinsics: Optional[CameraIntrinsics] = None
+    
+    # Performance
+    processing_time_ms: float = 0.0
+    metadata: Dict[str, Any] = field(default_factory=dict)

@@ -27,6 +27,10 @@ __pycache__/
 
 /dataset
 
+/test_results/
+
+/tests/results/
+
 
 # Distribution / packaging
 .Python

@@ -110,6 +110,16 @@ class VideoPipeline:
         else:  # balanced
             perception_config = get_balanced_config()
         
+        # Override 3D perception settings from CLI
+        if "enable_3d" in perception_dict:
+            perception_config.enable_3d = perception_dict["enable_3d"]
+        if "depth_model" in perception_dict and perception_dict["depth_model"]:
+            perception_config.depth_model = perception_dict["depth_model"]
+        if "enable_hands" in perception_dict:
+            perception_config.enable_hands = perception_dict["enable_hands"]
+        if "enable_occlusion" in perception_dict:
+            perception_config.enable_occlusion = perception_dict["enable_occlusion"]
+        
         # Extract semantic config using preset
         semantic_dict = config_dict.get("semantic", {})
         semantic_mode = semantic_dict.get("mode", "balanced")

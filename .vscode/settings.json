@@ -1,0 +1,12 @@
+{
+  "terminal.integrated.env.osx": {
+    "CONDA_AUTO_ACTIVATE": "orion"
+  },
+  "terminal.integrated.shellArgs.osx": [
+    "-l",
+    "-c",
+    "conda activate orion 2>/dev/null || true; exec zsh"
+  ],
+  "python.terminal.activateEnvironment": true,
+  "python.defaultInterpreterPath": "${env:HOME}/miniconda3/envs/orion/bin/python"
+}

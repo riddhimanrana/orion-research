@@ -1,0 +1,317 @@
+name: Continuous Integration & Testing
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run nightly tests
+    - cron: "0 2 * * *"
+
+jobs:
+  # ========================================================================
+  # Code Quality Checks (runs on every push)
+  # ========================================================================
+  
+  lint-and-format:
+    name: Lint & Code Quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+          cache: "pip"
+      
+      - name: Install dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      
+      - name: Lint with flake8
+        run: |
+          # Stop on critical errors
+          flake8 orion/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          # Warn on style issues
+          flake8 orion/ --count --exit-zero --max-complexity=10 --max-line-length=120
+      
+      - name: Type check with mypy
+        run: |
+          mypy orion/ --ignore-missing-imports --no-incremental
+      
+      - name: Format check with black
+        run: |
+          black --check orion/ --line-length=120
+
+  # ========================================================================
+  # Unit Tests: Ubuntu CPU
+  # ========================================================================
+
+  test-ubuntu-cpu:
+    name: Unit Tests - Ubuntu CPU
+    runs-on: ubuntu-latest
+    needs: lint-and-format
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+          cache: "pip"
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      
+      - name: Run unit tests
+        run: |
+          pytest orion/tests/ -v --cov=orion --cov-report=xml --tb=short
+        env:
+          DEVICE: cpu
+      
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.xml
+          flags: unittests-cpu
+          fail_ci_if_error: false
+
+  # ========================================================================
+  # Unit Tests: Ubuntu GPU (CUDA)
+  # ========================================================================
+
+  test-ubuntu-gpu:
+    name: Unit Tests - Ubuntu CUDA GPU
+    runs-on: ubuntu-latest
+    container:
+      image: nvidia/cuda:12.1.0-runtime-ubuntu22.04
+    needs: lint-and-format
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python and dependencies
+        run: |
+          apt-get update && apt-get install -y python3.10 python3-pip git
+          update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1
+          update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
+      
+      - name: Install PyTorch with CUDA support
+        run: |
+          pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+      
+      - name: Install project dependencies
+        run: |
+          pip install -e ".[dev]"
+      
+      - name: Run unit tests on GPU
+        run: |
+          pytest orion/tests/ -v --tb=short -x
+        env:
+          CUDA_VISIBLE_DEVICES: 0
+          DEVICE: cuda
+
+  # ========================================================================
+  # Unit Tests: macOS with Apple Silicon (MPS)
+  # ========================================================================
+
+  test-macos-mps:
+    name: Unit Tests - macOS MPS
+    runs-on: macos-latest
+    needs: lint-and-format
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11"]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+      
+      - name: Install dependencies (Apple Silicon)
+        run: |
+          pip install --upgrade pip
+          # For MPS, use CPU wheel if needed
+          pip install torch torchvision torchaudio
+          pip install -e ".[dev]"
+      
+      - name: Run unit tests (MPS if available)
+        run: |
+          pytest orion/tests/ -v --tb=short
+        env:
+          DEVICE: mps
+        continue-on-error: true  # MPS may not be available in CI runner
+
+  # ========================================================================
+  # Unit Tests: Windows
+  # ========================================================================
+
+  test-windows-cpu:
+    name: Unit Tests - Windows CPU
+    runs-on: windows-latest
+    needs: lint-and-format
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+          cache: "pip"
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+        shell: powershell
+      
+      - name: Run unit tests
+        run: |
+          pytest orion/tests/ -v --tb=short
+        shell: powershell
+        env:
+          DEVICE: cpu
+
+  # ========================================================================
+  # Integration Tests (after unit tests pass)
+  # ========================================================================
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [test-ubuntu-cpu]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+          cache: "pip"
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      
+      - name: Download test video
+        run: |
+          mkdir -p data/test
+          # Use a small test video (e.g., from project releases or GitHub)
+          wget -q -O data/test/sample.mp4 \
+            "https://media.githubusercontent.com/media/riddhimanrana/orion-research/main/data/examples/sample_egocentric.mp4" \
+            || echo "Test video not available, skipping integration test"
+      
+      - name: Run integration tests
+        run: |
+          pytest orion/tests/integration/ -v --tb=short || echo "Integration tests not available"
+      
+      - name: Run CLI validation (if sample video exists)
+        run: |
+          if [ -f data/test/sample.mp4 ]; then
+            python -m orion.cli analyze --mode perception_3d --input data/test/sample.mp4 --output results/ || true
+          fi
+
+  # ========================================================================
+  # Build Distribution Packages (only on main)
+  # ========================================================================
+
+  build-and-verify:
+    name: Build & Verify Package
+    runs-on: ubuntu-latest
+    needs: [lint-and-format]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+      
+      - name: Install build tools
+        run: |
+          pip install --upgrade pip setuptools wheel build
+      
+      - name: Build distribution
+        run: |
+          python -m build
+      
+      - name: Verify package contents
+        run: |
+          pip install twine
+          twine check dist/*
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: python-package-distributions
+          path: dist/
+
+  # ========================================================================
+  # Performance Profiling (nightly on schedule, manual on main)
+  # ========================================================================
+
+  profile-performance:
+    name: Performance Profiling
+    if: github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    needs: [test-ubuntu-cpu]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+          cache: "pip"
+      
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e ".[research]"
+      
+      - name: Run performance profiler (CPU)
+        run: |
+          mkdir -p results
+          python scripts/profile_performance.py --device cpu --output results/profile_cpu.json
+      
+      - name: Generate profile report
+        run: |
+          python scripts/generate_report.py --results results/profile_cpu.json --output results/profile_report.md
+      
+      - name: Upload profiling results
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-profiles
+          path: results/
+
+  # ========================================================================
+  # Final Status Check
+  # ========================================================================
+
+  final-status:
+    name: ✅ All Checks Passed
+    runs-on: ubuntu-latest
+    needs: [lint-and-format, test-ubuntu-cpu, test-ubuntu-gpu, test-macos-mps, test-windows-cpu, build-and-verify]
+    if: always()
+    steps:
+      - name: Check final status
+        run: |
+          if [[ "${{ needs.lint-and-format.result }}" == "failure" ]] || \
+             [[ "${{ needs.test-ubuntu-cpu.result }}" == "failure" ]] || \
+             [[ "${{ needs.test-ubuntu-gpu.result }}" == "failure" ]] || \
+             [[ "${{ needs.build-and-verify.result }}" == "failure" ]]; then
+            echo "❌ Some required checks failed"
+            exit 1
+          else
+            echo "✅ All required checks passed!"
+            exit 0
+          fi

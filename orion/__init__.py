@@ -22,7 +22,8 @@ from orion.perception import (
     PerceptionResult,
 )
 
-from orion.perception.engine import PerceptionEngine, run_perception
+from orion.perception.engine import PerceptionEngine
+from orion.perception.perception_3d import Perception3DEngine
 
 # Semantic module exports
 from orion.semantic import (
@@ -53,8 +54,8 @@ __all__ = [
     "Observation",
     "PerceptionEntity",
     "PerceptionResult",
+    "Perception3DEngine",
     "PerceptionEngine",
-    "run_perception",
     # Semantic
     "SemanticConfig",
     "ChangeType",

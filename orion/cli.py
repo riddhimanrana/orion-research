@@ -761,6 +761,25 @@ For more help: orion <command> --help
     analyze_parser.add_argument(
         "--keep-db", action="store_true", help="Keep existing Neo4j data"
     )
+    
+    # 3D Perception options
+    analyze_parser.add_argument(
+        "--enable-3d", action="store_true", 
+        help="Enable 3D perception (depth estimation, 3D coordinates, occlusion detection)"
+    )
+    analyze_parser.add_argument(
+        "--depth-model", choices=["midas", "zoe"], default="midas",
+        help="Depth estimation model (midas=fast, zoe=accurate, default: midas)"
+    )
+    analyze_parser.add_argument(
+        "--enable-hands", action="store_true",
+        help="Enable hand tracking with MediaPipe (requires --enable-3d)"
+    )
+    analyze_parser.add_argument(
+        "--enable-occlusion", action="store_true",
+        help="Enable occlusion detection (requires --enable-3d)"
+    )
+    
     analyze_parser.add_argument(
         "-o", "--output", default="data/testing", help="Output directory"
     )
@@ -1169,6 +1188,15 @@ def main(argv: list[str] | None = None) -> None:
             params_table.add_row("Graph Build", "[red]Skipped[/red]")
         if args.keep_db:
             params_table.add_row("Database", "[yellow]Keeping existing data[/yellow]")
+        if args.enable_3d:
+            depth_model_str = args.depth_model.upper()
+            features = []
+            if args.enable_hands:
+                features.append("hands")
+            if args.enable_occlusion:
+                features.append("occlusion")
+            features_str = ", ".join(features) if features else "depth only"
+            params_table.add_row("3D Perception", f"[green]Enabled[/green] ({depth_model_str}, {features_str})")
         
         console.print("\n")
         console.print(Panel(params_table, title="[bold]Analysis Configuration[/bold]", border_style="cyan"))
@@ -1177,7 +1205,13 @@ def main(argv: list[str] | None = None) -> None:
         # Create config for new VideoPipeline
         pipeline_config = {
             "video_path": args.video,
-            "perception": {"mode": config},
+            "perception": {
+                "mode": config,
+                "enable_3d": args.enable_3d,
+                "depth_model": args.depth_model if args.enable_3d else None,
+                "enable_hands": args.enable_hands if args.enable_3d else False,
+                "enable_occlusion": args.enable_occlusion if args.enable_3d else False,
+            },
             "semantic": {"mode": config},
             "neo4j": {
                 "uri": neo4j_uri,

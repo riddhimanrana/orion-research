@@ -202,14 +202,56 @@ class PerceptionConfig:
     use_scene_detection: bool = False
     """Enable intelligent scene change detection for frame sampling"""
     
+    # 3D Perception settings
+    enable_3d: bool = False
+    """Enable 3D perception (depth, 3D coordinates, occlusion)"""
+    
+    depth_model: Literal["midas", "zoe"] = "midas"
+    """Depth estimation model (midas=fast, zoe=accurate)"""
+    
+    # TODO: Hand tracking (future implementation with HOT3D dataset)
+    # enable_hands: bool = False
+    # """Enable hand tracking (requires HOT3D-trained model, not yet implemented)"""
+    
+    enable_occlusion: bool = False
+    """Enable occlusion detection (requires enable_3d=True)"""
+    
+    # Phase 2: Tracking settings
+    enable_tracking: bool = False
+    """Enable temporal entity tracking with Bayesian beliefs"""
+    
+    tracking_max_distance_pixels: float = 150.0
+    """Maximum 2D distance for track association (pixels)"""
+    
+    tracking_max_distance_3d_mm: float = 1500.0
+    """Maximum 3D distance for track association (millimeters)"""
+    
+    tracking_ttl_frames: int = 30
+    """Frames before declaring entity disappeared"""
+    
+    tracking_reid_window_frames: int = 90
+    """Window for attempting re-identification after disappearance"""
+    
+    tracking_class_belief_lr: float = 0.3
+    """Learning rate for Bayesian class belief updates"""
+    
     def __post_init__(self):
         """Validate perception config"""
         if self.target_fps <= 0:
             raise ValueError(f"target_fps must be > 0, got {self.target_fps}")
         
+        # Validate 3D perception dependencies
+        if self.enable_occlusion and not self.enable_3d:
+            logger.warning(
+                "enable_occlusion set but enable_3d=False. "
+                "Setting enable_3d=True automatically."
+            )
+            self.enable_3d = True
+        
         logger.debug(
             f"PerceptionConfig validated: target_fps={self.target_fps}, "
-            f"scene_detection={self.use_scene_detection}"
+            f"scene_detection={self.use_scene_detection}, "
+            f"3d_enabled={self.enable_3d}"
         )
 
 

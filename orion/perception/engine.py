@@ -25,6 +25,14 @@ from orion.perception.embedder import VisualEmbedder
 from orion.perception.tracker import EntityTracker
 from orion.perception.describer import EntityDescriber
 
+# Phase 2: Tracking imports
+try:
+    from orion.perception.tracking import EntityTracker3D, TrackingConfig, BayesianEntityBelief
+    TRACKING_AVAILABLE = True
+except ImportError:
+    TRACKING_AVAILABLE = False
+    logger.warning("Phase 2 tracking not available (tracking.py not found)")
+
 from orion.managers.model_manager import ModelManager
 
 logger = logging.getLogger(__name__)
@@ -63,6 +71,13 @@ class PerceptionEngine:
         self.embedder: Optional[VisualEmbedder] = None
         self.tracker: Optional[EntityTracker] = None
         self.describer: Optional[EntityDescriber] = None
+        
+        # Phase 2: Tracking component
+        self.tracker_3d: Optional[EntityTracker3D] = None
+        if self.config.enable_tracking and TRACKING_AVAILABLE:
+            logger.info("  Tracking: Enabled (Phase 2)")
+        elif self.config.enable_tracking and not TRACKING_AVAILABLE:
+            logger.warning("  Tracking: Requested but not available!")
         
         logger.info("PerceptionEngine initialized")
         logger.info(f"  Detection: {self.config.detection.model}")
@@ -153,6 +168,9 @@ class PerceptionEngine:
             config=self.config.detection,
             target_fps=self.config.target_fps,
             show_progress=True,
+            enable_3d=self.config.enable_3d,
+            depth_model=self.config.depth_model,
+            enable_occlusion=self.config.enable_occlusion,
         )
         
         self.embedder = VisualEmbedder(
@@ -168,6 +186,25 @@ class PerceptionEngine:
             vlm_model=vlm,
             config=self.config.description,
         )
+        
+        # Phase 2: Initialize tracking if enabled
+        if self.config.enable_tracking and TRACKING_AVAILABLE:
+            # Get YOLO class names from model
+            yolo_classes = list(yolo.names.values()) if hasattr(yolo, 'names') else []
+            
+            tracking_config = TrackingConfig(
+                max_distance_pixels=self.config.tracking_max_distance_pixels,
+                max_distance_3d_mm=self.config.tracking_max_distance_3d_mm,
+                ttl_frames=self.config.tracking_ttl_frames,
+                reid_window_frames=self.config.tracking_reid_window_frames,
+                class_belief_lr=self.config.tracking_class_belief_lr,
+            )
+            
+            self.tracker_3d = EntityTracker3D(
+                config=tracking_config,
+                yolo_classes=yolo_classes
+            )
+            logger.info("  ✓ EntityTracker3D initialized (Phase 2)")
         
         logger.info("✓ All components initialized\n")
     

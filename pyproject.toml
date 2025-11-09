@@ -31,19 +31,94 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Development: testing, linting, code quality
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
+    "pytest-xdist>=3.3.0",
     "black>=24.8.0",
     "isort>=5.12.0",
     "flake8>=6.0.0",
     "mypy>=1.0.0",
     "pre-commit>=3.0.0",
 ]
+
+# Research: benchmarking, visualization, notebooks
+research = [
+    "jupyter>=1.0.0",
+    "jupyterlab>=4.0.0",
+    "matplotlib>=3.8.0",
+    "seaborn>=0.12.0",
+    "pandas>=2.0.0",
+    "scipy>=1.11.0",
+]
+
+# Perception: depth models, hand tracking, visual processing
+perception = [
+    "mediapipe>=0.10.0",
+    "timm>=0.9.0",
+    "scikit-image>=0.21.0",
+]
+
+# QA & NLP: question parsing, LLM inference
+qa = [
+    "llama-cpp-python>=0.2.0",  # Local LLM inference
+]
+
+# Video: ffmpeg integration, video I/O
+video = [
+    "ffmpeg-python>=0.2.1",
+    "av>=10.0.0",
+]
+
+# Database: optional graph database for causal queries
+memgraph = [
+    "pymgclient>=0.2.0",
+]
+
+# Profiling: performance analysis
+profiling = [
+    "py-spy>=0.3.14",
+    "memory-profiler>=0.61.0",
+]
+
+# Documentation: API docs
 docs = [
     "sphinx>=5.0.0",
     "sphinx-rtd-theme>=1.2.0",
     "myst-parser>=2.0.0",
+    "pdoc>=14.0.0",
+]
+
+# All optional dependencies
+all = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-xdist>=3.3.0",
+    "black>=24.8.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+    "pre-commit>=3.0.0",
+    "jupyter>=1.0.0",
+    "jupyterlab>=4.0.0",
+    "matplotlib>=3.8.0",
+    "seaborn>=0.12.0",
+    "pandas>=2.0.0",
+    "scipy>=1.11.0",
+    "mediapipe>=0.10.0",
+    "timm>=0.9.0",
+    "scikit-image>=0.21.0",
+    "llama-cpp-python>=0.2.0",
+    "ffmpeg-python>=0.2.1",
+    "av>=10.0.0",
+    "pymgclient>=0.2.0",
+    "py-spy>=0.3.14",
+    "memory-profiler>=0.61.0",
+    "sphinx>=5.0.0",
+    "sphinx-rtd-theme>=1.2.0",
+    "myst-parser>=2.0.0",
+    "pdoc>=14.0.0",
 ]
 
 [project.urls]
