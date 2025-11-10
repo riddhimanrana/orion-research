@@ -64,6 +64,7 @@ class ModelManager:
             try:
                 from .asset_manager import AssetManager
                 self.asset_manager = AssetManager()
+                self.models_dir = self.asset_manager.cache_dir  # Fallback path
             except ImportError:
                 # Fallback: try from parent directory
                 try:
@@ -75,6 +76,7 @@ class ModelManager:
                         sys.path.insert(0, str(parent_dir))
                     from managers.asset_manager import AssetManager
                     self.asset_manager = AssetManager()
+                    self.models_dir = self.asset_manager.cache_dir
                 except ImportError:
                     logger.warning("Could not import AssetManager, using default paths")
                     self.asset_manager = None
@@ -87,6 +89,9 @@ class ModelManager:
         self._yolo: Optional[Any] = None
         self._clip: Optional[Any] = None
         self._fastvlm: Optional[Any] = None
+        
+        # Model configuration
+        self.yolo_model_name = "yolo11m"  # Default to medium (balanced)
         
         # LLM for contextual understanding
         self._ollama_client: Optional[Any] = None
@@ -135,33 +140,44 @@ class ModelManager:
         return self._yolo
     
     def _load_yolo(self) -> Any:
-        """Load YOLO11x model"""
+        """Load YOLO11 model (configurable variant)"""
         try:
             from ultralytics import YOLO
             
-            logger.info("Loading YOLO11x detector...")
+            model_name = self.yolo_model_name  # yolo11n, yolo11s, yolo11m, or yolo11x
+            logger.info(f"Loading {model_name.upper()} detector...")
             
-            # Get model path from asset manager
+            # Try asset manager first
             if self.asset_manager:
-                asset_dir = self.asset_manager.ensure_asset("yolo11x")
-                model_path = asset_dir / "yolo11x.pt"
+                try:
+                    asset_dir = self.asset_manager.ensure_asset(model_name)
+                    model_path = asset_dir / f"{model_name}.pt"
+                except:
+                    # Fall back to default path
+                    model_path = self.models_dir / "weights" / f"{model_name}.pt"
             else:
-                model_path = self.models_dir / "weights" / "yolo11x.pt"
+                model_path = self.models_dir / "weights" / f"{model_name}.pt"
             
+            # If not found locally, ultralytics will auto-download
             if not model_path.exists():
-                raise FileNotFoundError(
-                    f"YOLO11x weights not found at {model_path}. "
-                    "Run: python scripts/init.py"
-                )
+                logger.warning(f"{model_name}.pt not found at {model_path}, will auto-download")
+                model = YOLO(f"{model_name}.pt")
+            else:
+                model = YOLO(str(model_path))
             
-            model = YOLO(str(model_path))
-            logger.info(f"✓ YOLO11x loaded from {model_path}")
-            logger.info("  56.9M params, 80 COCO classes")
+            # Model specs
+            specs = {
+                "yolo11n": "2.6M params, fastest",
+                "yolo11s": "9.4M params, fast", 
+                "yolo11m": "20.1M params, balanced",
+                "yolo11x": "56.9M params, most accurate"
+            }
+            logger.info(f"✓ {model_name.upper()} loaded ({specs.get(model_name, 'unknown specs')})")
             
             return model
             
         except Exception as e:
-            logger.error(f"Failed to load YOLO11x: {e}")
+            logger.error(f"Failed to load YOLO11: {e}")
             raise
     
     # ========================================================================

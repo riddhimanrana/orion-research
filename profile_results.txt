@@ -1,0 +1,93 @@
+
+================================================================================
+ORION PERFORMANCE PROFILER
+================================================================================
+Video: data/examples/video_short.mp4
+Frames to process: 30
+SLAM enabled: True
+Depth enabled: True
+Depth model: midas
+================================================================================
+
+Video info:
+  Resolution: 1080x1920
+  FPS: 29.97
+
+Initializing models...
+Debug: __file__ = /Users/riddhiman.rana/Desktop/Coding/Orion/orion-research/orion/managers/asset_manager.py
+Debug: resolved = /Users/riddhiman.rana/Desktop/Coding/Orion/orion-research/orion/managers/asset_manager.py
+Debug: parents[2] = /Users/riddhiman.rana/Desktop/Coding/Orion/orion-research
+Debug: models_dir = /Users/riddhiman.rana/Desktop/Coding/Orion/orion-research/models
+`torch_dtype` is deprecated! Use `dtype` instead!
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+Using cache found in /Users/riddhiman.rana/Desktop/Coding/Orion/orion-research/models/_torch/hub/intel-isl_MiDaS_master
+/opt/homebrew/Caskroom/miniconda/base/envs/orion/lib/python3.10/site-packages/timm/models/layers/__init__.py:48: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+Using cache found in /Users/riddhiman.rana/Desktop/Coding/Orion/orion-research/models/_torch/hub/rwightman_gen-efficientnet-pytorch_master
+[DepthEstimator] Using device: mps
+[DepthEstimator] Loading MiDaS model...
+Loading weights:  None
+[DepthEstimator] MiDaS loaded successfully
+[SLAM] Loop closure detection enabled
+[SLAM] Depth uncertainty estimation enabled
+[SLAM] Temporal depth filtering enabled
+[SLAM] Scale Kalman filter enabled
+[SLAM] Hybrid visual-depth pose fusion enabled
+[SLAM] Depth consistency checking enabled
+[SLAM] Multi-frame depth fusion enabled
+✓ Models loaded
+
+Processing 30 frames...
+  Frame 10/30 | Avg time: 1852.6ms | FPS: 0.54
+  Frame 20/30 | Avg time: 1485.4ms | FPS: 0.67
+  Frame 30/30 | Avg time: 1379.0ms | FPS: 0.73
+
+================================================================================
+PERFORMANCE PROFILE
+================================================================================
+
+Component                      Mean (ms)    Std (ms)     % Total    Calls   
+--------------------------------------------------------------------------------
+Total Frame                        1379.0       1346.2       42.4%       30
+  SLAM Tracking                     666.3       1325.5       20.5%       30
+  YOLO Detection                    528.9        105.7       16.3%       30
+Model Loading                      7489.0          0.0        7.7%        1
+  CLIP Loading                     4092.0          0.0        4.2%        1
+  Depth Estimation                  102.4        124.4        3.1%       30
+  Depth Model Loading              2979.7          0.0        3.1%        1
+  CLIP Embedding                     81.4         32.2        2.5%       30
+  YOLO Loading                      264.3          0.0        0.3%        1
+  SLAM Initialization                13.7          0.0        0.0%        1
+--------------------------------------------------------------------------------
+
+Frames processed: 30
+Average time per frame: 1379.0ms
+Average FPS: 0.73
+================================================================================
+
+================================================================================
+OPTIMIZATION RECOMMENDATIONS
+================================================================================
+
+🟡 HIGH PRIORITY: YOLO is 38.4% of compute time
+   Average: 528.9ms per frame
+
+   Recommendations:
+   1. Switch to YOLO11s or YOLO11n (3-4x faster)
+   2. Reduce input resolution
+   3. Use TensorRT export (if NVIDIA GPU available)
+
+🟡 MEDIUM PRIORITY: SLAM is 48.3% of compute time
+   Average: 666.3ms per frame
+
+   Recommendations:
+   1. Adaptive feature count (fewer when tracking is good)
+   2. GPU-accelerated feature matching
+   3. Skip SLAM every N frames (interpolate between)
+
+================================================================================
+TARGET: 1.0-1.5 FPS (667-1000ms per frame)
+CURRENT: 0.73 FPS (1379ms per frame)
+🟡 CLOSE! Need 0ms improvement to reach 1.0 FPS
+   Focus on top 2 bottlenecks above.
+================================================================================

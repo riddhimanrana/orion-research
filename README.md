@@ -30,7 +30,36 @@ orion-research/
 orion analyze data/examples/video.mp4
 ```
 
-### 2. Train CIS Weights (Optional)
+### 2. Research Mode (SLAM, 3D Visualization)
+
+Run complete SLAM pipeline with 3D visualization:
+
+```bash
+# With Rerun 3D visualization (recommended)
+orion research slam --video data/examples/video_short.mp4 --viz rerun
+
+# With OpenCV visualization
+orion research slam --video data/examples/video_short.mp4 --viz opencv
+
+# Additional options
+orion research slam --video X \
+  --viz rerun \
+  --max-frames 100 \
+  --skip 2 \
+  --zone-mode dense
+```
+
+**Research Mode Features**:
+- Complete SLAM with loop closure detection
+- Entity tracking with 3D Re-ID
+- Spatial zone detection and classification
+- Interactive 3D visualization with Rerun
+- Trajectory tracking and velocity visualization
+- Camera pose estimation
+
+See **[`RERUN_QUICK_GUIDE.md`](RERUN_QUICK_GUIDE.md)** for visualization details.
+
+### 3. Train CIS Weights (Optional)
 
 Make causality detection more accurate using VSGR ground truth:
 
@@ -50,8 +79,14 @@ See **[`docs/CIS_TRAINING_GUIDE.md`](docs/CIS_TRAINING_GUIDE.md)** for complete 
 ## Requirements
 
 ```bash
+# Core installation
 pip install -e .
-pip install optuna  # For CIS training
+
+# For research mode (SLAM + 3D visualization)
+pip install -e .[research]
+
+# For CIS training
+pip install optuna
 ```
 
 ## Key Components

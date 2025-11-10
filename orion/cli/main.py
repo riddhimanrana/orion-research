@@ -14,6 +14,7 @@ from .commands import (
     handle_neo4j,
     handle_ollama,
     handle_qa,
+    handle_research,
 )
 from .display import print_banner, show_models, show_modes
 from ..settings import OrionSettings, SettingsError
@@ -80,6 +81,24 @@ For more help: orion <command> --help
 
     # Display
     analyze_parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
+    
+    # Spatial Memory (Experimental)
+    analyze_parser.add_argument(
+        "--use-spatial-memory",
+        action="store_true",
+        help="Enable persistent spatial intelligence (remembers everything across sessions)"
+    )
+    analyze_parser.add_argument(
+        "--memory-dir",
+        type=str,
+        default="memory/spatial_intelligence",
+        help="Directory for persistent spatial memory storage"
+    )
+    analyze_parser.add_argument(
+        "--export-memgraph",
+        action="store_true",
+        help="Export to Memgraph for real-time spatial queries"
+    )
 
     # ═══════════════════════════════════════════════════════════
     # QA COMMAND
@@ -123,6 +142,108 @@ For more help: orion <command> --help
     # STATUS COMMAND
     # ═══════════════════════════════════════════════════════════
     subparsers.add_parser("status", help="Comprehensive system and service status check")
+
+    # ═══════════════════════════════════════════════════════════
+    # RESEARCH COMMAND - Advanced SLAM visualization
+    # ═══════════════════════════════════════════════════════════
+    research_parser = subparsers.add_parser(
+        "research",
+        help="Research mode: SLAM, depth, tracking, zones (with 3D visualization)"
+    )
+    research_subparsers = research_parser.add_subparsers(
+        dest="research_mode",
+        help="Research mode to run"
+    )
+    research_subparsers.required = True
+    
+    # SLAM mode
+    slam_parser = research_subparsers.add_parser(
+        "slam",
+        help="Run complete SLAM pipeline with advanced visualization"
+    )
+    slam_parser.add_argument("--video", type=str, required=True, help="Path to video file")
+    slam_parser.add_argument(
+        "--viz", 
+        choices=["rerun", "opencv", "none"], 
+        default="rerun",
+        help="Visualization mode (rerun=3D browser, opencv=windows, none=headless)"
+    )
+    slam_parser.add_argument("--max-frames", type=int, help="Limit number of frames to process")
+    slam_parser.add_argument(
+        "--skip", 
+        type=int, 
+        default=15, 
+        help="Frame skip interval (default: 15 = ~2fps for 30fps video)"
+    )
+    slam_parser.add_argument(
+        "--zone-mode",
+        choices=["dense", "sparse"],
+        default="dense",
+        help="Spatial zone clustering mode"
+    )
+    slam_parser.add_argument(
+        "--no-adaptive",
+        action="store_true",
+        help="Disable adaptive frame skip"
+    )
+    slam_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug mode with additional logging"
+    )
+    slam_parser.add_argument(
+        "--yolo-model",
+        choices=["yolo11n", "yolo11s", "yolo11m", "yolo11x"],
+        default="yolo11n",
+        help="YOLO model variant (n=fastest/real-time, m=balanced, x=accurate)"
+    )
+    slam_parser.add_argument(
+        "--export-memgraph",
+        action="store_true",
+        help="Export to Memgraph for real-time queries (FastVLM captions on-demand)"
+    )
+    slam_parser.add_argument(
+        "--use-spatial-memory",
+        action="store_true",
+        help="Enable persistent spatial intelligence (remembers everything across sessions)"
+    )
+    slam_parser.add_argument(
+        "-i", "--interactive",
+        action="store_true",
+        help="Start interactive spatial intelligence assistant after processing"
+    )
+    slam_parser.add_argument(
+        "--memory-dir",
+        type=str,
+        default="memory/spatial_intelligence",
+        help="Directory for persistent spatial memory (default: memory/spatial_intelligence)"
+    )
+    
+    # Depth mode (placeholder)
+    depth_parser = research_subparsers.add_parser(
+        "depth",
+        help="Test depth estimation on video frames"
+    )
+    depth_parser.add_argument("--video", type=str, required=True, help="Path to video file")
+    depth_parser.add_argument("--model", choices=["midas", "zoe"], default="midas")
+    depth_parser.add_argument("--viz", choices=["rerun", "opencv"], default="rerun")
+    
+    # Tracking mode (placeholder)
+    tracking_parser = research_subparsers.add_parser(
+        "tracking",
+        help="Test 3D entity tracking with Re-ID"
+    )
+    tracking_parser.add_argument("--video", type=str, required=True, help="Path to video file")
+    tracking_parser.add_argument("--viz", choices=["rerun", "opencv"], default="rerun")
+    
+    # Zones mode (placeholder)
+    zones_parser = research_subparsers.add_parser(
+        "zones",
+        help="Test spatial zone detection and classification"
+    )
+    zones_parser.add_argument("--video", type=str, required=True, help="Path to video file")
+    zones_parser.add_argument("--mode", choices=["dense", "sparse"], default="dense")
+    zones_parser.add_argument("--viz", choices=["rerun", "opencv"], default="rerun")
 
     # ═══════════════════════════════════════════════════════════
     # INIT COMMAND
@@ -213,6 +334,9 @@ def main() -> None:
         from ..managers.auto_config import status_command
 
         status_command(args)
+
+    elif args.command == "research":
+        handle_research(args, settings)
 
     elif args.command == "init":
         handle_init(args)

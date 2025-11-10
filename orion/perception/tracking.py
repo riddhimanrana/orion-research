@@ -18,6 +18,9 @@ from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cosine
 import time
 
+# NEW: Geometric Re-ID for spatial consistency
+from orion.perception.geometric_reid import GeometricReID
+
 
 @dataclass
 class BayesianEntityBelief:
@@ -173,6 +176,14 @@ class EntityTracker3D:
         self.total_entities_seen = 0
         self.reidentifications = 0
         self.id_switches = 0  # For evaluation
+        
+        # NEW: Geometric Re-ID for spatial consistency
+        self.geometric_reid = GeometricReID(
+            max_distance_mm=2000.0,  # 2m max movement per frame
+            max_velocity_change_mm_s=3000.0,  # 3m/s max acceleration
+            history_size=10,
+            temporal_weight_decay=0.95
+        )
     
     def track_frame(
         self, 
@@ -231,6 +242,10 @@ class EntityTracker3D:
         # Step 7: Cleanup disappeared tracks beyond re-ID window
         self._cleanup_disappeared_tracks(frame_number)
         
+        # Step 8: NEW - Cleanup old geometric Re-ID states (every 100 frames)
+        if frame_number % 100 == 0:
+            self.geometric_reid.cleanup_old_entities(frame_number, max_frames_gap=100)
+        
         return list(self.tracks.values())
     
     def _predict_track_positions(self):
@@ -255,6 +270,7 @@ class EntityTracker3D:
         - 2D Euclidean distance
         - 3D Euclidean distance (if available)
         - Appearance dissimilarity (1 - cosine similarity)
+        - Geometric consistency (NEW: spatial continuity check)
         
         Returns:
             cost_matrix of shape (num_detections, num_tracks)
@@ -293,9 +309,37 @@ class EntityTracker3D:
                     similarity = 1 - cosine(det_embedding, track.appearance_embedding)
                     appearance_cost = (1 - similarity) * self.config.max_distance_pixels
                 
+                # NEW: Geometric consistency score (spatial continuity)
+                geometric_score = 0.5  # Default neutral score
+                if det_centroid_3d is not None and track.centroid_3d_mm is not None:
+                    # Check if match is geometrically plausible
+                    # Use frame number as timestamp approximation (30fps)
+                    timestamp = track.last_seen_frame / 30.0
+                    
+                    if not self.geometric_reid.is_plausible_match(
+                        det_centroid_3d, track.entity_id, timestamp
+                    ):
+                        # Physically impossible match - reject with huge penalty
+                        cost_matrix[i, j] = 1e8
+                        continue
+                    
+                    # Compute geometric consistency score (0-1, higher = better)
+                    geometric_score = self.geometric_reid.compute_geometric_score(
+                        det_centroid_3d, track.entity_id, 
+                        track.last_seen_frame, timestamp
+                    )
+                    
+                    # Convert score to cost (invert: cost = 1 - score)
+                    geometric_cost = (1 - geometric_score) * self.config.max_distance_pixels
+                else:
+                    geometric_cost = 0.0  # No penalty if 3D unavailable
+                
                 # Combined cost (weighted sum)
-                # Weight: 50% 2D, 30% 3D, 20% appearance
-                cost = 0.5 * dist_2d + 0.3 * dist_3d + 0.2 * appearance_cost
+                # NEW WEIGHTS: 40% 2D, 20% 3D, 20% appearance, 20% geometric
+                cost = (0.4 * dist_2d + 
+                       0.2 * dist_3d + 
+                       0.2 * appearance_cost +
+                       0.2 * geometric_cost)
                 
                 # Penalize if distance exceeds threshold
                 if dist_2d > self.config.max_distance_pixels:
@@ -379,6 +423,16 @@ class EntityTracker3D:
         track.last_seen_frame = frame_number
         track.total_detections += 1
         track.consecutive_misses = 0
+        
+        # NEW: Update geometric Re-ID spatial state
+        if new_centroid_3d is not None:
+            timestamp = frame_number / 30.0  # Assume 30fps
+            self.geometric_reid.update_spatial_state(
+                entity_id=track.entity_id,
+                position_3d=new_centroid_3d,
+                timestamp=timestamp,
+                frame_idx=frame_number
+            )
         
         # If was disappeared, mark as re-identified
         if track.is_disappeared:
@@ -503,10 +557,16 @@ class EntityTracker3D:
     
     def get_statistics(self) -> Dict:
         """Get tracking statistics for evaluation."""
+        # Get geometric Re-ID stats
+        geo_stats = self.geometric_reid.get_statistics()
+        
         return {
             'total_active_tracks': len(self.tracks),
             'total_disappeared_tracks': len(self.disappeared_tracks),
             'total_entities_seen': self.total_entities_seen,
             'reidentifications': self.reidentifications,
-            'id_switches': self.id_switches
+            'id_switches': self.id_switches,
+            # NEW: Geometric Re-ID stats
+            'geometric_tracked_entities': geo_stats['total_tracked_entities'],
+            'geometric_avg_history': geo_stats['avg_history_size'],
         }

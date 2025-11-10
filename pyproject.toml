@@ -43,7 +43,7 @@ dev = [
     "pre-commit>=3.0.0",
 ]
 
-# Research: benchmarking, visualization, notebooks
+# Research: benchmarking, visualization, notebooks, 3D visualization
 research = [
     "jupyter>=1.0.0",
     "jupyterlab>=4.0.0",
@@ -51,6 +51,7 @@ research = [
     "seaborn>=0.12.0",
     "pandas>=2.0.0",
     "scipy>=1.11.0",
+    "rerun-sdk>=0.26.0",  # 3D visualization (0.26.x - latest stable)
 ]
 
 # Perception: depth models, hand tracking, visual processing

@@ -63,11 +63,16 @@ class StateChange:
     change_type: "ChangeType" = field(default=ChangeType.UNKNOWN)
     is_fallback: bool = False
     
-    # Spatial information
+    # Spatial information (2D)
     centroid_before: Optional[Tuple[float, float]] = None
     centroid_after: Optional[Tuple[float, float]] = None
     displacement: float = 0.0
     velocity: float = 0.0
+    
+    # Spatial information (3D) - NEW for 3D CIS
+    centroid_3d_before: Optional[np.ndarray] = None  # [x, y, z] in mm
+    centroid_3d_after: Optional[np.ndarray] = None   # [x, y, z] in mm
+    velocity_3d: Optional[np.ndarray] = None         # [vx, vy, vz] in mm/s
     
     # Bounding boxes
     bounding_box_before: Optional[List[float]] = None
@@ -397,6 +402,11 @@ class SemanticEntity:
     zone_label: Optional[str] = None
     zone_confidence: Optional[float] = None
     neighbor_entity_ids: List[str] = field(default_factory=list)
+    
+    # 3D tracking (NEW - for 3D CIS)
+    centroid_3d_mm: Optional[np.ndarray] = None  # Current 3D position [x, y, z] in mm
+    prev_centroid_3d_mm: Optional[np.ndarray] = None  # Previous 3D position
+    velocity_3d: Optional[np.ndarray] = None  # 3D velocity [vx, vy, vz] in mm/s
     
     # Descriptions over time (timestamped)
     descriptions: List[Dict] = field(default_factory=list)

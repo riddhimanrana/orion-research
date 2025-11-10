@@ -180,6 +180,10 @@ class EventCompositionConfig:
 class CausalConfig:
     """Causal Influence Score (CIS) configuration"""
     
+    # Mode selection
+    use_3d_cis: bool = True
+    """Use 3D CIS scorer (requires SLAM + depth) instead of 2D CIS"""
+    
     # CIS weights (must sum to 1.0)
     weight_temporal: float = 0.35
     """Weight for temporal proximity"""
@@ -197,7 +201,23 @@ class CausalConfig:
     cis_threshold: float = 0.55
     """CIS threshold for considering causality"""
     
-    # Distance/decay parameters
+    # 3D CIS parameters (when use_3d_cis=True)
+    max_spatial_distance_mm: float = 600.0
+    """Maximum 3D distance in mm considered causal (default 600mm = 60cm)"""
+    
+    temporal_decay_tau: float = 4.0
+    """Temporal decay time constant in seconds"""
+    
+    hand_grasping_bonus: float = 0.30
+    """Bonus for hand grasping interaction (additive)"""
+    
+    hand_touching_bonus: float = 0.15
+    """Bonus for hand touching interaction (additive)"""
+    
+    hand_near_bonus: float = 0.05
+    """Bonus for hand near interaction (additive)"""
+    
+    # 2D CIS parameters (when use_3d_cis=False) - legacy
     max_spatial_distance: float = 600.0
     """Maximum pixel distance considered causal before decaying to zero"""
     

@@ -31,6 +31,7 @@ from orion.semantic.state_detector import StateChangeDetector
 from orion.semantic.scene_assembler import SceneAssembler
 from orion.semantic.temporal_windows import TemporalWindowManager
 from orion.semantic.causal_scorer import CausalInfluenceScorer
+from orion.semantic.cis_scorer_3d import CausalInfluenceScorer3D  # NEW: 3D CIS
 from orion.semantic.event_composer import EventComposer
 from orion.semantic.temporal_description_generator import TemporalDescriptionGenerator
 from orion.graph.builder import GraphBuilder
@@ -87,7 +88,26 @@ class SemanticEngine:
         
         self.scene_assembler = SceneAssembler(self.config.temporal_window)
         self.window_manager = TemporalWindowManager(self.config.temporal_window)
-        self.causal_scorer = CausalInfluenceScorer(self.config.causal)
+        
+        # Initialize CIS scorer (2D or 3D based on config)
+        if self.config.causal.use_3d_cis:
+            self.causal_scorer = CausalInfluenceScorer3D(
+                weight_temporal=self.config.causal.weight_temporal,
+                weight_spatial=self.config.causal.weight_spatial,
+                weight_motion=self.config.causal.weight_motion,
+                weight_semantic=self.config.causal.weight_semantic,
+                temporal_decay_tau=self.config.causal.temporal_decay_tau,
+                max_spatial_distance_mm=self.config.causal.max_spatial_distance_mm,
+                hand_grasping_bonus=self.config.causal.hand_grasping_bonus,
+                hand_touching_bonus=self.config.causal.hand_touching_bonus,
+                hand_near_bonus=self.config.causal.hand_near_bonus,
+                cis_threshold=self.config.causal.cis_threshold,
+            )
+            logger.info("Using 3D CIS scorer with SLAM + depth")
+        else:
+            self.causal_scorer = CausalInfluenceScorer(self.config.causal)
+            logger.info("Using 2D CIS scorer (legacy)")
+        
         self.event_composer = EventComposer(self.config.event_composition)
         self.graph_builder: Optional[GraphBuilder] = None
         

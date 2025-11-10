@@ -13,8 +13,11 @@ Date: November 2025
 """
 
 import numpy as np
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List, TYPE_CHECKING
 from dataclasses import dataclass
+
+if TYPE_CHECKING:
+    from orion.semantic.types import StateChange, CausalLink
 
 
 @dataclass
@@ -429,3 +432,91 @@ class CausalInfluenceScorer3D:
         boost = scene_boosts.get(scene_type, {}).get(pair, 1.0)
         
         return float(min(1.0, cis * boost))
+    
+    def compute_causal_links(
+        self,
+        state_changes: List,  # List[StateChange]
+        embeddings: Dict[str, "np.ndarray"],
+    ) -> List:  # List[CausalLink]
+        """
+        Compute causal links for state changes (compatibility wrapper for 2D CIS interface).
+        
+        Args:
+            state_changes: List of StateChange objects
+            embeddings: Dict mapping entity_id → CLIP embedding
+        
+        Returns:
+            List of CausalLink objects
+        """
+        from orion.semantic.types import CausalLink
+        
+        if len(state_changes) < 2:
+            return []
+        
+        causal_links = []
+        sorted_changes = sorted(state_changes, key=lambda c: c.timestamp_after)
+        
+        # For each pair of state changes, compute 3D CIS
+        for idx, agent_change in enumerate(sorted_changes):
+            for patient_change in sorted_changes[idx + 1:]:
+                # Build entity dicts
+                agent_entity = {
+                    'centroid_3d_mm': agent_change.centroid_3d_after,
+                    'velocity_3d': agent_change.velocity_3d,
+                    'embedding': embeddings.get(agent_change.entity_id),
+                    'class_label': agent_change.entity_id.split('_')[0],  # Extract class from entity_id
+                    'is_hand': 'hand' in agent_change.entity_id.lower(),
+                }
+                
+                patient_entity = {
+                    'centroid_3d_mm': patient_change.centroid_3d_after,
+                    'velocity_3d': patient_change.velocity_3d,
+                    'embedding': embeddings.get(patient_change.entity_id),
+                    'class_label': patient_change.entity_id.split('_')[0],
+                    'is_hand': 'hand' in patient_change.entity_id.lower(),
+                }
+                
+                # Skip if 3D data not available (fall back to 0.5 default for legacy support)
+                if agent_entity['centroid_3d_mm'] is None or patient_entity['centroid_3d_mm'] is None:
+                    continue
+                
+                time_delta = abs(patient_change.timestamp_after - agent_change.timestamp_after)
+                
+                # Compute 3D CIS
+                cis_score, components = self.calculate_cis(
+                    agent_entity,
+                    patient_entity,
+                    time_delta
+                )
+                
+                # Skip if below threshold
+                if cis_score < self.cis_threshold:
+                    continue
+                
+                # Create justification string
+                justification = (
+                    f"T={components.temporal:.2f}, S={components.spatial:.2f}, "
+                    f"M={components.motion:.2f}, Se={components.semantic:.2f}, "
+                    f"H={components.hand_bonus:.2f}"
+                )
+                
+                # Create CausalLink
+                link = CausalLink(
+                    agent_id=agent_change.entity_id,
+                    patient_id=patient_change.entity_id,
+                    agent_change=agent_change,
+                    patient_change=patient_change,
+                    influence_score=cis_score,
+                    features={
+                        'temporal': components.temporal,
+                        'spatial': components.spatial,
+                        'motion': components.motion,
+                        'semantic': components.semantic,
+                        'hand_bonus': components.hand_bonus,
+                    },
+                    justification=justification,
+                )
+                
+                causal_links.append(link)
+        
+        return causal_links

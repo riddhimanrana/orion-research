@@ -866,6 +866,203 @@ class ZoneManager:
         
         return best_zone_id
     
+    def merge_zones_on_loop_closure(
+        self,
+        frame_idx_a: int,
+        frame_idx_b: int,
+        spatial_threshold_mm: float = 5000.0
+    ):
+        """
+        Merge zones when loop closure detected.
+        
+        When SLAM detects we've returned to a previously visited location,
+        merge zones that are spatially overlapping.
+        
+        Args:
+            frame_idx_a: Current frame index
+            frame_idx_b: Loop-closed frame index (earlier in video)
+            spatial_threshold_mm: Distance threshold for merging (default 5m)
+        """
+        # Get zones that contain entities from each frame
+        zones_a = set()
+        zones_b = set()
+        
+        for obs in self.observation_buffer:
+            if obs.frame_idx == frame_idx_a:
+                zone_id = self.query_zone_by_point(obs.centroid_3d_mm)
+                if zone_id:
+                    zones_a.add(zone_id)
+            elif obs.frame_idx == frame_idx_b:
+                zone_id = self.query_zone_by_point(obs.centroid_3d_mm)
+                if zone_id:
+                    zones_b.add(zone_id)
+        
+        # Try to merge zones from both frames
+        zones_to_merge = []
+        for zone_a_id in zones_a:
+            for zone_b_id in zones_b:
+                if zone_a_id == zone_b_id:
+                    continue  # Already same zone
+                
+                zone_a = self.zones.get(zone_a_id)
+                zone_b = self.zones.get(zone_b_id)
+                
+                if not zone_a or not zone_b:
+                    continue
+                
+                # Check spatial proximity
+                dist = np.linalg.norm(zone_a.centroid_3d_mm - zone_b.centroid_3d_mm)
+                
+                if dist < spatial_threshold_mm:
+                    zones_to_merge.append((zone_a_id, zone_b_id))
+        
+        # Perform merges
+        for zone_a_id, zone_b_id in zones_to_merge:
+            if zone_a_id in self.zones and zone_b_id in self.zones:
+                self._merge_zones(zone_a_id, self.zones[zone_b_id], 0.0)
+    
+    def get_zone_object_classes(self, zone_id: str) -> Dict[str, int]:
+        """
+        Get object class distribution for a zone.
+        
+        Args:
+            zone_id: Zone ID
+        
+        Returns:
+            Dict mapping class_label → count
+        """
+        zone = self.zones.get(zone_id)
+        if not zone:
+            return {}
+        
+        # Count class labels from observations
+        class_counts = {}
+        for obs in self.observation_buffer:
+            # Check if this observation belongs to this zone
+            if obs.entity_id in [m[0] for m in zone.members]:
+                class_label = obs.class_label
+                class_counts[class_label] = class_counts.get(class_label, 0) + 1
+        
+        return class_counts
+    
+    def semantic_zone_similarity(self, zone_a_id: str, zone_b_id: str) -> float:
+        """
+        Compute semantic similarity between two zones.
+        
+        Uses Jaccard similarity of object class sets.
+        
+        Args:
+            zone_a_id: First zone ID
+            zone_b_id: Second zone ID
+        
+        Returns:
+            Similarity score 0-1 (1 = identical object types)
+        """
+        classes_a = set(self.get_zone_object_classes(zone_a_id).keys())
+        classes_b = set(self.get_zone_object_classes(zone_b_id).keys())
+        
+        if not classes_a or not classes_b:
+            return 0.0
+        
+        intersection = len(classes_a & classes_b)
+        union = len(classes_a | classes_b)
+        
+        return intersection / union if union > 0 else 0.0
+    
+    def classify_zone_by_semantic_pattern(self, zone_id: str) -> str:
+        """
+        Classify zone type based on object patterns.
+        
+        Args:
+            zone_id: Zone ID
+        
+        Returns:
+            Room type label: "bedroom", "kitchen", "living_room", "bathroom", "unknown"
+        """
+        # Room type patterns (common object combinations)
+        room_patterns = {
+            'bedroom': {'bed', 'nightstand', 'dresser', 'lamp', 'pillow'},
+            'kitchen': {'stove', 'sink', 'refrigerator', 'oven', 'microwave', 'dining table'},
+            'living_room': {'couch', 'tv', 'coffee table', 'bookshelf', 'chair', 'television'},
+            'bathroom': {'toilet', 'sink', 'bathtub', 'shower', 'mirror'},
+            'dining_room': {'dining table', 'chair', 'vase'},
+            'office': {'desk', 'chair', 'computer', 'laptop', 'book'},
+        }
+        
+        # Get objects in this zone
+        zone_objects = set(self.get_zone_object_classes(zone_id).keys())
+        
+        if not zone_objects:
+            return "unknown"
+        
+        # Find best matching pattern
+        best_match = "unknown"
+        best_score = 0.0
+        
+        for room_type, pattern in room_patterns.items():
+            # Jaccard similarity
+            intersection = len(zone_objects & pattern)
+            union = len(zone_objects | pattern)
+            score = intersection / union if union > 0 else 0.0
+            
+            # Also consider coverage (what % of pattern is present)
+            coverage = intersection / len(pattern) if pattern else 0.0
+            
+            # Combined score (prefer both similarity and coverage)
+            combined = 0.6 * score + 0.4 * coverage
+            
+            if combined > best_score and combined > 0.3:  # Min threshold
+                best_score = combined
+                best_match = room_type
+        
+        return best_match
+    
+    def merge_zones_by_semantic_similarity(
+        self,
+        semantic_threshold: float = 0.6,
+        spatial_threshold_mm: float = 10000.0
+    ):
+        """
+        Merge zones that have high semantic similarity and are spatially close.
+        
+        This helps consolidate zones that are actually the same room but were
+        over-segmented due to viewpoint changes.
+        
+        Args:
+            semantic_threshold: Minimum Jaccard similarity to merge
+            spatial_threshold_mm: Maximum distance to consider for merging
+        """
+        zone_ids = list(self.zones.keys())
+        merged = set()
+        
+        for i, zone_a_id in enumerate(zone_ids):
+            if zone_a_id in merged:
+                continue
+            
+            for zone_b_id in zone_ids[i+1:]:
+                if zone_b_id in merged:
+                    continue
+                
+                zone_a = self.zones.get(zone_a_id)
+                zone_b = self.zones.get(zone_b_id)
+                
+                if not zone_a or not zone_b:
+                    continue
+                
+                # Check spatial proximity
+                dist = np.linalg.norm(zone_a.centroid_3d_mm - zone_b.centroid_3d_mm)
+                
+                if dist > spatial_threshold_mm:
+                    continue
+                
+                # Check semantic similarity
+                sem_sim = self.semantic_zone_similarity(zone_a_id, zone_b_id)
+                
+                if sem_sim >= semantic_threshold:
+                    # Merge zone_b into zone_a
+                    self._merge_zones(zone_a_id, zone_b, 0.0)
+                    merged.add(zone_b_id)
+    
     def get_zone_statistics(self) -> dict:
         """Get statistics about current zones."""
         return {

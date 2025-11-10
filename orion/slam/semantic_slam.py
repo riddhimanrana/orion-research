@@ -380,3 +380,19 @@ class SemanticSLAM:
             'landmark_usage_rate': frames_with_landmarks / total_frames if total_frames > 0 else 0.0,
             'stable_object_classes': len(self.stable_classes)
         }
+    
+    def register_loop_closure_callback(self, callback):
+        """
+        Register callback for loop closure detection.
+        
+        Delegates to base SLAM engine.
+        (Phase 4 Week 2 - Day 4)
+        
+        Args:
+            callback: Function to call when loop closure detected
+        """
+        if hasattr(self.base_slam, 'register_loop_closure_callback'):
+            self.base_slam.register_loop_closure_callback(callback)
+        else:
+            logger.warning("[SemanticSLAM] Base SLAM does not support loop closure callbacks")
+

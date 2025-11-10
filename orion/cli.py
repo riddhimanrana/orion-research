@@ -811,6 +811,18 @@ For more help: orion <command> --help
         "--runtime",
         help="Select runtime backend (auto or torch; defaults to config)",
     )
+    analyze_parser.add_argument(
+        "--export-memgraph", action="store_true",
+        help="Export results to Memgraph graph database for real-time queries"
+    )
+    analyze_parser.add_argument(
+        "--memgraph-host", default="127.0.0.1",
+        help="Memgraph host (default: localhost)"
+    )
+    analyze_parser.add_argument(
+        "--memgraph-port", type=int, default=7687,
+        help="Memgraph port (default: 7687)"
+    )
 
     qa_parser = subparsers.add_parser("qa", help="Q&A mode only")
     qa_parser.add_argument("--model", help="Ollama model to use (defaults to config)")
@@ -863,6 +875,96 @@ For more help: orion <command> --help
         "status",
         help="Comprehensive system and service status check"
     )
+    
+    # ==================================================================
+    # RESEARCH MODE - Advanced SLAM visualization and debugging
+    # ==================================================================
+    research_parser = subparsers.add_parser(
+        "research",
+        help="Research mode with SLAM, advanced visualization, and debugging tools"
+    )
+    research_subparsers = research_parser.add_subparsers(
+        dest="research_mode",
+        help="Research mode options"
+    )
+    
+    # SLAM visualization mode
+    slam_parser = research_subparsers.add_parser(
+        "slam",
+        help="Run complete SLAM pipeline with advanced visualization"
+    )
+    slam_parser.add_argument("--video", type=str, required=True, help="Path to video file")
+    slam_parser.add_argument(
+        "--viz", 
+        choices=["rerun", "opencv", "none"], 
+        default="rerun",
+        help="Visualization mode (rerun=3D browser, opencv=windows, none=headless)"
+    )
+    slam_parser.add_argument("--max-frames", type=int, help="Limit number of frames to process")
+    slam_parser.add_argument("--skip", type=int, default=15, help="Frame skip interval (default: 15 = ~2fps for 30fps video)")
+    slam_parser.add_argument(
+        "--zone-mode",
+        choices=["dense", "sparse"],
+        default="dense",
+        help="Spatial zone clustering mode"
+    )
+    slam_parser.add_argument(
+        "--no-adaptive",
+        action="store_true",
+        help="Disable adaptive frame skip"
+    )
+    slam_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug mode with additional logging"
+    )
+    slam_parser.add_argument(
+        "--yolo-model",
+        choices=["yolo11n", "yolo11s", "yolo11m", "yolo11x"],
+        default="yolo11n",
+        help="YOLO model variant (n=fastest, s=fast, m=balanced, x=accurate)"
+    )
+    slam_parser.add_argument(
+        "--no-fastvlm",
+        action="store_true",
+        help="Disable FastVLM semantic enrichment"
+    )
+    slam_parser.add_argument(
+        "--export-memgraph",
+        action="store_true",
+        help="Export to Memgraph graph database for real-time queries"
+    )
+    slam_parser.add_argument(
+        "-i", "--interactive",
+        action="store_true",
+        help="Start interactive query mode after processing"
+    )
+    
+    # Depth estimation mode
+    depth_parser = research_subparsers.add_parser(
+        "depth",
+        help="Test depth estimation on video frames"
+    )
+    depth_parser.add_argument("--video", type=str, required=True, help="Path to video file")
+    depth_parser.add_argument("--model", choices=["midas", "zoe"], default="midas")
+    depth_parser.add_argument("--viz", choices=["rerun", "opencv"], default="rerun")
+    
+    # Tracking mode
+    tracking_parser = research_subparsers.add_parser(
+        "tracking",
+        help="Test 3D entity tracking with Re-ID"
+    )
+    tracking_parser.add_argument("--video", type=str, required=True, help="Path to video file")
+    tracking_parser.add_argument("--viz", choices=["rerun", "opencv"], default="rerun")
+    
+    # Zone detection mode
+    zones_parser = research_subparsers.add_parser(
+        "zones",
+        help="Test spatial zone detection and classification"
+    )
+    zones_parser.add_argument("--video", type=str, required=True, help="Path to video file")
+    zones_parser.add_argument("--mode", choices=["dense", "sparse"], default="dense")
+    zones_parser.add_argument("--viz", choices=["rerun", "opencv"], default="rerun")
     
     index_parser = subparsers.add_parser("index", help="Create vector indexes and backfill embeddings")
     
@@ -948,6 +1050,108 @@ For more help: orion <command> --help
     config_set_parser.add_argument("value", help="New value")
 
     return parser
+
+
+def _handle_research_command(args, settings: OrionSettings) -> None:
+    """Handle research mode commands (SLAM, depth, tracking, zones)"""
+    
+    if args.research_mode == "slam":
+        # Run complete SLAM pipeline
+        console.print("\n[bold cyan]🗺️  Starting SLAM Research Mode[/bold cyan]\n")
+        
+        params_table = Table(box=box.ROUNDED, show_header=False, border_style="cyan")
+        params_table.add_column("Parameter", style="cyan bold", width=20)
+        params_table.add_column("Value", style="yellow", width=60)
+        
+        params_table.add_row("Video", args.video)
+        params_table.add_row("Visualization", args.viz.upper())
+        params_table.add_row("YOLO Model", args.yolo_model.upper())
+        params_table.add_row("Frame Skip", str(args.skip))
+        params_table.add_row("Zone Mode", args.zone_mode)
+        if args.max_frames:
+            params_table.add_row("Max Frames", str(args.max_frames))
+        if args.no_fastvlm:
+            params_table.add_row("FastVLM", "[red]Disabled[/red]")
+        else:
+            params_table.add_row("FastVLM", "[green]Enabled[/green]")
+        if args.export_memgraph:
+            params_table.add_row("Memgraph Export", "[green]Enabled[/green]")
+        if args.interactive:
+            params_table.add_row("Interactive Query", "[green]Enabled[/green]")
+        if args.debug:
+            params_table.add_row("Debug Mode", "[yellow]Enabled[/yellow]")
+        
+        console.print(params_table)
+        console.print("\n")
+        
+        # Import and run SLAM system
+        import subprocess
+        
+        cmd = [
+            sys.executable,
+            "scripts/run_slam_complete.py",
+            "--video", args.video,
+            "--skip", str(args.skip),
+            "--zone-mode", args.zone_mode,
+            "--yolo-model", args.yolo_model,
+        ]
+        
+        if args.viz == "rerun":
+            cmd.append("--rerun")
+        
+        if args.max_frames:
+            cmd.extend(["--max-frames", str(args.max_frames)])
+        
+        if args.no_adaptive:
+            cmd.append("--no-adaptive")
+        
+        if args.no_fastvlm:
+            cmd.append("--no-fastvlm")
+        
+        if args.export_memgraph:
+            cmd.append("--export-memgraph")
+        
+        try:
+            subprocess.run(cmd, check=True)
+            
+            # Start interactive query mode if requested
+            if args.interactive and args.export_memgraph:
+                console.print("\n[bold cyan]════════════════════════════════════════════════[/bold cyan]")
+                console.print("[bold cyan]       Starting Interactive Query Mode[/bold cyan]")
+                console.print("[bold cyan]════════════════════════════════════════════════[/bold cyan]\n")
+                
+                # Run interactive query script
+                query_cmd = [
+                    sys.executable,
+                    "scripts/query_memgraph.py",
+                    "--interactive"
+                ]
+                subprocess.run(query_cmd)
+            elif args.interactive and not args.export_memgraph:
+                console.print("\n[yellow]⚠️  Interactive mode requires --export-memgraph flag[/yellow]")
+                console.print("[dim]Add --export-memgraph to enable interactive queries[/dim]\n")
+                
+        except subprocess.CalledProcessError as e:
+            console.print(f"[red]SLAM pipeline failed with exit code {e.returncode}[/red]")
+            sys.exit(e.returncode)
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Interrupted by user[/yellow]")
+            sys.exit(0)
+    
+    elif args.research_mode == "depth":
+        console.print("\n[bold cyan]📊 Depth Estimation Test Mode[/bold cyan]\n")
+        console.print("[yellow]Coming soon: Isolated depth estimation testing[/yellow]\n")
+    
+    elif args.research_mode == "tracking":
+        console.print("\n[bold cyan]👁️  Entity Tracking Test Mode[/bold cyan]\n")
+        console.print("[yellow]Coming soon: 3D tracking with Re-ID testing[/yellow]\n")
+    
+    elif args.research_mode == "zones":
+        console.print("\n[bold cyan]🗂️  Spatial Zones Test Mode[/bold cyan]\n")
+        console.print("[yellow]Coming soon: Zone detection and classification testing[/yellow]\n")
+    
+    else:
+        console.print("[red]No research mode specified. Use 'orion research --help'[/red]")
 
 
 def _run_command(command, description):
@@ -1289,6 +1493,9 @@ def main(argv: list[str] | None = None) -> None:
         else:
             console.print("[red]No service command provided. Use 'orion services --help'.[/red]")
             return
+
+    elif args.command == "research":
+        _handle_research_command(args, settings)
 
     elif args.command == "index":
         from .vector_indexing import backfill_embeddings

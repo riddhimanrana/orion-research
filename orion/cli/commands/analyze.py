@@ -20,6 +20,24 @@ if TYPE_CHECKING:
 console = Console()
 
 
+def _start_standard_qa(args, settings, neo4j_uri, neo4j_user, neo4j_password, console):
+    """Start standard Q&A session (fallback when spatial intelligence not available)"""
+    try:
+        from ...video_qa import VideoQASystem
+
+        qa = VideoQASystem(
+            neo4j_uri=neo4j_uri,
+            neo4j_user=neo4j_user,
+            neo4j_password=neo4j_password,
+            llm_model=getattr(args, "qa_model", None) or settings.qa_model,
+        )
+        qa.start_interactive_session()
+    except ImportError:
+        console.print("[red]✗ Q&A not available. Install: pip install ollama[/red]")
+    except Exception as e:
+        console.print(f"[red]✗ Q&A session failed: {e}[/red]")
+
+
 def handle_analyze(args: argparse.Namespace, settings: OrionSettings) -> None:
     """Handle the analyze command - process video with the new modular pipeline."""
     # Import the new VideoPipeline
@@ -67,6 +85,12 @@ def handle_analyze(args: argparse.Namespace, settings: OrionSettings) -> None:
 
     if getattr(args, "keep_db", False):
         params_table.add_row("Database", "[yellow]Keeping existing data[/yellow]")
+    
+    # Show spatial memory if enabled
+    if getattr(args, "use_spatial_memory", False):
+        params_table.add_row("Spatial Memory", f"[green]✓ Enabled[/green] ({getattr(args, 'memory_dir', 'memory/spatial_intelligence')})")
+    if getattr(args, "export_memgraph", False):
+        params_table.add_row("Memgraph Export", "[green]✓ Enabled[/green]")
 
     # Show inspection mode if enabled
     if hasattr(args, "inspect") and args.inspect:
@@ -124,24 +148,48 @@ def handle_analyze(args: argparse.Namespace, settings: OrionSettings) -> None:
             if not getattr(args, "verbose", False):
                 display_pipeline_results(results)
 
-            # Start interactive Q&A if requested
+            # Start interactive mode if requested
             if getattr(args, "interactive", False) and results.get("success"):
                 console.print("\n[bold cyan]════════════════════════════════════════════════[/bold cyan]")
-                console.print("[bold cyan]       Starting Interactive Q&A Mode[/bold cyan]")
-                console.print("[bold cyan]════════════════════════════════════════════════[/bold cyan]\n")
-
-                try:
-                    from ...video_qa import VideoQASystem
-
-                    qa = VideoQASystem(
-                        neo4j_uri=neo4j_uri,
-                        neo4j_user=neo4j_user,
-                        neo4j_password=neo4j_password,
-                        llm_model=getattr(args, "qa_model", None) or settings.qa_model,
-                    )
-                    qa.start_interactive_session()
-                except ImportError:
-                    console.print("[red]✗ Q&A not available. Install: pip install ollama[/red]")
+                
+                # Check if spatial memory/Memgraph export is requested
+                use_spatial = getattr(args, "use_spatial_memory", False)
+                use_memgraph = getattr(args, "export_memgraph", False)
+                
+                if use_spatial or use_memgraph:
+                    console.print("[bold cyan]   Starting Spatial Intelligence Assistant[/bold cyan]")
+                    console.print("[bold cyan]════════════════════════════════════════════════[/bold cyan]\n")
+                    console.print("[yellow]NOTE: Spatial memory requires processing with 'orion research slam'[/yellow]")
+                    console.print("[yellow]      The 'analyze' command uses Neo4j graph backend.[/yellow]\n")
+                    
+                    import subprocess
+                    import sys
+                    
+                    assistant_script = Path(__file__).parent.parent.parent.parent / "scripts" / "spatial_intelligence_assistant.py"
+                    
+                    if assistant_script.exists():
+                        console.print("[cyan]Checking for existing spatial memory...[/cyan]")
+                        
+                        memory_dir = Path(getattr(args, "memory_dir", "memory/spatial_intelligence"))
+                        if memory_dir.exists() and (memory_dir / "entities.json").exists():
+                            console.print(f"[green]✓ Found existing spatial memory at {memory_dir}[/green]\n")
+                            
+                            # Start interactive assistant
+                            subprocess.run([sys.executable, str(assistant_script), "--interactive"])
+                        else:
+                            console.print(f"[yellow]⚠ No spatial memory found at {memory_dir}[/yellow]")
+                            console.print("[yellow]  Process video with: orion research slam --video X --use-spatial-memory[/yellow]\n")
+                            
+                            # Fall back to standard Q&A
+                            console.print("[cyan]Starting standard Q&A mode instead...[/cyan]\n")
+                            _start_standard_qa(args, settings, neo4j_uri, neo4j_user, neo4j_password, console)
+                    else:
+                        console.print("[yellow]⚠ Spatial intelligence assistant not found. Using standard Q&A...[/yellow]\n")
+                        _start_standard_qa(args, settings, neo4j_uri, neo4j_user, neo4j_password, console)
+                else:
+                    console.print("[bold cyan]       Starting Interactive Q&A Mode[/bold cyan]")
+                    console.print("[bold cyan]════════════════════════════════════════════════[/bold cyan]\n")
+                    _start_standard_qa(args, settings, neo4j_uri, neo4j_user, neo4j_password, console)
 
     except FileNotFoundError as e:
         console.print(f"[red]✗ Video file not found: {e}[/red]")
