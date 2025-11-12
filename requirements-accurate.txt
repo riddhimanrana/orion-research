@@ -1,0 +1,43 @@
+# Accurate Mode - Advanced Dependencies
+# Install with: pip install -r requirements-accurate.txt
+
+# Core dependencies (already in base requirements)
+numpy>=1.24.0
+opencv-python>=4.8.0
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Detection & Segmentation
+# Detectron2 - Instance segmentation (Mask R-CNN)
+# Install from source for Apple Silicon:
+# python -m pip install 'git+https://github.com/facebookresearch/detectron2.git'
+# OR for x86: pip install detectron2 -f https://dl.fbaipublicfiles.com/detectron2/wheels/cpu/torch2.0/index.html
+
+# Re-ID Models
+# OSNet for person re-identification (optional but recommended)
+# torchreid>=1.4.0
+# Install with: pip install torchreid
+
+# Scene Understanding
+scipy>=1.10.0  # For spatial clustering and distance computation
+scikit-learn>=1.3.0  # For HDBSCAN and clustering
+
+# Graph Database
+# Memgraph connector for scene graph export
+# pymgclient>=1.3.0
+# Install with: pip install pymgclient
+
+# FastVLM (already in mlx-vlm/)
+mlx>=0.22.0
+mlx-lm>=0.28.0
+
+# CLIP (already installed)
+# clip  # Usually via: pip install git+https://github.com/openai/CLIP.git
+
+# Visualization
+rerun-sdk>=0.15.0
+
+# Utilities
+pillow>=10.0.0
+tqdm>=4.65.0
+dataclasses-json>=0.6.0

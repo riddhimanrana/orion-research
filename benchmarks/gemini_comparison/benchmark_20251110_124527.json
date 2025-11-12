@@ -1,0 +1,52 @@
+{
+  "timestamp": "20251110_124527",
+  "video": "data/examples/test.mp4",
+  "memory_dir": "memory/spatial_intelligence",
+  "num_queries": 4,
+  "results": [
+    {
+      "query": "What objects can you see in the scene?",
+      "orion_response": "Okay, I\u2019ve analyzed the spatial data. Here\u2019s what I can see in the scene:\n\n**Objects I can see:**\n\n*   **A large chair (furniture)** positioned in the lower right of the frame, stationary far from camera (~135.8m) tracked across 3 frames in spatial zone 0. Selected because: new_class\n*   **A large chair (furniture)** positioned in the lower right of the frame, stationary far from camera (~19.8m) tracked across 2 frames in spatial zone 0. Selected because: highly_visible.\n*   **A large dining table** positioned in the lower right of the frame, stationary moderate distance (~4.7m) tracked across 2 frames in spatial zone 0. Selected because: highly_visible.\n*   **A large couch** positioned in the lower right of the frame, stationary near camera (~1.6m) tracked across 1 frames in spatial zone 0. Selected because: new_class\n*   **A large chair** positioned in the lower right of the frame, stationary near camera (~1.6m) tracked across 1 frames in spatial zone 0. Selected because: new_class\n\n**Important Notes:**\n\n*   I can see a book, but I'm not certain it's yours.\n*   I can see a large couch, a large chair, and a large dining table in",
+      "gemini_response": "Okay, I can analyze the video and describe the spatial scene. Here's a summary of the objects and their locations in the video:\n\n**Starting Point:**\n\n*   **Office Desk:** This is the starting point. On it, there are two computer monitors, a keyboard, a wrist rest, a mouse, a laptop, and two water bottles.\n*   **Desk location** Desk is in a bedroom near the entrance to the hallway.\n\n**Moving Through the House:**\n\n*   **Hallway:** Several doorways lead off this hallway. Some lead to closets, others to additional rooms.\n*   **Stairs:** The hallway leads to a staircase with a brown carpet, white railing, and wooden handrail. On the wall, there are pictures and windows.\n*   **Foyer:** The stairs lead down to a foyer. A large window, decor, and doors are present.\n\n**Open Living Space:**\n\n*   **Living Room:** The foyer extends into an open living space with a tall ceiling. Furniture includes couches, chairs, a glass display case, and a decorative rug.\n*   **Dining Area:** There is a dining table with chairs.\n*   **Kitchen:** The dining area extends into a kitchen. It has wooden cabinets, an island, stainless steel appliances, and a person standing there.\n\n**Return to the Starting Point:**\n\n*   A second staircase is shown that is accessible from the foyer.\n*   The video ends by returning to the starting point, where you see the office desk once again in the bedroom.\n\nIn summary, the video walks through a two-story house, starting in a bedroom/office, leading through hallways, down stairs to a combined living/dining/kitchen area, and finally back up to the originating bedroom.",
+      "orion_time": 5.206009149551392,
+      "gemini_time": 6.4872400760650635,
+      "orion_entities": 5,
+      "orion_length": 1147,
+      "gemini_length": 1594,
+      "length_ratio": 0.7195734002509411
+    },
+    {
+      "query": "Where would I find the couch?",
+      "orion_response": "That\u2019s a great question! Based on the data, I\u2019d say the couch would be located in the lower right area of the frame. Specifically, it\u2019s positioned about 3.4 meters away, and it\u2019s tracked across 1 frame. \n\nYou could also see it near the couch in the lower right area, about 3.4 meters away. \n\nI\u2019m not certain it\u2019s the *exact* same couch, but it\u2019s a very close match. \n\nI can see a book, but I\u2019m not certain it\u2019s yours. It\u2019s a bit difficult to pinpoint the exact location with this level of detail. \n\nWould you like me to elaborate on any of these observations or provide more detailed spatial information?",
+      "gemini_response": "Here's where you would find the couch, based on the video:\n\nYou would find the couch on the first floor in the living room. The living room is located past the stair case and through the hallway.\n",
+      "orion_time": 3.0241689682006836,
+      "gemini_time": 1.7269999980926514,
+      "orion_entities": 5,
+      "orion_length": 604,
+      "gemini_length": 196,
+      "length_ratio": 3.0816326530612246
+    },
+    {
+      "query": "Is there a book somewhere? Where is it?",
+      "orion_response": "That\u2019s a great question! Based on the data, I can see a book, but I\u2019m not certain it\u2019s yours. \n\nI can see a book, positioned in the lower right of the frame, about 135.8 meters away. It\u2019s a large book, and it\u2019s labeled \u201cbook\u201d in the spatial memory. \n\nI\u2019d suggest you double-check the book\u2019s position and visual confirmation before assuming it\u2019s yours. \n\nWould you like me to elaborate on any of these entities or provide more detailed spatial analysis?",
+      "gemini_response": "Here's what I can determine from the video:\n\nYes, there is a book in the video. It is a \"Piano Adventures\" lesson book, lying on a black coffee table in the living room and later held by the person taking the video. The book is eventually seen near the dining table and kitchen area. \n",
+      "orion_time": 2.708418846130371,
+      "gemini_time": 2.199208974838257,
+      "orion_entities": 5,
+      "orion_length": 452,
+      "gemini_length": 285,
+      "length_ratio": 1.5859649122807018
+    },
+    {
+      "query": "How many chairs are in the room?",
+      "orion_response": "Okay, I\u2019ve analyzed the scene data. You\u2019re right, there are three chairs in the room. \n\nLet\u2019s break it down:\n\n*   Entity #7 (chair)\n*   Entity #10 (chair)\n*   Entity #12 (chair)\n\nI can see a chair in the lower right area of the frame, near the camera, and it\u2019s been tracked for 30 frames. \n\nI\u2019m not certain about Entity #13 (chair), but I can see it in the lower right area of the frame, near the camera, and it\u2019s been tracked for 24 frames. \n\nI\u2019m not certain about Entity #5 (person), but I can see it in the lower right area of the frame, near the camera, and it\u2019s been tracked for 34 frames.\n\nDo you need me to elaborate on any of these detections or provide more detailed spatial analysis?",
+      "gemini_response": "Here's the breakdown of the chairs I could identify from the video:\n\n*   **Living Room:** There are at least 6 chairs in the living room.\n*   **Dining Room:** There are at least 4 chairs in the dining room.\n*   **Office:** There is at least 1 chair in the office.\n*   **Kitchen:** There are at least 2 barstools in the kitchen.\n\nSo, in total, there are at least **13 chairs** visible in the video.",
+      "orion_time": 3.6090197563171387,
+      "gemini_time": 1.837742805480957,
+      "orion_entities": 5,
+      "orion_length": 693,
+      "gemini_length": 397,
+      "length_ratio": 1.7455919395465995
+    }
+  ]
+}

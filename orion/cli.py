@@ -850,6 +850,24 @@ For more help: orion <command> --help
     subparsers.add_parser("models", help="Show model information")
     subparsers.add_parser("modes", help="Show processing modes")
 
+    # ==================================================================
+    # UNIFIED PERCEPTION PIPELINE - Phases 1-5
+    # ==================================================================
+    run_parser = subparsers.add_parser(
+        "run",
+        help="Run unified 9-modality perception pipeline (Phases 1-5: UnifiedFrame → Visualization → Scale → Tracking → Re-ID)"
+    )
+    run_parser.add_argument("--video", type=str, default="data/examples/video_short.mp4",
+                            help="Path to input video file (default: data/examples/video_short.mp4)")
+    run_parser.add_argument("--max-frames", type=int, default=60,
+                            help="Maximum frames to process (default: 60)")
+    run_parser.add_argument("--benchmark", action="store_true",
+                            help="Show detailed timing breakdown for each phase")
+    run_parser.add_argument("--no-rerun", action="store_true",
+                            help="Disable Rerun visualization logging")
+    run_parser.add_argument("--runtime",
+                            help="Select runtime backend (auto or torch; defaults to config)")
+
     # Service management commands
     services_parser = subparsers.add_parser("services", help="Manage Orion services (Neo4j, Ollama)")
     services_subparsers = services_parser.add_subparsers(dest="service_command", help="Service actions")
@@ -901,7 +919,7 @@ For more help: orion <command> --help
         help="Visualization mode (rerun=3D browser, opencv=windows, none=headless)"
     )
     slam_parser.add_argument("--max-frames", type=int, help="Limit number of frames to process")
-    slam_parser.add_argument("--skip", type=int, default=15, help="Frame skip interval (default: 15 = ~2fps for 30fps video)")
+    slam_parser.add_argument("--skip", type=int, default=30, help="Frame skip interval (default: 30 = ~1fps for 30fps video, use 15-20 for better accuracy)")
     slam_parser.add_argument(
         "--zone-mode",
         choices=["dense", "sparse"],
@@ -1050,6 +1068,62 @@ For more help: orion <command> --help
     config_set_parser.add_argument("value", help="New value")
 
     return parser
+
+
+def _handle_unified_pipeline(args: argparse.Namespace, settings: OrionSettings) -> None:
+    """Handle unified perception pipeline (Phases 1-5)"""
+    from pathlib import Path
+    from .perception.unified_pipeline import UnifiedPipeline
+    
+    video_path = args.video
+    
+    # Check video exists
+    if not Path(video_path).exists():
+        console.print(f"\n[red]❌ Error: Video not found: {video_path}[/red]")
+        return
+    
+    try:
+        console.print("\n" + "="*80)
+        console.print("[bold cyan]🎯 ORION UNIFIED 9-MODALITY PERCEPTION PIPELINE[/bold cyan]")
+        console.print("[bold]Phases 1-5: UnifiedFrame → Visualization → Scale → Tracking → Re-ID[/bold]")
+        console.print("="*80 + "\n")
+        
+        # Prepare runtime if specified
+        if args.runtime:
+            try:
+                backend, _ = _prepare_runtime(args.runtime)
+            except Exception:
+                return
+        
+        pipeline = UnifiedPipeline(
+            video_path=video_path,
+            max_frames=args.max_frames,
+            use_rerun=not args.no_rerun
+        )
+        
+        results = pipeline.run(benchmark=args.benchmark)
+        
+        # Print summary
+        summary_table = Table(title="[bold cyan]Pipeline Summary[/bold cyan]", box=box.ROUNDED, expand=False)
+        summary_table.add_column("Metric", style="cyan", no_wrap=True)
+        summary_table.add_column("Value", style="green", justify="right")
+        
+        summary_table.add_row("Input Video", video_path)
+        summary_table.add_row("Frames Processed", f"{results['frames_processed']}")
+        summary_table.add_row("Raw Detections (Phase 1)", f"{results['total_detections']}")
+        summary_table.add_row("Tracked Objects (Phase 4)", f"{results['tracked_objects']}")
+        summary_table.add_row("Unified Objects (Phase 5)", f"{results['unified_objects']}")
+        summary_table.add_row("Total Reduction", f"{results['reduction_factor']:.1f}x")
+        summary_table.add_row("Processing Time", f"{results['elapsed_time']:.1f}s")
+        summary_table.add_row("FPS", f"{results['fps']:.1f}")
+        
+        console.print("\n", summary_table)
+        console.print("\n" + "="*80 + "\n")
+        
+    except Exception as e:
+        console.print(f"\n[red]❌ Pipeline error: {e}[/red]")
+        import traceback
+        traceback.print_exc()
 
 
 def _handle_research_command(args, settings: OrionSettings) -> None:
@@ -1478,6 +1552,9 @@ def main(argv: list[str] | None = None) -> None:
 
     elif args.command == "modes":
         show_modes()
+
+    elif args.command == "run":
+        _handle_unified_pipeline(args, settings)
 
     elif args.command == "status":
         from .auto_config import status_command

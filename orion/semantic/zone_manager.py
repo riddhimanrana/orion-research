@@ -790,8 +790,12 @@ class ZoneManager:
         if not self.scene_classifier:
             return
         
-        # Classify scene
-        scene_type, confidence = self.scene_classifier.classify(frame)
+        # Classify scene (with objects hint if available)
+        result = self.scene_classifier.classify(frame)
+        if result is None:
+            return  # Skip if classification failed
+        
+        scene_type, confidence = result
         
         # Apply to all zones (simple heuristic: all zones get same label for now)
         # TODO: Improve with per-zone classification using representative frames

@@ -1,6 +1,6 @@
 ### Copilot Instructions for Orion Research Repository
 
-**Top-Level Rule:** Do not create or suggest README files under any circumstances, unless explicitly requested by the user.
+**Top-Level Rule:** Do not create or suggest markdown files under any circumstances, unless explicitly requested by the user.
 
 **General Repository Understanding and Instructions:**
 - This repository is located at `/Users/riddhiman.rana/Desktop/Coding/Orion/orion-research` and focuses on research-related coding projects, likely involving data analysis, machine learning, or experimental software development.

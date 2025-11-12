@@ -57,12 +57,6 @@ class AssetManager:
         project_root = Path(__file__).resolve().parents[2]
         models_dir = project_root / "models"
 
-        # Debug logging
-        console.print(f"[dim]Debug: __file__ = {Path(__file__)}[/dim]")
-        console.print(f"[dim]Debug: resolved = {Path(__file__).resolve()}[/dim]")
-        console.print(f"[dim]Debug: parents[2] = {Path(__file__).resolve().parents[2]}[/dim]")
-        console.print(f"[dim]Debug: models_dir = {models_dir}[/dim]")
-
         return models_dir
 
     @staticmethod

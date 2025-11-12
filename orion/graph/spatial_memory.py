@@ -117,7 +117,7 @@ class SpatialMemorySystem:
     """
     
     def __init__(self, memory_dir: Path = Path("memory")):
-        self.memory_dir = memory_dir
+        self.memory_dir = Path(memory_dir) if isinstance(memory_dir, str) else memory_dir
         self.memory_dir.mkdir(parents=True, exist_ok=True)
         
         # Core memory structures
@@ -129,6 +129,7 @@ class SpatialMemorySystem:
         self.scene_type: Optional[str] = None  # e.g., "kitchen", "office", "living room"
         self.scene_description: Optional[str] = None  # Rich description
         self.spatial_layout: Optional[Dict] = None  # 3D reconstruction info
+        self.current_scene: Optional[Any] = None  # SceneContext from scene_understanding module
         
         # Session tracking
         self.session_start: datetime = datetime.now()

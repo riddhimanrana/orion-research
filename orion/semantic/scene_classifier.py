@@ -10,7 +10,7 @@ Date: November 2025
 
 import numpy as np
 from enum import Enum
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 from dataclasses import dataclass
 
 
@@ -141,55 +141,59 @@ class SceneClassifier:
     def classify(
         self,
         frame: np.ndarray,
-        return_top_k: int = 3
+        objects: Optional[List[str]] = None  # NEW: Object hints
     ) -> Tuple[SceneType, float]:
         """
-        Classify scene type from video frame.
+        Classify scene type from image.
         
         Args:
-            frame: RGB video frame (H, W, 3)
-            return_top_k: Number of top predictions to consider
+            frame: RGB image (H, W, 3)
+            objects: Optional list of detected object classes for hints
         
         Returns:
-            Tuple of (scene_type, confidence)
+            (scene_type, confidence)
         """
         self._ensure_text_embeddings()
         
-        # Extract image embedding
-        img_embedding = self.clip_model.encode_image(frame, normalize=True)
-        
-        # Compute similarities
-        similarities = np.dot(self._text_embeddings, img_embedding)
-        
-        # Get top-k matches
-        top_k_indices = np.argsort(similarities)[-return_top_k:][::-1]
-        
-        # Vote by scene type
-        scene_votes = {}
-        for idx in top_k_indices:
-            scene_type = self._embedding_to_scene[idx]
-            score = float(similarities[idx])
+        # NEW: Object-based hints for scene type
+        object_scene_hints = {
+            # Office indicators
+            ('tv', 'mouse', 'keyboard'): (SceneType.OFFICE, 0.8),
+            ('laptop', 'keyboard', 'mouse'): (SceneType.OFFICE, 0.9),
+            ('laptop', 'keyboard'): (SceneType.OFFICE, 0.7),
+            ('keyboard', 'mouse'): (SceneType.OFFICE, 0.6),
             
-            if scene_type not in scene_votes:
-                scene_votes[scene_type] = []
-            scene_votes[scene_type].append(score)
-        
-        # Aggregate votes (mean similarity)
-        scene_scores = {
-            scene: np.mean(scores)
-            for scene, scores in scene_votes.items()
+            # Kitchen indicators
+            ('oven', 'refrigerator'): (SceneType.KITCHEN, 0.9),
+            ('microwave', 'refrigerator'): (SceneType.KITCHEN, 0.8),
+            
+            # Bedroom indicators
+            ('bed',): (SceneType.BEDROOM, 0.9),
+            
+            # Living room indicators
+            ('couch', 'tv'): (SceneType.LIVING_ROOM, 0.8),
         }
         
-        # Best scene
-        best_scene = max(scene_scores.items(), key=lambda x: x[1])
-        scene_type, confidence = best_scene
+        # Check object hints first
+        if objects and len(objects) >= 2:
+            for obj_combo, (hint_scene, hint_conf) in object_scene_hints.items():
+                if all(obj in objects for obj in obj_combo):
+                    print(f"  🎯 Object hint: {obj_combo} → {hint_scene.value} (conf: {hint_conf:.2f})")
+                    # If hint confidence is high, use it directly
+                    if hint_conf > 0.7:
+                        return hint_scene, hint_conf
         
-        return scene_type, confidence
+        # Get image embedding
+        image_emb = self.clip_model.encode_image(frame, normalize=True)
+        
+        # Compute similarities with all scene prompts
+        similarities = np.dot(self._text_embeddings, image_emb)
     
     def classify_detailed(
         self,
         frame: np.ndarray,
-        prev_frame: Optional[np.ndarray] = None
+        prev_frame: Optional[np.ndarray] = None,
+        objects: Optional[List[str]] = None  # NEW: Object hints
     ) -> SceneClassification:
         """
         Detailed scene classification with context.
@@ -197,12 +201,13 @@ class SceneClassifier:
         Args:
             frame: Current RGB frame
             prev_frame: Previous frame (for motion detection)
+            objects: Optional list of detected object classes
         
         Returns:
             SceneClassification with full details
         """
-        # Get scene type
-        scene_type, confidence = self.classify(frame)
+        # Get scene type with object hints
+        scene_type, confidence = self.classify(frame, objects=objects)
         
         # Determine indoor/outdoor
         indoor_types = {

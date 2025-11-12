@@ -1,0 +1,852 @@
+{
+  "data/examples/test.mp4": {
+    "video": "data/examples/test.mp4",
+    "fps": 29.97002997002997,
+    "frames_processed": 50,
+    "total_detections": 0,
+    "unique_objects": [],
+    "scene_types": [
+      "unknown"
+    ],
+    "frame_data": [
+      {
+        "idx": 0,
+        "timestamp": 0.0,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 1,
+        "timestamp": 0.03336666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 2,
+        "timestamp": 0.06673333333333334,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 3,
+        "timestamp": 0.10010000000000001,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 4,
+        "timestamp": 0.13346666666666668,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 5,
+        "timestamp": 0.16683333333333333,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 6,
+        "timestamp": 0.20020000000000002,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 7,
+        "timestamp": 0.23356666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 8,
+        "timestamp": 0.26693333333333336,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 9,
+        "timestamp": 0.3003,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 10,
+        "timestamp": 0.33366666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 11,
+        "timestamp": 0.3670333333333333,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 12,
+        "timestamp": 0.40040000000000003,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 13,
+        "timestamp": 0.4337666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 14,
+        "timestamp": 0.46713333333333334,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 15,
+        "timestamp": 0.5005000000000001,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 16,
+        "timestamp": 0.5338666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 17,
+        "timestamp": 0.5672333333333334,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 18,
+        "timestamp": 0.6006,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 19,
+        "timestamp": 0.6339666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 20,
+        "timestamp": 0.6673333333333333,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 21,
+        "timestamp": 0.7007,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 22,
+        "timestamp": 0.7340666666666666,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 23,
+        "timestamp": 0.7674333333333333,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 24,
+        "timestamp": 0.8008000000000001,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 25,
+        "timestamp": 0.8341666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 26,
+        "timestamp": 0.8675333333333334,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 27,
+        "timestamp": 0.9009,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 28,
+        "timestamp": 0.9342666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 29,
+        "timestamp": 0.9676333333333333,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 30,
+        "timestamp": 1.0010000000000001,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 31,
+        "timestamp": 1.0343666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 32,
+        "timestamp": 1.0677333333333334,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 33,
+        "timestamp": 1.1011,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 34,
+        "timestamp": 1.1344666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 35,
+        "timestamp": 1.1678333333333333,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 36,
+        "timestamp": 1.2012,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 37,
+        "timestamp": 1.2345666666666666,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 38,
+        "timestamp": 1.2679333333333334,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 39,
+        "timestamp": 1.3013000000000001,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 40,
+        "timestamp": 1.3346666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 41,
+        "timestamp": 1.3680333333333334,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 42,
+        "timestamp": 1.4014,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 43,
+        "timestamp": 1.4347666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 44,
+        "timestamp": 1.4681333333333333,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 45,
+        "timestamp": 1.5015,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 46,
+        "timestamp": 1.5348666666666666,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 47,
+        "timestamp": 1.5682333333333334,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 48,
+        "timestamp": 1.6016000000000001,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 49,
+        "timestamp": 1.6349666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      }
+    ],
+    "timeline": [
+      {
+        "frame": 0,
+        "timestamp": 0.0,
+        "event": "Scene changed to unknown",
+        "objects": []
+      }
+    ],
+    "memgraph_observations": [],
+    "errors": [],
+    "processing_time": 0.22051095962524414,
+    "fps_processed": 226.74609953616107,
+    "gemini_responses": []
+  },
+  "data/examples/video.mp4": {
+    "video": "data/examples/video.mp4",
+    "fps": 29.97002997002997,
+    "frames_processed": 50,
+    "total_detections": 0,
+    "unique_objects": [],
+    "scene_types": [
+      "unknown"
+    ],
+    "frame_data": [
+      {
+        "idx": 0,
+        "timestamp": 0.0,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 1,
+        "timestamp": 0.03336666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 2,
+        "timestamp": 0.06673333333333334,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 3,
+        "timestamp": 0.10010000000000001,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 4,
+        "timestamp": 0.13346666666666668,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 5,
+        "timestamp": 0.16683333333333333,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 6,
+        "timestamp": 0.20020000000000002,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 7,
+        "timestamp": 0.23356666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 8,
+        "timestamp": 0.26693333333333336,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 9,
+        "timestamp": 0.3003,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 10,
+        "timestamp": 0.33366666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 11,
+        "timestamp": 0.3670333333333333,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 12,
+        "timestamp": 0.40040000000000003,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 13,
+        "timestamp": 0.4337666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 14,
+        "timestamp": 0.46713333333333334,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 15,
+        "timestamp": 0.5005000000000001,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 16,
+        "timestamp": 0.5338666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 17,
+        "timestamp": 0.5672333333333334,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 18,
+        "timestamp": 0.6006,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 19,
+        "timestamp": 0.6339666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 20,
+        "timestamp": 0.6673333333333333,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 21,
+        "timestamp": 0.7007,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 22,
+        "timestamp": 0.7340666666666666,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 23,
+        "timestamp": 0.7674333333333333,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 24,
+        "timestamp": 0.8008000000000001,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 25,
+        "timestamp": 0.8341666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 26,
+        "timestamp": 0.8675333333333334,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 27,
+        "timestamp": 0.9009,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 28,
+        "timestamp": 0.9342666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 29,
+        "timestamp": 0.9676333333333333,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 30,
+        "timestamp": 1.0010000000000001,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 31,
+        "timestamp": 1.0343666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 32,
+        "timestamp": 1.0677333333333334,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 33,
+        "timestamp": 1.1011,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 34,
+        "timestamp": 1.1344666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 35,
+        "timestamp": 1.1678333333333333,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 36,
+        "timestamp": 1.2012,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 37,
+        "timestamp": 1.2345666666666666,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 38,
+        "timestamp": 1.2679333333333334,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 39,
+        "timestamp": 1.3013000000000001,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 40,
+        "timestamp": 1.3346666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 41,
+        "timestamp": 1.3680333333333334,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 42,
+        "timestamp": 1.4014,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 43,
+        "timestamp": 1.4347666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 44,
+        "timestamp": 1.4681333333333333,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 45,
+        "timestamp": 1.5015,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 46,
+        "timestamp": 1.5348666666666666,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 47,
+        "timestamp": 1.5682333333333334,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 48,
+        "timestamp": 1.6016000000000001,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      },
+      {
+        "idx": 49,
+        "timestamp": 1.6349666666666667,
+        "objects": 0,
+        "scene": "unknown",
+        "zones": {},
+        "detections": []
+      }
+    ],
+    "timeline": [
+      {
+        "frame": 0,
+        "timestamp": 0.0,
+        "event": "Scene changed to unknown",
+        "objects": []
+      }
+    ],
+    "memgraph_observations": [],
+    "errors": [],
+    "processing_time": 0.19684314727783203,
+    "fps_processed": 254.00935054867858,
+    "gemini_responses": []
+  }
+}

@@ -15,6 +15,7 @@ from .commands import (
     handle_ollama,
     handle_qa,
     handle_research,
+    handle_unified_pipeline,
 )
 from .display import print_banner, show_models, show_modes
 from ..settings import OrionSettings, SettingsError
@@ -115,6 +116,40 @@ For more help: orion <command> --help
     # ═══════════════════════════════════════════════════════════
     subparsers.add_parser("models", help="Show model information")
     subparsers.add_parser("modes", help="Show processing modes")
+
+    # ═══════════════════════════════════════════════════════════
+    # UNIFIED PERCEPTION PIPELINE - Phases 1-5
+    # ═══════════════════════════════════════════════════════════
+    run_parser = subparsers.add_parser(
+        "run",
+        help="Run unified 9-modality perception pipeline (Phases 1-5)"
+    )
+    run_parser.add_argument(
+        "--video",
+        type=str,
+        default="data/examples/video_short.mp4",
+        help="Path to input video file (default: data/examples/video_short.mp4)"
+    )
+    run_parser.add_argument(
+        "--max-frames",
+        type=int,
+        default=60,
+        help="Maximum frames to process (default: 60)"
+    )
+    run_parser.add_argument(
+        "--benchmark",
+        action="store_true",
+        help="Show detailed timing breakdown for each phase"
+    )
+    run_parser.add_argument(
+        "--no-rerun",
+        action="store_true",
+        help="Disable Rerun visualization logging"
+    )
+    run_parser.add_argument(
+        "--runtime",
+        help="Select runtime backend (auto or torch; defaults to config)"
+    )
 
     # ═══════════════════════════════════════════════════════════
     # SERVICE COMMANDS
@@ -321,6 +356,9 @@ def main() -> None:
 
     elif args.command == "modes":
         show_modes()
+
+    elif args.command == "run":
+        handle_unified_pipeline(args, settings)
 
     elif args.command == "services":
         if args.service_command == "neo4j":

@@ -153,8 +153,9 @@ class SemanticSLAM:
             final_pose = landmark_pose
             
         else:
-            # Both failed
-            logger.warning(f"[SemanticSLAM] Frame {frame_idx}: Both visual and landmark tracking failed")
+            # Both failed (normal for first frame)
+            if frame_idx > 0:  # Only warn after first frame
+                logger.warning(f"[SemanticSLAM] Frame {frame_idx}: Both visual and landmark tracking failed")
             final_pose = None
         
         # Update history

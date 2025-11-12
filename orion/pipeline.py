@@ -12,7 +12,7 @@ from typing import Optional, TYPE_CHECKING
 
 from orion.perception.config import PerceptionConfig
 from orion.semantic.config import SemanticConfig
-from orion.graph.database import Neo4jManager
+# from orion.graph.database import Neo4jManager  # REMOVED: Neo4j deprecated, using Memgraph
 from orion.perception.engine import PerceptionEngine
 from orion.semantic.engine import SemanticEngine
 
@@ -29,10 +29,10 @@ class PipelineConfig:
     perception_config: PerceptionConfig = field(default_factory=PerceptionConfig)
     semantic_config: SemanticConfig = field(default_factory=SemanticConfig)
 
-    # Neo4j configuration
-    neo4j_uri: str = "neo4j://localhost:7687"
-    neo4j_user: str = "neo4j"
-    neo4j_password: str = "password"
+    # Graph configuration (deprecated Neo4j, now using Memgraph)
+    # neo4j_uri: str = "neo4j://localhost:7687"
+    # neo4j_user: str = "neo4j"
+    # neo4j_password: str = "password"
 
     # Pipeline behavior
     skip_semantic: bool = False
@@ -64,19 +64,15 @@ class VideoPipeline:
         self.perception_engine = PerceptionEngine(config.perception_config)
         self.semantic_engine = SemanticEngine(config.semantic_config)
 
-        # Initialize Neo4j manager if graph ingestion is enabled
-        self.neo4j_manager: Optional[Neo4jManager] = None
-        if not config.skip_graph_ingestion:
-            try:
-                self.neo4j_manager = Neo4jManager(
-                    uri=config.neo4j_uri,
-                    user=config.neo4j_user,
-                    password=config.neo4j_password,
-                )
-                self.logger.info("Neo4j manager initialized successfully")
-            except Exception as e:
-                self.logger.warning(f"Failed to initialize Neo4j: {e}")
-                self.logger.info("Continuing without graph ingestion")
+        # Graph ingestion disabled (Neo4j deprecated, Memgraph integration pending)
+        # self.neo4j_manager: Optional[Neo4jManager] = None
+        # if not config.skip_graph_ingestion:
+        #     try:
+        #         self.neo4j_manager = Neo4jManager(...)
+        #         self.logger.info("Neo4j manager initialized successfully")
+        #     except Exception as e:
+        #         self.logger.warning(f"Failed to initialize Neo4j: {e}")
+        #         self.logger.info("Continuing without graph ingestion")
 
         self.logger.info("Pipeline initialized successfully")
         
@@ -131,17 +127,17 @@ class VideoPipeline:
         else:  # balanced
             semantic_config = get_balanced_semantic_config()
         
-        # Extract Neo4j config
-        neo4j_dict = config_dict.get("neo4j", {})
+        # Neo4j config deprecated (using Memgraph)
+        # neo4j_dict = config_dict.get("neo4j", {})
         
         # Create pipeline config
         pipeline_config = PipelineConfig(
             perception_config=perception_config,
             semantic_config=semantic_config,
-            neo4j_uri=neo4j_dict.get("uri", "neo4j://localhost:7687"),
-            neo4j_user=neo4j_dict.get("user", "neo4j"),
-            neo4j_password=neo4j_dict.get("password", "password"),
-            skip_graph_ingestion=not neo4j_dict.get("clear_db", True),
+            # neo4j_uri=neo4j_dict.get("uri", "neo4j://localhost:7687"),
+            # neo4j_user=neo4j_dict.get("user", "neo4j"),
+            # neo4j_password=neo4j_dict.get("password", "password"),
+            skip_graph_ingestion=True,  # Disabled until Memgraph integration
         )
         
         # Create pipeline and store video path
@@ -241,19 +237,19 @@ class VideoPipeline:
             else:
                 self.logger.info("Skipping semantic stage (skip_semantic=True)")
 
-            # Stage 3: Graph Ingestion (if not skipped and Neo4j available)
-            if not self.config.skip_graph_ingestion and self.neo4j_manager:
-                self.logger.info("Stage 3: Ingesting to knowledge graph...")
-                graph_result = self._ingest_to_graph(
-                    results, scene_id, metadata
-                )
-                results["graph"] = graph_result
-
-                if inspect_stage == "graph":
-                    self.logger.info(
-                        "Stopping after graph stage (inspect_stage='graph')"
-                    )
-                    return results
+            # Stage 3: Graph Ingestion (disabled - Neo4j deprecated)
+            # if not self.config.skip_graph_ingestion and self.neo4j_manager:
+            #     self.logger.info("Stage 3: Ingesting to knowledge graph...")
+            #     graph_result = self._ingest_to_graph(
+            #         results, scene_id, metadata
+            #     )
+            #     results["graph"] = graph_result
+            # 
+            #     if inspect_stage == "graph":
+            #         self.logger.info(
+            #             "Stopping after graph stage (inspect_stage='graph')"
+            #         )
+            #         return results
 
             self.logger.info("Pipeline completed successfully")
             return results
@@ -380,7 +376,7 @@ class VideoPipeline:
         self, results: dict, scene_id: str, metadata: Optional[dict]
     ) -> dict:
         """
-        Ingest results to Neo4j knowledge graph.
+        Ingest results to knowledge graph (DEPRECATED - Neo4j removed).
 
         Args:
             results: Combined results from perception and semantic stages
@@ -390,74 +386,18 @@ class VideoPipeline:
         Returns:
             Graph ingestion results
         """
-        if not self.neo4j_manager:
-            self.logger.warning("Neo4j manager not available, skipping graph ingestion")
-            return {"status": "skipped", "reason": "Neo4j manager unavailable"}
-
-        try:
-            self.logger.info(f"Ingesting scene '{scene_id}' to Neo4j...")
-            
-            # Clear database if needed
-            if not self.config.skip_graph_ingestion:
-                self.neo4j_manager.clear_database()
-                self.logger.info("  Database cleared")
-            
-            # Get perception and semantic results
-            perception = results.get("perception", {})
-            semantic = results.get("semantic", {})
-            
-            # Ingest entities
-            entities = perception.get("entities", [])
-            for entity in entities:
-                self.neo4j_manager.create_entity_node(
-                    entity_id=entity["entity_id"],
-                    object_class=entity["class"],
-                    properties={
-                        "observations_count": entity.get("observations_count", 0),
-                        "description": entity.get("description", ""),
-                    }
-                )
-            
-            self.logger.info(f"  Ingested {len(entities)} entities")
-            
-            # Create scene node
-            self.neo4j_manager.create_scene_node(
-                scene_id=scene_id,
-                properties={
-                    "video_path": perception.get("video_path", ""),
-                    "duration_seconds": perception.get("duration_seconds", 0.0),
-                    "total_frames": perception.get("total_frames", 0),
-                    "fps": perception.get("fps", 0.0),
-                }
-            )
-            
-            # Link entities to scene
-            for entity in entities:
-                self.neo4j_manager.link_entity_to_scene(
-                    entity["entity_id"],
-                    scene_id
-                )
-            
-            self.logger.info(f"  Created scene node and relationships")
-
-            return {
-                "status": "ingested",
-                "scene_id": scene_id,
-                "entities_ingested": len(entities),
-                "events_ingested": semantic.get("num_events", 0),
-            }
-
-        except Exception as e:
-            self.logger.error(f"Graph ingestion failed: {e}", exc_info=True)
-            return {"status": "failed", "error": str(e)}
+        # Neo4j deprecated - graph ingestion disabled
+        self.logger.warning("Graph ingestion disabled (Neo4j deprecated, Memgraph integration pending)")
+        return {"status": "skipped", "reason": "Neo4j deprecated"}
 
     def close(self):
         """Close all resources"""
-        if self.neo4j_manager:
-            try:
-                self.neo4j_manager.close()
-            except Exception as e:
-                self.logger.warning(f"Error closing Neo4j manager: {e}")
+        # Neo4j manager deprecated
+        # if self.neo4j_manager:
+        #     try:
+        #         self.neo4j_manager.close()
+        #     except Exception as e:
+        #         self.logger.warning(f"Error closing Neo4j manager: {e}")
 
         self.logger.info("Pipeline resources closed")
 

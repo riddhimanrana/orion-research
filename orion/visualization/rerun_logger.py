@@ -614,12 +614,17 @@ class RerunLogger:
         
         rr.set_time_sequence("frame", frame_idx)
         
-        # Log scalars using Scalars archetype (Rerun 0.19.x)
-        rr.log("metrics/fps", rr.Scalars([fps]))
-        rr.log("metrics/entities", rr.Scalars([num_entities]))
-        rr.log("metrics/zones", rr.Scalars([num_zones]))
-        rr.log("metrics/slam_poses", rr.Scalars([slam_poses]))
-        rr.log("metrics/loop_closures", rr.Scalars([loop_closures]))
+        # Log scalars using Scalar archetype (skip if Rerun API incompatible)
+        try:
+            # Try modern Rerun API first
+            rr.log("metrics/fps", rr.Scalar(fps))
+            rr.log("metrics/entities", rr.Scalar(num_entities))
+            rr.log("metrics/zones", rr.Scalar(num_zones))
+            rr.log("metrics/slam_poses", rr.Scalar(slam_poses))
+            rr.log("metrics/loop_closures", rr.Scalar(loop_closures))
+        except (AttributeError, TypeError):
+            # Fallback: skip metrics logging if API is incompatible
+            pass
     
     def log_text(self, entity_path: str, text: str, frame_idx: Optional[int] = None):
         """
