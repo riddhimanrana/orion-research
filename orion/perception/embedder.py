@@ -27,32 +27,45 @@ logger = logging.getLogger(__name__)
 
 
 class VisualEmbedder:
+    """Generates visual embeddings using selected backend (CLIP or DINO).
+
+    When backend=='clip': retains original CLIP behavior (optionally multimodal).
+    When backend=='dino': uses DINO for instance-level embeddings, optionally also
+    generating CLIP embeddings for label verification (stored separately).
     """
-    Generates visual embeddings using CLIP.
-    
-    Supports both vision-only and multimodal (vision + text) embedding.
-    """
-    
+
     def __init__(
         self,
         clip_model,
         config: EmbeddingConfig,
+        dino_model: Optional[object] = None,
     ):
-        """
-        Initialize embedder.
-        
-        Args:
-            clip_model: CLIP model instance from ModelManager
-            config: Embedding configuration
-        """
         self.clip = clip_model
         self.config = config
-        
-        mode = "multimodal" if config.use_text_conditioning else "vision-only"
+        backend = config.backend
+        mode = "multimodal" if (backend == "clip" and config.use_text_conditioning) else "vision-only"
         logger.debug(
-            f"VisualEmbedder initialized: dim={config.embedding_dim}, "
-            f"mode={mode}, batch_size={config.batch_size}"
+            f"VisualEmbedder initialized: backend={backend}, dim={config.embedding_dim}, "
+            f"mode={mode}, batch_size={config.batch_size}, device={config.device}"
         )
+        # DINO model instantiation with device selection
+        if backend == "dino":
+            # If dino_model is already provided, use it; else, create with device
+            if dino_model is not None:
+                self.dino = dino_model
+            else:
+                from orion.backends.dino_backend import DINOBackend
+                # Map "auto" to best available
+                device = config.device
+                import torch
+                if device == "auto":
+                    if torch.cuda.is_available():
+                        device = "cuda"
+                    elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+                        device = "mps"
+                    else:
+                        device = "cpu"
+                self.dino = DINOBackend(device=device)
     
     def embed_detections(self, detections: List[dict]) -> List[dict]:
         """
@@ -68,8 +81,11 @@ class VisualEmbedder:
         logger.info("PHASE 1B: VISUAL EMBEDDING GENERATION")
         logger.info("="*80)
         
-        logger.info(f"Generating {self.config.embedding_dim}-dim CLIP embeddings...")
-        logger.info(f"  Mode: {'Multimodal (vision + text)' if self.config.use_text_conditioning else 'Vision only'}")
+        logger.info(f"Generating {self.config.embedding_dim}-dim {self.config.backend.upper()} embeddings...")
+        if self.config.backend == "clip":
+            logger.info(f"  Mode: {'Multimodal (vision + text)' if self.config.use_text_conditioning else 'Vision only'}")
+        else:
+            logger.info("  Mode: Vision only (DINO does not support text conditioning)")
         logger.info(f"  Processing {len(detections)} detections...")
         
         # Process in batches for efficiency
@@ -99,63 +115,61 @@ class VisualEmbedder:
     def _embed_batch(self, batch: List[dict]) -> List[np.ndarray]:
         """
         Generate embeddings for a batch of detections.
-        
         Args:
             batch: List of detection dicts
-            
         Returns:
             List of embedding arrays
         """
-        embeddings = []
-        
-        for detection in batch:
-            crop = detection["crop"]
-            class_name = detection.get("object_class")
-            
-            embedding = self.embed_crop(crop, class_name)
-            embeddings.append(embedding)
-        
-        return embeddings
+        backend = self.config.backend
+        if backend == "clip":
+            embeddings = []
+            for detection in batch:
+                crop = detection["crop"]
+                class_name = detection.get("object_class")
+                embedding = self._embed_clip(crop, class_name)
+                embeddings.append(embedding)
+            return embeddings
+        elif backend == "dino":
+            crops = [cv2.cvtColor(det["crop"], cv2.COLOR_BGR2RGB) for det in batch]
+            embeddings = self.dino.encode_images_batch(crops, normalize=True)
+            # Optionally produce auxiliary CLIP embedding for semantic verification
+            if self.clip is not None:
+                for detection in batch:
+                    class_name = detection.get("object_class")
+                    detection["clip_embedding"] = self._embed_clip(detection["crop"], class_name)
+            return embeddings
+        else:
+            raise ValueError(f"Unsupported embedding backend: {backend}")
     
-    def embed_crop(
-        self,
-        crop: np.ndarray,
-        class_name: Optional[str] = None,
-    ) -> np.ndarray:
-        """
-        Generate embedding for a single crop.
-        
-        Args:
-            crop: Cropped image region (BGR format)
-            class_name: Optional class name for text conditioning
-            
-        Returns:
-            Normalized embedding vector
-        """
-        # Convert BGR to RGB
+    def _embed_clip(self, crop: np.ndarray, class_name: Optional[str]) -> np.ndarray:
         rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
         pil_image = Image.fromarray(rgb_crop)
-        
-        # Generate embedding
         if self.config.use_text_conditioning and class_name:
-            # Multimodal: condition on YOLO class
-            # This helps catch misclassifications - if image doesn't match class,
-            # embedding will be different from other instances of that class
             embedding = self.clip.encode_multimodal(
                 pil_image,
                 f"a {class_name}",
                 normalize=True,
             )
         else:
-            # Vision only
             embedding = self.clip.encode_image(
                 pil_image,
                 normalize=True,
             )
-        
-        # Ensure normalized
         norm = np.linalg.norm(embedding)
         if norm > 0 and abs(norm - 1.0) > 1e-3:
             embedding = embedding / norm
-        
+        return embedding
+
+    def _embed_dino(self, crop: np.ndarray) -> np.ndarray:
+        if self.dino is None:
+            raise RuntimeError("DINO model requested but not provided to VisualEmbedder")
+        # DINO backend expects numpy array; provide RGB array directly
+        rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+        embedding = self.dino.encode_image(
+            rgb_crop,
+            normalize=True,
+        )
+        norm = np.linalg.norm(embedding)
+        if norm > 0 and abs(norm - 1.0) > 1e-3:
+            embedding = embedding / norm
         return embedding

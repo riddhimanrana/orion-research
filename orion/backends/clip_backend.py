@@ -91,12 +91,14 @@ class CLIPEmbedder:
         
         # Load model and processor
         try:
+            # Use safetensors format to bypass torch CVE-2025-32434
+            self.processor = CLIPProcessor.from_pretrained(model_name, local_files_only=True)
             self.model = CLIPModel.from_pretrained(
                 model_name,
-                torch_dtype=torch.float16 if self.device != "cpu" else torch.float32
+                torch_dtype=torch.float16 if self.device != "cpu" else torch.float32,
+                use_safetensors=True,  # Bypass torch.load vulnerability
+                local_files_only=True  # Use cached models only
             ).to(self.device)
-            
-            self.processor = CLIPProcessor.from_pretrained(model_name)
             
             self.model.eval()
             logger.info("✓ CLIP loaded successfully")

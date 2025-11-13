@@ -22,18 +22,45 @@ import time
 from collections import Counter
 from typing import Dict, List, Optional
 
+# Initialize logger early so optional import warnings work
+logger = logging.getLogger(__name__)
+
 from orion.perception.types import PerceptionResult
 from orion.semantic.types import SemanticResult, SemanticEntity, Event
 from orion.semantic.config import SemanticConfig
 
-from orion.semantic.entity_tracker import SemanticEntityTracker
-from orion.semantic.state_detector import StateChangeDetector
-from orion.semantic.scene_assembler import SceneAssembler
-from orion.semantic.temporal_windows import TemporalWindowManager
-from orion.semantic.causal_scorer import CausalInfluenceScorer
-from orion.semantic.cis_scorer_3d import CausalInfluenceScorer3D  # NEW: 3D CIS
-from orion.semantic.event_composer import EventComposer
-from orion.semantic.temporal_description_generator import TemporalDescriptionGenerator
+try:
+    from orion.semantic.entity_tracker import SemanticEntityTracker  # archived optional
+except Exception:
+    SemanticEntityTracker = None  # type: ignore
+try:
+    from orion.semantic.state_detector import StateChangeDetector  # archived optional
+except Exception:
+    StateChangeDetector = None  # type: ignore
+try:
+    from orion.semantic.scene_assembler import SceneAssembler  # archived optional
+except Exception:
+    SceneAssembler = None  # type: ignore
+try:
+    from orion.semantic.temporal_windows import TemporalWindowManager  # archived optional
+except Exception:
+    TemporalWindowManager = None  # type: ignore
+try:
+    from orion.semantic.causal_scorer import CausalInfluenceScorer  # archived optional
+except Exception:
+    CausalInfluenceScorer = None  # type: ignore
+try:
+    from orion.semantic.cis_scorer_3d import CausalInfluenceScorer3D  # archived optional
+except Exception:
+    CausalInfluenceScorer3D = None  # type: ignore
+try:
+    from orion.semantic.event_composer import EventComposer  # archived optional
+except Exception:
+    EventComposer = None  # type: ignore
+try:
+    from orion.semantic.temporal_description_generator import TemporalDescriptionGenerator  # archived optional
+except Exception:
+    TemporalDescriptionGenerator = None  # type: ignore
 from orion.graph.builder import GraphBuilder
 from orion.semantic.spatial_utils import (
     extract_spatial_features,
@@ -45,7 +72,7 @@ from orion.semantic.spatial_utils import (
     SpatialZone,
 )
 
-logger = logging.getLogger(__name__)
+# (logger already initialized above for early import warnings)
 
 
 class SemanticEngine:
@@ -70,27 +97,34 @@ class SemanticEngine:
         self.model_manager = ModelManager.get_instance()
         
         # Initialize components with shared models
-        self.entity_tracker = SemanticEntityTracker(self.config.state_change)
+        self.entity_tracker = (
+            SemanticEntityTracker(self.config.state_change)
+            if SemanticEntityTracker is not None else None
+        )
         
         # Pass CLIP and FastVLM to description generator
-        self.description_generator = TemporalDescriptionGenerator(
-            clip_model=self.model_manager.clip,  # Use shared CLIP instance
-            vlm_model=self.model_manager.fastvlm,  # Use shared FastVLM instance
-            sample_interval=1.0,  # Sample descriptions every 1 second to increase coverage
-            min_samples_per_entity=2,  # At least 2 descriptions per entity (relaxed)
+        self.description_generator = (
+            TemporalDescriptionGenerator(
+                clip_model=self.model_manager.clip,
+                vlm_model=self.model_manager.fastvlm,
+                sample_interval=1.0,
+                min_samples_per_entity=2,
+            ) if TemporalDescriptionGenerator is not None else None
         )
         
         # Pass CLIP to state detector for text embeddings
-        self.state_detector = StateChangeDetector(
-            embedding_model=self.model_manager.clip,  # Use shared CLIP instance
-            config=self.config.state_change,
+        self.state_detector = (
+            StateChangeDetector(
+                embedding_model=self.model_manager.clip,
+                config=self.config.state_change,
+            ) if StateChangeDetector is not None else None
         )
         
-        self.scene_assembler = SceneAssembler(self.config.temporal_window)
-        self.window_manager = TemporalWindowManager(self.config.temporal_window)
+        self.scene_assembler = SceneAssembler(self.config.temporal_window) if SceneAssembler is not None else None
+        self.window_manager = TemporalWindowManager(self.config.temporal_window) if TemporalWindowManager is not None else None
         
         # Initialize CIS scorer (2D or 3D based on config)
-        if self.config.causal.use_3d_cis:
+        if CausalInfluenceScorer3D is not None and self.config.causal.use_3d_cis:
             self.causal_scorer = CausalInfluenceScorer3D(
                 weight_temporal=self.config.causal.weight_temporal,
                 weight_spatial=self.config.causal.weight_spatial,
@@ -104,11 +138,14 @@ class SemanticEngine:
                 cis_threshold=self.config.causal.cis_threshold,
             )
             logger.info("Using 3D CIS scorer with SLAM + depth")
-        else:
+        elif CausalInfluenceScorer is not None:
             self.causal_scorer = CausalInfluenceScorer(self.config.causal)
             logger.info("Using 2D CIS scorer (legacy)")
+        else:
+            self.causal_scorer = None
+            logger.warning("No causal scorer available; causal links disabled")
         
-        self.event_composer = EventComposer(self.config.event_composition)
+        self.event_composer = EventComposer(self.config.event_composition) if EventComposer is not None else None
         self.graph_builder: Optional[GraphBuilder] = None
         
         if self.config.enable_graph_ingestion:
@@ -147,9 +184,13 @@ class SemanticEngine:
         logger.info(f"\nInput: {perception_result.total_detections} detections across {perception_result.total_frames} frames")
         
         # Step 1: Track entities across time
-        logger.info("\n[1/8] Consolidating semantic entities...")
+        logger.info(f"\n[1/8] Consolidating semantic entities...")
         step_start = time.time()
-        entities = self.entity_tracker.consolidate_entities(perception_result)
+        if self.entity_tracker is not None:
+            entities = self.entity_tracker.consolidate_entities(perception_result)
+        else:
+            entities = []
+            logger.warning("Entity tracker unavailable; skipping consolidation")
         elapsed = time.time() - step_start
         logger.info(f"  ✓ Consolidated {len(entities)} semantic entities ({elapsed:.2f}s)")
         
@@ -159,11 +200,14 @@ class SemanticEngine:
             logger.info(f"    Avg detections/entity: {perception_result.total_detections/len(entities):.1f}")
         
         # Step 1b: Generate temporal descriptions (NEW - critical for state changes)
-        logger.info("\n[1b/8] Generating temporal descriptions...")
+        logger.info(f"\n[1b/8] Generating temporal descriptions...")
         step_start = time.time()
-        self.description_generator.generate_temporal_descriptions(entities)
+        if self.description_generator is not None and entities:
+            self.description_generator.generate_temporal_descriptions(entities)
+        else:
+            logger.warning("Description generator unavailable or no entities; skipping descriptions")
         elapsed = time.time() - step_start
-        total_descriptions = sum(len(e.descriptions) for e in entities)
+        total_descriptions = sum(len(e.descriptions) for e in entities) if entities else 0
         logger.info(f"  ✓ Generated {total_descriptions} temporal descriptions ({elapsed:.2f}s)")
         
         if self.config.verbose and len(entities) > 0:
@@ -173,14 +217,18 @@ class SemanticEngine:
         # Step 2: Detect spatial zones (NEW - Phase 2)
         logger.info("\n[2/8] Detecting spatial zones...")
         step_start = time.time()
-        spatial_zones = self._detect_spatial_zones(entities)
+        spatial_zones = self._detect_spatial_zones(entities) if entities else []
         elapsed = time.time() - step_start
         logger.info(f"  ✓ Detected {len(spatial_zones)} spatial zones ({elapsed:.2f}s)")
         
         # Step 3: Detect state changes
         logger.info("\n[3/8] Detecting state changes...")
         step_start = time.time()
-        state_changes = self.state_detector.detect_changes(entities)
+        if self.state_detector is not None and entities:
+            state_changes = self.state_detector.detect_changes(entities)
+        else:
+            state_changes = []
+            logger.warning("State detector unavailable or no entities; skipping state change detection")
         elapsed = time.time() - step_start
         logger.info(f"  ✓ Detected {len(state_changes)} state changes ({elapsed:.2f}s)")
         
@@ -191,11 +239,19 @@ class SemanticEngine:
         logger.info("\n[4/8] Assembling scenes...")
         step_start = time.time()
         # Create temporal windows first (needed for scenes)
-        windows = self.window_manager.create_windows(
-            state_changes,
-            total_duration=perception_result.duration_seconds,
-        )
-        scenes = self.scene_assembler.assemble_scenes(windows)
+        if self.window_manager is not None:
+            windows = self.window_manager.create_windows(
+                state_changes,
+                total_duration=perception_result.duration_seconds,
+            )
+        else:
+            windows = []
+            logger.warning("Temporal window manager unavailable; skipping window creation")
+        if self.scene_assembler is not None and windows:
+            scenes = self.scene_assembler.assemble_scenes(windows)
+        else:
+            scenes = []
+            logger.warning("Scene assembler unavailable or no windows; skipping scene assembly")
         elapsed = time.time() - step_start
         logger.info(f"  ✓ Assembled {len(scenes)} scenes from {len(windows)} windows ({elapsed:.2f}s)")
         
@@ -208,10 +264,14 @@ class SemanticEngine:
             for e in entities
             if e.average_embedding is not None
         }
-        causal_links = self.causal_scorer.compute_causal_links(
-            state_changes,
-            embeddings,
-        )
+        if self.causal_scorer is not None and state_changes:
+            causal_links = self.causal_scorer.compute_causal_links(
+                state_changes,
+                embeddings,
+            )
+        else:
+            causal_links = []
+            logger.warning("Causal scorer unavailable or no state changes; skipping causal link computation")
         elapsed = time.time() - step_start
         logger.info(f"  ✓ Identified {len(causal_links)} causal links ({elapsed:.2f}s)")
         
@@ -229,7 +289,11 @@ class SemanticEngine:
         # Step 6: Compose events
         logger.info("\n[6/8] Composing events...")
         step_start = time.time()
-        events = self.event_composer.compose_events(windows)
+        if self.event_composer is not None and windows:
+            events = self.event_composer.compose_events(windows)
+        else:
+            events = []
+            logger.warning("Event composer unavailable or no windows; skipping event composition")
         elapsed = time.time() - step_start
         logger.info(f"  ✓ Composed {len(events)} events ({elapsed:.2f}s)")
         

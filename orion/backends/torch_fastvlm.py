@@ -32,7 +32,7 @@ class FastVLMTorchWrapper:
 
     def __init__(
         self,
-        model_source: Optional[str] = "apple/fastvlm-0.5b",
+        model_source: Optional[str] = None,
         *,
         device: Optional[str] = None,
         conv_mode: str = "qwen_2",
@@ -47,7 +47,18 @@ class FastVLMTorchWrapper:
         if not TRANSFORMERS_AVAILABLE:
             raise ImportError("transformers is required for the torch backend. Install with: pip install transformers")
 
-        self.model_source = model_source
+        # Use local model path if available, otherwise fallback to HF
+        if model_source is None:
+            local_path = Path(__file__).parent.parent.parent / "models" / "fastvlm-0.5b"
+            if local_path.exists():
+                self.model_source = str(local_path)
+                logger.info(f"Using local FastVLM model at {self.model_source}")
+            else:
+                self.model_source = "apple/fastvlm-0.5b"
+                logger.info("Using HuggingFace FastVLM model")
+        else:
+            self.model_source = model_source
+        
         self.device = device or self._detect_device()
         self.conv_mode = conv_mode
 
@@ -56,10 +67,11 @@ class FastVLMTorchWrapper:
         self.model = AutoModelForCausalLM.from_pretrained(
             self.model_source,
             trust_remote_code=True,
-            torch_dtype=torch.float16 if self.device != "cpu" else torch.float32
+            torch_dtype=torch.float16 if self.device != "cpu" else torch.float32,
+            local_files_only=True
         ).to(self.device)
         
-        self.processor = AutoProcessor.from_pretrained(self.model_source, trust_remote_code=True)
+        self.processor = AutoProcessor.from_pretrained(self.model_source, trust_remote_code=True, local_files_only=True)
         self.model.eval()
         logger.info(f"✓ FastVLM model loaded on {self.device}")
 
@@ -85,11 +97,8 @@ class FastVLMTorchWrapper:
         if isinstance(image, (str, Path)):
             image = Image.open(image).convert("RGB")
 
-        conversation = [
-            {"role": "user", "content": f'<image>\n{prompt}'}
-        ]
-        
-        prompt_text = self.processor.apply_chat_template(conversation, add_generation_prompt=True)
+        # Format prompt manually since FastVLM doesn't have a chat template
+        prompt_text = f"USER: <image>\n{prompt}\nASSISTANT:"
         
         inputs = self.processor(text=prompt_text, images=image, return_tensors="pt").to(self.device)
 

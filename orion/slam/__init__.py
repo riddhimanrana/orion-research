@@ -8,11 +8,9 @@ Author: Orion Research Team
 Date: November 2025
 """
 
-from orion.slam.slam_engine import SLAMEngine, OpenCVSLAM
-from orion.slam.world_coordinate_tracker import WorldCoordinateTracker
+from orion.slam.slam_engine import SLAMEngine, SLAMConfig
 
 __all__ = [
     'SLAMEngine',
-    'OpenCVSLAM',
-    'WorldCoordinateTracker',
+    'SLAMConfig',
 ]

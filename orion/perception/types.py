@@ -358,6 +358,7 @@ class PerceptionResult:
     total_detections: int = 0
     unique_entities: int = 0
     processing_time_seconds: float = 0.0
+    metrics: Optional[Dict[str, Any]] = None  # Optional tracking/telemetry metrics
     
     def __post_init__(self):
         """Compute statistics"""

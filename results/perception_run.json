@@ -1,0 +1,24 @@
+{
+  "video": "data/examples/video.mp4",
+  "mode": "quick",
+  "yolo_model": "yolo11n",
+  "embedding_backend": "clip",
+  "embedding_dim": 512,
+  "unique_entities": 6,
+  "total_detections": 45,
+  "sampled_frames": 21,
+  "detections_per_sampled_frame": 2.142857142857143,
+  "timings_seconds": {
+    "detection": 26.371,
+    "embedding": 8.676,
+    "tracking": 0.569,
+    "clustering": 0.014,
+    "description": 24.658,
+    "total": 64.298
+  },
+  "tracking_metrics": {
+    "total_tracks": 5,
+    "confirmed_tracks": 5,
+    "active_tracks": 2
+  }
+}

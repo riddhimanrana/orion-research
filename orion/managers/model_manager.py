@@ -89,6 +89,7 @@ class ModelManager:
         self._yolo: Optional[Any] = None
         self._clip: Optional[Any] = None
         self._fastvlm: Optional[Any] = None
+        self._dino: Optional[Any] = None
         
         # Model configuration
         self.yolo_model_name = "yolo11m"  # Default to medium (balanced)
@@ -216,6 +217,52 @@ class ModelManager:
         except Exception as e:
             logger.error(f"Failed to load CLIP: {e}")
             raise
+
+    # ========================================================================
+    # DINO Embedder (v2/v3)
+    # ========================================================================
+
+    @property
+    def dino(self) -> Any:
+        """
+        Get DINO embedder (lazy loaded).
+
+        Returns:
+            DINOEmbedder instance
+        """
+        if self._dino is None:
+            self._dino = self._load_dino()
+        return self._dino
+
+    def _load_dino(self) -> Any:
+        """Load DINO(v2/v3) model for vision embeddings"""
+        try:
+            from orion.backends.dino_backend import DINOEmbedder
+
+            logger.info("Loading DINO embedder (vision-only)…")
+
+            # Try DINOv3 ViT-L/16 local weights first (300M params, 1024-dim embeddings)
+            dinov3_vitl = self.models_dir / "dinov3-vitl16"
+            if dinov3_vitl.exists():
+                logger.info(f"Found DINOv3 ViT-L/16 local weights at {dinov3_vitl}")
+                embedder = DINOEmbedder(
+                    model_name="facebook/dinov3-vitl16-pretrain-lvd1689m",
+                    local_weights_dir=dinov3_vitl,
+                    device=self.device,
+                )
+            else:
+                # Fallback to public DINOv2 (not gated)
+                logger.info("DINOv3 not found, using public DINOv2 (facebook/dinov2-base)")
+                embedder = DINOEmbedder(
+                    model_name="facebook/dinov2-base",
+                    device=self.device,
+                )
+
+            logger.info("✓ DINO loaded (viewpoint-robust embeddings)")
+            return embedder
+        except Exception as e:
+            logger.error(f"Failed to load DINO: {e}")
+            raise
     
     # ========================================================================
     # FastVLM Describer
@@ -283,6 +330,9 @@ class ModelManager:
         if self._fastvlm is not None:
             del self._fastvlm
             self._fastvlm = None
+        if self._dino is not None:
+            del self._dino
+            self._dino = None
         
         # Clear GPU memory
         if torch.cuda.is_available():
@@ -298,6 +348,7 @@ class ModelManager:
             "yolo_loaded": self._yolo is not None,
             "clip_loaded": self._clip is not None,
             "fastvlm_loaded": self._fastvlm is not None,
+            "dino_loaded": self._dino is not None,
         }
         
         if torch.cuda.is_available():

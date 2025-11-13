@@ -263,6 +263,41 @@ class UnifiedRerunVisualizer:
         for obj in frame.objects_3d:
             self._log_single_object(obj, frame)
     
+    def log_enhanced_tracks(self, tracks: List, frame_idx: int, timestamp: float) -> None:
+        """Log tracks from EnhancedTracker with 2D+3D boxes and IDs.
+        
+        Args:
+            tracks: List of Track objects from EnhancedTracker
+            frame_idx: Current frame index
+            timestamp: Current timestamp
+        """
+        rr.set_time_seconds("timestamp", timestamp)
+        rr.set_time_sequence("frame", frame_idx)
+        
+        for track in tracks:
+            # 2D bbox overlay
+            x1, y1, x2, y2 = track.bbox_2d
+            rr.log(
+                f"tracks_2d/track_{track.id}",
+                rr.Boxes2D(
+                    array=[[x1, y1, x2 - x1, y2 - y1]],
+                    labels=[f"#{track.id} {track.class_name}"],
+                    colors=[(0, 255, 0)],
+                ),
+            )
+            
+            # 3D position
+            pos_3d = track.bbox_3d[:3]  # [x, y, z]
+            rr.log(
+                f"world/tracks/track_{track.id}",
+                rr.Points3D(
+                    positions=[pos_3d],
+                    colors=[(0, 255, 0)],
+                    radii=[0.05],
+                    labels=[f"#{track.id} {track.class_name} ({track.confidence:.2f})"],
+                ),
+            )
+    
     def _log_single_object(self, obj: Object3D, frame: UnifiedFrame) -> None:
         """Log a single 3D bounding box"""
         # Extract 2D box dimensions from bbox_2d

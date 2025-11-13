@@ -268,6 +268,10 @@ class SLAMEngine:
         """
         self.loop_closure_callbacks.append(callback)
     
+    def get_latest_pose(self) -> Optional[np.ndarray]:
+        """Get most recent camera pose (4x4 transform) or None if no frames processed yet."""
+        return self.poses[-1] if self.poses else None
+    
     def process_frame(
         self,
         frame: np.ndarray,

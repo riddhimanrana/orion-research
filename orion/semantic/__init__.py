@@ -38,45 +38,8 @@ from orion.semantic.config import (
     SemanticConfig,
 )
 
-# Engine component exports
-from orion.semantic.entity_tracker import SemanticEntityTracker
-from orion.semantic.state_detector import StateChangeDetector
-from orion.semantic.scene_assembler import SceneAssembler
-from orion.semantic.temporal_windows import TemporalWindowManager
-from orion.semantic.causal_scorer import CausalInfluenceScorer
-from orion.semantic.event_composer import EventComposer
-from orion.graph.builder import GraphBuilder
+# Engine export (minimal – deprecated component modules archived)
 from orion.semantic.engine import SemanticEngine, run_semantic
-
-__all__ = [
-    # Types
-    "ChangeType",
-    "StateChange",
-    "TemporalWindow",
-    "CausalLink",
-    "SceneSegment",
-    "LocationProfile",
-    "Event",
-    "SemanticEntity",
-    "SemanticResult",
-    # Config
-    "StateChangeConfig",
-    "TemporalWindowConfig",
-    "EventCompositionConfig",
-    "CausalConfig",
-    "SemanticConfig",
-    # Components
-    "SemanticEntityTracker",
-    "StateChangeDetector",
-    "SceneAssembler",
-    "TemporalWindowManager",
-    "CausalInfluenceScorer",
-    "EventComposer",
-    "GraphBuilder",
-    # Engine
-    "SemanticEngine",
-    "run_semantic",
-]
 
 
 from .types import (
@@ -122,4 +85,7 @@ __all__ = [
     "get_fast_semantic_config",
     "get_balanced_semantic_config",
     "get_accurate_semantic_config",
+    # Engine
+    "SemanticEngine",
+    "run_semantic",
 ]

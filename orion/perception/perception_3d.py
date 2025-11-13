@@ -63,7 +63,12 @@ class Perception3DEngine:
         self.depth_estimator = None
         if enable_depth:
             logger.info("[Phase1] Initializing depth estimator...")
-            self.depth_estimator = DepthEstimator(model_name=depth_model, device=device)
+            # DepthEstimator now only supports DepthAnythingV2
+            self.depth_estimator = DepthEstimator(
+                model_name="depth_anything_v2",
+                model_size="small",  # fast for real-time
+                device=device
+            )
         
         # Initialize hand tracker
         self.hand_tracker = None

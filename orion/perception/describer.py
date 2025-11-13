@@ -242,7 +242,7 @@ class EntityDescriber:
         prompt = "Describe what you see in this image in detail. Focus on the main object, its appearance, color, shape, and any distinguishing features."
         
         try:
-            description = self.vlm.generate(
+            description = self.vlm.generate_description(
                 image=pil_image,
                 prompt=prompt,
                 max_tokens=self.config.max_tokens,

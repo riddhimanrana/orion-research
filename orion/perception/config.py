@@ -82,10 +82,18 @@ class EmbeddingConfig:
     embedding_dim: int = 512
     """Output embedding dimension"""
     
+    backend: Literal["clip", "dino"] = "clip"
+    """Embedding backend to use ('clip' for CLIP, 'dino' for DINOv3)."""
+    
+
+    # Device selection
+    device: str = "auto"  # "auto", "cuda", "mps", "cpu"
+    """Device for embedding model (auto/cuda/mps/cpu)"""
+
     # Batch processing
     batch_size: int = 32
     """Embeddings per batch (higher = faster but more memory)"""
-    
+
     # Conditioning
     use_text_conditioning: bool = True
     """Condition embeddings on YOLO class labels"""
@@ -106,15 +114,24 @@ class EmbeddingConfig:
                 f"embedding_dim must be one of {valid_dims}, got {self.embedding_dim}"
             )
         
+        if self.backend not in {"clip", "dino"}:
+            raise ValueError(f"backend must be 'clip' or 'dino', got {self.backend}")
+        
+        if self.backend == "dino" and self.use_text_conditioning:
+            # DINO does not support multimodal conditioning; warn and disable
+            logger.warning("Text conditioning requested with DINO backend; disabling use_text_conditioning.")
+            self.use_text_conditioning = False
+        
         if self.batch_size < 1:
             raise ValueError(f"batch_size must be >= 1, got {self.batch_size}")
-        
         if self.batch_size > 256:
             logger.warning(f"Very large batch_size: {self.batch_size}. May cause OOM.")
-        
+        valid_devices = {"auto", "cuda", "mps", "cpu"}
+        if self.device not in valid_devices:
+            raise ValueError(f"device must be one of {valid_devices}, got {self.device}")
         logger.debug(
             f"EmbeddingConfig validated: model={self.model}, "
-            f"dim={self.embedding_dim}, batch_size={self.batch_size}"
+            f"dim={self.embedding_dim}, batch_size={self.batch_size}, device={self.device}"
         )
 
 
@@ -207,7 +224,7 @@ class PerceptionConfig:
     """Enable 3D perception (depth, 3D coordinates, occlusion)"""
     
     depth_model: Literal["midas", "zoe"] = "midas"
-    """Depth estimation model (midas=fast, zoe=accurate)"""
+    """Depth estimation model (deprecated; DepthAnythingV2 is now used internally)"""
     
     # TODO: Hand tracking (future implementation with HOT3D dataset)
     # enable_hands: bool = False
@@ -234,6 +251,29 @@ class PerceptionConfig:
     
     tracking_class_belief_lr: float = 0.3
     """Learning rate for Bayesian class belief updates"""
+
+    # Tracker backend selection (prototype: 'simple' existing logic or 'tapnet')
+    tracker_backend: Literal["simple", "tapnet"] = "simple"
+    """Select tracking backend: 'simple' (current centroid/HDBSCAN) or 'tapnet' (point trajectory model)"""
+
+    # TapNet configuration (only used when tracker_backend='tapnet')
+    tapnet_checkpoint_path: Optional[str] = None
+    """Local path to TapNet / BootsTAPIR causal checkpoint (e.g., models/tapnet/causal_bootstapir_checkpoint.pt). Required for tapnet backend."""
+
+    tapnet_max_points: int = 256
+    """Maximum number of query points to track (sampled from detections centroids)."""
+
+    tapnet_resolution: int = 256
+    """Inference resolution (square). 256 for speed, 512 for accuracy."""
+
+    tapnet_online_mode: bool = True
+    """Use causal/online TapNet variant (per-frame). Set False for full-video batch (higher latency)."""
+
+    tapnet_min_track_length: int = 3
+    """Minimum length (frames) before promoting a point track to a persistent entity candidate."""
+
+    tapnet_reid_merge_similarity: float = 0.35
+    """Cosine similarity threshold between DINOv3 embeddings of track endpoints to merge trajectories (entity persistence)."""
     
     def __post_init__(self):
         """Validate perception config"""
@@ -253,6 +293,20 @@ class PerceptionConfig:
             f"scene_detection={self.use_scene_detection}, "
             f"3d_enabled={self.enable_3d}"
         )
+
+        # TapNet validation
+        if self.tracker_backend == "tapnet":
+            if not self.tapnet_checkpoint_path:
+                logger.warning(
+                    "tracker_backend='tapnet' but tapnet_checkpoint_path not set. "
+                    "Tracking will fall back to 'simple'. Set tapnet_checkpoint_path to enable TapNet."
+                )
+                self.tracker_backend = "simple"
+            if self.tapnet_resolution not in (256, 512):
+                logger.warning(
+                    f"tapnet_resolution={self.tapnet_resolution} unsupported; forcing 256"
+                )
+                self.tapnet_resolution = 256
 
 
 # Preset configurations
@@ -307,6 +361,7 @@ def get_accurate_config() -> PerceptionConfig:
     Accurate mode: maximum quality (slowest)
     
     For research and evaluation
+    Enables: DINO embeddings, SLAM, 3D perception, tracking
     """
     return PerceptionConfig(
         detection=DetectionConfig(
@@ -315,11 +370,16 @@ def get_accurate_config() -> PerceptionConfig:
         ),
         embedding=EmbeddingConfig(
             embedding_dim=1024,
+            backend="dino",
             batch_size=16,
+            device="auto",  # Use GPU if available
         ),
         description=DescriptionConfig(
             max_tokens=300,
             temperature=0.2,
         ),
         target_fps=8.0,
+        enable_3d=True,
+        depth_model="midas",  # Note: DepthAnythingV2 used internally regardless
+        enable_tracking=True,
     )

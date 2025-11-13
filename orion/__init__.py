@@ -42,7 +42,8 @@ from orion.semantic import (
 from orion.semantic.engine import SemanticEngine, run_semantic
 
 # Pipeline exports
-from orion.pipeline import VideoPipeline
+# Note: Old pipeline.py archived. Use core_pipeline for new code.
+# from orion.pipeline import VideoPipeline
 
 __all__ = [
     # Version
@@ -70,5 +71,5 @@ __all__ = [
     "SemanticEngine",
     "run_semantic",
     # Pipeline
-    "VideoPipeline",
+    # "VideoPipeline",  # Use orion.core_pipeline instead
 ]

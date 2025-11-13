@@ -1,8 +1,9 @@
-"""
+"""  
 Entity Tracker
 ==============
 
 Clusters observations into unique tracked entities using HDBSCAN.
+Also provides TrackerProtocol interface for pluggable trackers.
 
 Responsibilities:
 - Cluster observations by embedding similarity
@@ -10,6 +11,7 @@ Responsibilities:
 - Compute entity statistics (appearance count, temporal bounds)
 - Select best observation per entity for description
 - Provide lightweight motion tracking utilities for causal inference
+- Define protocol interface for all tracker implementations
 
 Author: Orion Research Team
 Date: October 2025
@@ -19,7 +21,7 @@ import logging
 import math
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Deque, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Deque, Dict, List, Optional, Protocol, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -37,6 +39,27 @@ logger = logging.getLogger(__name__)
 
 Vector2 = Tuple[float, float]
 BBox = Sequence[Union[float, int]]
+
+
+class TrackerProtocol(Protocol):
+    """Minimal protocol all trackers should satisfy."""
+
+    def update(
+        self,
+        detections: List[Dict],
+        embeddings: Optional[List[np.ndarray]] = None,
+        camera_pose: Optional[np.ndarray] = None,
+        frame_idx: int = 0,
+    ) -> List[Any]:
+        """Update tracker state with detections for a single frame.
+
+        Returns a list of confirmed track objects (implementation-defined).
+        """
+        ...
+
+    def get_statistics(self) -> Dict:
+        """Return tracker stats for monitoring/telemetry."""
+        ...
 
 
 def bbox_to_centroid(bbox: BBox) -> Vector2:
@@ -208,20 +231,24 @@ class EntityTracker:
         if not HDBSCAN_AVAILABLE:
             return self._fallback_clustering(observations)
         
-        # Extract embeddings
+        # Extract and normalize embeddings for cosine similarity via euclidean
         embeddings = np.array([obs.visual_embedding for obs in observations])
         logger.info(f"  Embedding shape: {embeddings.shape}")
         
-        # Run HDBSCAN
+        # Normalize embeddings (euclidean distance on normalized vectors = cosine distance)
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        embeddings_normalized = embeddings / (norms + 1e-8)
+        
+        # Run HDBSCAN with loose parameters - create large cohesive clusters for cross-view Re-ID
         clusterer = hdbscan.HDBSCAN(
-            min_cluster_size=3,
+            min_cluster_size=2,
             min_samples=1,
-            metric="euclidean",
-            cluster_selection_epsilon=0.35,
+            metric="euclidean",  # Euclidean on normalized vectors = cosine similarity
+            cluster_selection_epsilon=0.65,  # Very loose - let Phase 5 handle fine-grained merging
             cluster_selection_method="eom",
         )
         
-        labels = clusterer.fit_predict(embeddings)
+        labels = clusterer.fit_predict(embeddings_normalized)
         
         # Analyze clustering results
         unique_labels = set(labels)

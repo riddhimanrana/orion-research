@@ -43,6 +43,13 @@ class Track:
     # Depth and zone
     depth_mm: float
     zone_id: Optional[str]
+    
+    @property
+    def velocity(self) -> Optional[np.ndarray]:
+        """Get 2D velocity in pixels/frame for spatial matching."""
+        if self.state is not None and len(self.state) >= 6:
+            return self.state[3:5]  # [vx, vy] in pixels/frame
+        return None
 
 
 class KalmanFilter3D:
@@ -125,6 +132,7 @@ class EnhancedTracker:
         appearance_threshold: float = 0.5,  # Cosine similarity threshold
         max_gallery_size: int = 5,  # Max embeddings per track
         ema_alpha: float = 0.9,  # EMA weight for appearance
+        clip_model = None,  # For label verification
     ):
         self.max_age = max_age
         self.min_hits = min_hits
@@ -132,6 +140,14 @@ class EnhancedTracker:
         self.appearance_threshold = appearance_threshold
         self.max_gallery_size = max_gallery_size
         self.ema_alpha = ema_alpha
+        self.clip_model = clip_model
+        
+        # Workspace categories for CLIP verification
+        self.workspace_categories = [
+            "laptop", "keyboard", "mouse", "monitor", "phone",
+            "backpack", "water bottle", "coffee cup",
+            "desk", "chair", "cable", "lamp"
+        ]
         
         self.tracks: List[Track] = []
         self.next_id = 0
@@ -139,6 +155,76 @@ class EnhancedTracker:
         
         # Camera motion compensation
         self.last_camera_pose: Optional[np.ndarray] = None
+        
+        # Label normalization map
+        self.label_normalization = {
+            'laptop keyboard': 'keyboard',
+            'musical keyboard': 'keyboard',
+            'keyboard': 'keyboard',
+            'desktop computer': 'laptop',
+            'laptop': 'laptop',
+            'computer monitor': 'monitor',
+            'monitor': 'monitor',
+            'diaper bag': 'backpack',
+            'backpack': 'backpack',
+            'bag': 'backpack',
+            'water bottle': 'bottle',
+            'thermos': 'bottle',
+            'thermos bottle': 'bottle',
+            'bottle': 'bottle',
+        }
+    
+    def _normalize_label(self, class_name: str) -> str:
+        """Normalize YOLO label variants to canonical form."""
+        return self.label_normalization.get(class_name.lower(), class_name)
+    
+    def _verify_and_correct_label(self, class_name: str, embedding: Optional[np.ndarray]) -> Tuple[str, float, str]:
+        """
+        Verify YOLO label using CLIP, correct if needed.
+        
+        Returns: (final_label, confidence, method)
+            method: "yolo_verified", "clip_corrected", "needs_fastvlm"
+        """
+        if self.clip_model is None or embedding is None:
+            return class_name, 1.0, "yolo_only"
+        
+        from sklearn.metrics.pairwise import cosine_similarity
+        
+        # Verify YOLO label
+        yolo_text_emb = self.clip_model.encode_text(f"a photo of a {class_name}", normalize=True)
+        yolo_similarity = cosine_similarity(
+            embedding.reshape(1, -1),
+            yolo_text_emb.reshape(1, -1)
+        )[0][0]
+        
+        # If YOLO seems reasonable, use it
+        if yolo_similarity > 0.28:
+            return class_name, yolo_similarity, "yolo_verified"
+        
+        # Try workspace categories
+        best_category = None
+        best_score = 0.0
+        
+        for category in self.workspace_categories:
+            cat_text_emb = self.clip_model.encode_text(f"a photo of a {category}", normalize=True)
+            score = cosine_similarity(
+                embedding.reshape(1, -1),
+                cat_text_emb.reshape(1, -1)
+            )[0][0]
+            
+            if score > best_score:
+                best_score = score
+                best_category = category
+        
+        # Use better match
+        if best_score > yolo_similarity:
+            return best_category, best_score, "clip_corrected"
+        
+        # Unknown object
+        if best_score < 0.25:
+            return "unknown", best_score, "needs_fastvlm"
+        
+        return best_category, best_score, "clip_classified"
     
     def update(
         self,
@@ -255,51 +341,100 @@ class EnhancedTracker:
         embeddings: Optional[List[np.ndarray]],
     ) -> np.ndarray:
         """
-        Compute cost matrix: (1 - IoU) + (1 - appearance_sim).
-        Lower cost = better match.
+        Compute cost matrix using spatial-semantic matching.
+        Cost = 0.5*spatial + 0.2*size + 0.25*semantic + 0.05*appearance
+        
+        This addresses CLIP embedding limitations (0.78 avg similarity for different objects).
+        Spatial and semantic consistency are more reliable than appearance for egocentric video.
         """
         num_tracks = len(self.tracks)
         num_dets = len(detections)
         
         cost_matrix = np.zeros((num_tracks, num_dets))
         
+        # Frame diagonal for normalizing distances
+        frame_diag = np.sqrt(1920**2 + 1080**2)  # Assuming 1080p
+        
         for t_idx, track in enumerate(self.tracks):
             for d_idx, det in enumerate(detections):
-                # IoU cost (3D or 2D)
-                iou = self._compute_iou_3d(
-                    track.bbox_3d[:3],  # Use predicted position
-                    det['bbox_3d'][:3],
-                    track.bbox_3d[3:],
-                    det['bbox_3d'][3:],
-                )
-                iou_cost = 1.0 - iou
+                # 1. Spatial cost: distance between predicted and detected position
+                det_center = np.array([
+                    (det['bbox_2d'][0] + det['bbox_2d'][2]) / 2,
+                    (det['bbox_2d'][1] + det['bbox_2d'][3]) / 2
+                ], dtype=np.float64)
                 
-                # Appearance cost (if available)
-                appearance_cost = 0.5  # Neutral if no embeddings
+                # Use 2D bbox center from track (not 3D backprojection)
+                track_center = np.array([
+                    (track.bbox_2d[0] + track.bbox_2d[2]) / 2.0,
+                    (track.bbox_2d[1] + track.bbox_2d[3]) / 2.0
+                ], dtype=np.float64)
+                
+                # Add velocity prediction if available
+                if hasattr(track, 'velocity') and track.velocity is not None:
+                    track_center = track_center + track.velocity[:2].astype(np.float64)
+                
+                spatial_dist = np.linalg.norm(det_center - track_center)
+                spatial_cost = min(1.0, spatial_dist / frame_diag)
+                
+                # 2. Size cost: bbox area change
+                # 2. Size cost: bbox area change (use 2D bbox)
+                det_area = (det['bbox_2d'][2] - det['bbox_2d'][0]) * \
+                          (det['bbox_2d'][3] - det['bbox_2d'][1])
+                track_area = (track.bbox_2d[2] - track.bbox_2d[0]) * \
+                            (track.bbox_2d[3] - track.bbox_2d[1])
+                
+                if track_area > 0:
+                    size_ratio = det_area / track_area
+                    # Allow 2x growth/shrink before heavy penalty
+                    if 0.5 < size_ratio < 2.0:
+                        size_cost = abs(1.0 - size_ratio)
+                    else:
+                        size_cost = 1.0
+                else:
+                    size_cost = 0.5
+                
+                # 3. Semantic cost: class mismatch (use normalized labels)
+                det_normalized = self._normalize_label(det['class_name'])
+                track_normalized = self._normalize_label(track.class_name)
+                semantic_cost = 0.0 if det_normalized == track_normalized else 1.0
+                
+                # 4. Appearance cost: weak signal (CLIP not discriminative enough)
+                appearance_cost = 0.5  # Neutral default
                 if embeddings is not None and track.avg_appearance is not None:
                     similarity = self._cosine_similarity(
                         track.avg_appearance, embeddings[d_idx]
                     )
                     appearance_cost = 1.0 - similarity
                 
-                # Combined cost (weight IoU more for real-time performance)
-                cost_matrix[t_idx, d_idx] = 0.7 * iou_cost + 0.3 * appearance_cost
+                # Combined cost with spatial-semantic priority
+                # In egocentric video: semantic + size more reliable than spatial
+                # (camera moves a lot, making spatial unreliable)
+                cost_matrix[t_idx, d_idx] = (
+                    0.3 * spatial_cost +      # Reduced (camera moves)
+                    0.2 * size_cost +          # Same
+                    0.45 * semantic_cost +     # Increased (normalized labels reliable)
+                    0.05 * appearance_cost     # Same (CLIP not discriminative)
+                )
         
         return cost_matrix
     
     def _hungarian_matching(
         self, cost_matrix: np.ndarray
     ) -> Tuple[List[Tuple[int, int]], List[int], List[int]]:
-        """Hungarian algorithm for optimal assignment."""
+        """Hungarian algorithm for optimal assignment with spatial-semantic threshold."""
         from scipy.optimize import linear_sum_assignment
         
         # Find optimal assignment
         track_indices, det_indices = linear_sum_assignment(cost_matrix)
         
-        # Filter by threshold
+        # Filter by threshold (VERY lenient - egocentric video has lots of motion)
         matches = []
         for t_idx, d_idx in zip(track_indices, det_indices):
-            if cost_matrix[t_idx, d_idx] < 0.7:  # Combined threshold
+            # Very lenient: if same class (semantic=0), allow high spatial cost
+            # Cost = 0.3*spatial + 0.2*size + 0.45*semantic + 0.05*appearance
+            # Same class worst case: 0.3*1 + 0.2*1 + 0.45*0 + 0.05*1 = 0.55
+            # Different class: always > 0.45, so max threshold 0.8
+            if cost_matrix[t_idx, d_idx] < 0.8:
                 matches.append((t_idx, d_idx))
         
         # Unmatched detections and tracks
@@ -359,6 +494,12 @@ class EnhancedTracker:
         """Create new track from unmatched detection."""
         pos = detection['bbox_3d'][:3]
         
+        # Verify and correct label using CLIP
+        corrected_label, label_confidence, method = self._verify_and_correct_label(
+            detection['class_name'],
+            embedding
+        )
+        
         # Initialize Kalman state: [x, y, z, vx, vy, vz]
         state = np.zeros(6)
         state[:3] = pos
@@ -371,7 +512,7 @@ class EnhancedTracker:
         
         track = Track(
             id=self.next_id,
-            class_name=detection['class_name'],
+            class_name=corrected_label,  # Use corrected label, not YOLO's guess
             bbox_3d=detection['bbox_3d'],
             bbox_2d=detection['bbox_2d'],
             confidence=detection['confidence'],
