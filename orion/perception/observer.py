@@ -26,14 +26,6 @@ from orion.perception.config import DetectionConfig
 
 logger = logging.getLogger(__name__)
 
-# Optional 3D perception imports
-try:
-    from orion.perception.perception_3d import Perception3DEngine
-    PERCEPTION_3D_AVAILABLE = True
-except ImportError:
-    PERCEPTION_3D_AVAILABLE = False
-    logger.warning("3D perception not available (Perception3DEngine import failed)")
-
 
 class FrameObserver:
     """

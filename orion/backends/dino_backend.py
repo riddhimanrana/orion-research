@@ -54,6 +54,9 @@ class DINOEmbedder:
         self._timm_transform = None
 
         self._load_model()
+        # Video feature cache (for dinov3 video mode stub)
+        self._last_video_frame_index: Optional[int] = None
+        self._last_video_feature_map: Optional[np.ndarray] = None  # (Hf,Wf,D)
 
     def _load_model(self) -> None:
         # Try local weights first if specified
@@ -109,8 +112,17 @@ class DINOEmbedder:
             import torch  # type: ignore
             from torchvision import transforms  # type: ignore
 
-            logger.info(f"Loading DINO via timm backbone: {self.model_name}")
-            self._timm_model = timm.create_model(self.model_name, pretrained=True)
+            # Map HF model names to timm equivalents
+            timm_model_name = self.model_name
+            if "facebook/dinov2-base" in self.model_name:
+                timm_model_name = "vit_base_patch14_dinov2.lvd142m"
+            elif "facebook/dinov2-small" in self.model_name:
+                timm_model_name = "vit_small_patch14_dinov2.lvd142m"
+            elif "facebook/dinov2-large" in self.model_name:
+                timm_model_name = "vit_large_patch14_dinov2.lvd142m"
+
+            logger.info(f"Loading DINO via timm backbone: {timm_model_name}")
+            self._timm_model = timm.create_model(timm_model_name, pretrained=True)
             self._timm_model.reset_classifier(0)
 
             # Device placement
@@ -209,6 +221,48 @@ class DINOEmbedder:
         else:
             emb = emb.astype(np.float32)
         return emb
+
+    # ===========================
+    # Video feature map interface
+    # ===========================
+    def extract_frame_features(self, image: np.ndarray) -> np.ndarray:
+        """Stub for DINOv3 video encoder feature map extraction.
+
+        Real implementation would run backbone and return spatial feature map
+        for region pooling. Here we degrade gracefully by returning a single
+        global embedding expanded spatially.
+        """
+        emb = self.encode_image(image, normalize=True)  # (D,)
+        # Create fake spatial map (16x16) by tiling
+        side = 16
+        fmap = np.tile(emb[None, None, :], (side, side, 1))  # (Hf,Wf,D)
+        return fmap.astype(np.float32)
+
+    def pool_region(self, feature_map: np.ndarray, bbox: tuple, frame_shape: tuple) -> np.ndarray:
+        """Average-pool embedding over bbox region (scaled to feature map).
+
+        Args:
+            feature_map: (Hf,Wf,D)
+            bbox: (x1,y1,x2,y2) in pixel coords of original frame
+            frame_shape: (H,W) of original frame
+        Returns:
+            np.ndarray (D,) pooled embedding
+        """
+        Hf, Wf, D = feature_map.shape
+        H, W = frame_shape[:2]
+        x1, y1, x2, y2 = bbox
+        # Scale to feature map indices
+        fx1 = int(max(0, min(Wf - 1, x1 / W * Wf)))
+        fy1 = int(max(0, min(Hf - 1, y1 / H * Hf)))
+        fx2 = int(max(0, min(Wf - 1, x2 / W * Wf)))
+        fy2 = int(max(0, min(Hf - 1, y2 / H * Hf)))
+        if fx2 <= fx1 or fy2 <= fy1:
+            return feature_map.mean(axis=(0, 1))
+        region = feature_map[fy1:fy2, fx1:fx2, :]
+        pooled = region.mean(axis=(0, 1))
+        # Normalize again for safety
+        n = np.linalg.norm(pooled) + 1e-8
+        return (pooled / n).astype(np.float32)
 
     def encode_images_batch(self, images: List[np.ndarray], normalize: bool = True) -> List[np.ndarray]:
         """

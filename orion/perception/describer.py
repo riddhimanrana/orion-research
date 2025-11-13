@@ -23,12 +23,30 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from orion.perception.types import PerceptionEntity, Observation
+from orion.perception.types import PerceptionEntity, Observation, BoundingBox
 from orion.perception.config import DescriptionConfig
-from orion.perception.spatial_analyzer import calculate_spatial_zone
 from orion.perception.corrector import ClassCorrector
 
 logger = logging.getLogger(__name__)
+
+
+def calculate_spatial_zone(bbox: BoundingBox, frame_width: float = 1920.0, frame_height: float = 1080.0) -> str:
+    """Classify spatial zone from bounding box (simplified inline version)."""
+    if frame_width <= 0 or frame_height <= 0:
+        return "unknown"
+    cx = (bbox.x1 + bbox.x2) / 2.0
+    cy = (bbox.y1 + bbox.y2) / 2.0
+    ny = max(0.0, min(1.0, cy / frame_height))
+    if ny < 0.15:
+        return "ceiling"
+    elif ny < 0.35:
+        return "wall_upper"
+    elif ny < 0.65:
+        return "wall_middle"
+    elif ny < 0.75:
+        return "wall_lower"
+    else:
+        return "floor"
 
 
 class EntityDescriber:

@@ -222,7 +222,13 @@ class PerceptionEngine:
             "yolo_model": self.config.detection.model,
             "tracker_backend": self.config.tracker_backend,
             "tapnet_tracks": len(self.tapnet_tracker.get_active_tracks()) if self.tapnet_tracker else 0,
+            "cluster_embeddings": int(sum(1 for d in detections if 'cluster_rep_id' in d and d.get('cluster_size'))),
+            "avg_cluster_size": float(np.mean([d.get('cluster_size',1) for d in detections if d.get('cluster_size')])) if any(d.get('cluster_size') for d in detections) else 1.0,
         })
+
+        # Inject Re-ID metrics if available
+        if hasattr(self, "_reid_metrics") and isinstance(self._reid_metrics, dict):
+            result_metrics["reid"] = self._reid_metrics
 
         result = PerceptionResult(
             entities=entities,
@@ -257,9 +263,16 @@ class PerceptionEngine:
         yolo = self.model_manager.yolo
         logger.info("  ✓ YOLO11x loaded")
         
-        # CLIP (always available for semantics/descriptions)
-        clip = self.model_manager.clip
-        logger.info("  ✓ CLIP loaded (semantic + description)")
+        # CLIP (only load if requested by backend or text conditioning)
+        clip = None
+        try:
+            if self.config.embedding.backend == "clip" or self.config.embedding.use_text_conditioning:
+                clip = self.model_manager.clip
+                logger.info("  ✓ CLIP loaded (semantic + description)")
+            else:
+                logger.info("  ✓ Skipping CLIP load (backend does not require it)")
+        except Exception as e:
+            logger.warning(f"  ✗ CLIP load failed: {e}. Proceeding without CLIP.")
 
         # DINO (instance-level embeddings) if requested
         dino = None
@@ -454,10 +467,12 @@ class PerceptionEngine:
         logger.info("✓ Visualization data export complete\n")
     
     def _reid_deduplicate_entities(self, entities: List[PerceptionEntity]) -> List[PerceptionEntity]:
-        """Phase 5: Re-ID semantic deduplication using CLIP/DINO embeddings.
-        
-        Merges entities that have very similar average embeddings (cosine > 0.85)
-        across the entire video, reducing false duplicates.
+        """Phase 5: Adaptive Re-ID semantic deduplication.
+
+        Dynamically derives per-class similarity thresholds, applies spatial distance
+        veto, temporal overlap heuristics, and low-observation rescue merges, then
+        downsamples embeddings for memory efficiency. Metrics stored in `self._reid_metrics`.
+        Verbose pairwise printing gated by `EmbeddingConfig.reid_debug`.
         """
         if len(entities) <= 1:
             return entities
@@ -467,137 +482,174 @@ class PerceptionEngine:
         logger.info("="*80)
         logger.info(f"Input entities: {len(entities)}")
         
-        # Extract average embeddings
-        embeddings = []
-        valid_entities = []
+        # Extract average embeddings (compute if missing)
+        embeddings: List[np.ndarray] = []
+        valid_entities: List[PerceptionEntity] = []
         for entity in entities:
-            if entity.average_embedding is not None:
-                embeddings.append(entity.average_embedding)
-                valid_entities.append(entity)
-            else:
-                logger.warning(f"Entity {entity.entity_id} has no average_embedding!")
-        
-        if len(embeddings) < 2:
-            logger.warning(f"Not enough entities with embeddings for Re-ID ({len(embeddings)} entities)")
+            if entity.average_embedding is None:
+                try:
+                    entity.compute_average_embedding()
+                except Exception:
+                    logger.warning(f"Entity {entity.entity_id} missing average embedding and could not compute.")
+                    continue
+            embeddings.append(entity.average_embedding)
+            valid_entities.append(entity)
+
+        if len(valid_entities) < 2:
+            logger.warning(f"Not enough entities with embeddings for Re-ID ({len(valid_entities)} entities)")
             return entities
-        
-        embeddings = np.array(embeddings)
-        
-        # Normalize for cosine similarity
-        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-        embeddings_normalized = embeddings / (norms + 1e-8)
-        
-        # Compute cosine similarity matrix
-        similarity_matrix = embeddings_normalized @ embeddings_normalized.T
-        
-        # Log similarity matrix for same-class entities
-        print("\n" + "="*80)
-        print("PHASE 5: SIMILARITY ANALYSIS")
-        print("="*80)
-        print("Similarity scores between same-class entities:")
-        class_groups = {}
-        for i, entity in enumerate(valid_entities):
-            cls = entity.object_class.value if hasattr(entity.object_class, 'value') else str(entity.object_class)
-            if cls not in class_groups:
-                class_groups[cls] = []
-            class_groups[cls].append(i)
-        
-        for cls, indices in class_groups.items():
-            if len(indices) > 1:
-                print(f"\n  {cls}: {len(indices)} entities")
-                for i in range(len(indices)):
-                    for j in range(i + 1, len(indices)):
-                        idx_i, idx_j = indices[i], indices[j]
-                        sim = similarity_matrix[idx_i, idx_j]
-                        obs_i = len(valid_entities[idx_i].observations)
-                        obs_j = len(valid_entities[idx_j].observations)
-                        print(f"    {valid_entities[idx_i].entity_id} ({obs_i} obs) ↔ {valid_entities[idx_j].entity_id} ({obs_j} obs): similarity={sim:.4f}")
-        
-        # Greedy merging: merge entities with similarity > threshold OR high temporal overlap for same class
+
+        emb_arr = np.vstack(embeddings)
+        norms = np.linalg.norm(emb_arr, axis=1, keepdims=True) + 1e-8
+        emb_norm = emb_arr / norms
+        similarity_matrix = emb_norm @ emb_norm.T
+
+        # Group indices per class
+        class_groups: Dict[str, List[int]] = {}
+        for i, ent in enumerate(valid_entities):
+            cls = ent.object_class.value if hasattr(ent.object_class, 'value') else str(ent.object_class)
+            class_groups.setdefault(cls, []).append(i)
+
+        # Derive dynamic thresholds & collect stats
+        backend = getattr(self.config.embedding, 'backend', 'clip')
+        base_threshold = 0.55 if backend == 'dinov3' else 0.65
+        class_thresholds: Dict[str, float] = {}
+        similarity_stats: Dict[str, Dict[str, float]] = {}
+        for cls, idxs in class_groups.items():
+            if len(idxs) < 2:
+                class_thresholds[cls] = base_threshold
+                continue
+            sims: List[float] = []
+            for a_i in range(len(idxs)):
+                for b_i in range(a_i+1, len(idxs)):
+                    sims.append(float(similarity_matrix[idxs[a_i], idxs[b_i]]))
+            if sims:
+                sims_arr = np.array(sims)
+                median = float(np.median(sims_arr))
+                mean = float(np.mean(sims_arr))
+                std = float(np.std(sims_arr))
+                p95 = float(np.percentile(sims_arr, 95))
+                # Dynamic threshold heuristic
+                dyn = max(base_threshold, min(0.90, median - 0.05 if median > base_threshold else median + 0.05))
+                class_thresholds[cls] = dyn
+                similarity_stats[cls] = {"mean": mean, "std": std, "median": median, "p95": p95, "threshold": dyn, "pair_count": float(len(sims_arr))}
+            else:
+                class_thresholds[cls] = base_threshold
+
+        if getattr(self.config.embedding, 'reid_debug', False):
+            print("\n" + "="*80)
+            print("PHASE 5: SIMILARITY ANALYSIS (Adaptive)")
+            print("="*80)
+            for cls, stats in similarity_stats.items():
+                print(f"Class {cls}: median={stats['median']:.3f} mean={stats['mean']:.3f} std={stats['std']:.3f} p95={stats['p95']:.3f} -> threshold={stats['threshold']:.3f}")
+
+        # Prepare centroid cache
+        def entity_centroid(ent: PerceptionEntity) -> Tuple[float, float]:
+            xs, ys = [], []
+            for obs in ent.observations:
+                xs.append(obs.centroid[0])
+                ys.append(obs.centroid[1])
+            return (float(np.mean(xs)), float(np.mean(ys)))
+
+        centroids = [entity_centroid(e) for e in valid_entities]
+        # Frame size heuristic from first observation if available
+        fw = valid_entities[0].observations[0].frame_width or 1.0
+        fh = valid_entities[0].observations[0].frame_height or 1.0
+        diag = (fw**2 + fh**2) ** 0.5 if fw > 0 and fh > 0 else 1.0
+
         merged_flags = [False] * len(valid_entities)
-        merged_entities = []
-        similarity_threshold = 0.65  # Lowered threshold - embeddings vary across views
-        temporal_overlap_threshold = 0.5  # 50% frame overlap suggests same object
-        
-        print(f"\nMerging with similarity threshold: {similarity_threshold}")
-        print(f"Temporal overlap threshold: {temporal_overlap_threshold}")
-        print("="*80 + "\n")
-        
+        merged_entities: List[PerceptionEntity] = []
+        merges_count = 0
+        per_class_merge_counts: Dict[str, int] = {cls:0 for cls in class_groups}
+        temporal_overlap_base = 0.50
+
+        max_embeddings_per_entity = getattr(self.config.embedding, 'max_embeddings_per_entity', None)
+
         for i in range(len(valid_entities)):
             if merged_flags[i]:
                 continue
-            
-            # Find all entities similar to entity i
+            ent_i = valid_entities[i]
+            cls_i = ent_i.object_class.value if hasattr(ent_i.object_class, 'value') else str(ent_i.object_class)
+            threshold_i = class_thresholds.get(cls_i, base_threshold)
             similar_indices = [i]
-            entity_i = valid_entities[i]
-            
-            for j in range(i + 1, len(valid_entities)):
+            # Deterministic sampling seed for reproducible downsampling behavior
+            np.random.seed(42)
+            for j in range(i+1, len(valid_entities)):
                 if merged_flags[j]:
                     continue
-                    
-                entity_j = valid_entities[j]
-                
-                # Must be same class
-                if entity_i.object_class != entity_j.object_class:
+                ent_j = valid_entities[j]
+                if ent_i.object_class != ent_j.object_class:
                     continue
-                
-                # Check embedding similarity
-                sim = similarity_matrix[i, j]
-                
-                # Check temporal overlap (for objects spanning many frames)
-                frame_i_min, frame_i_max = entity_i.first_seen_frame, entity_i.last_seen_frame
-                frame_j_min, frame_j_max = entity_j.first_seen_frame, entity_j.last_seen_frame
-                overlap_start = max(frame_i_min, frame_j_min)
-                overlap_end = min(frame_i_max, frame_j_max)
+                sim = float(similarity_matrix[i, j])
+                # Temporal overlap
+                f_i_min, f_i_max = ent_i.first_seen_frame, ent_i.last_seen_frame
+                f_j_min, f_j_max = ent_j.first_seen_frame, ent_j.last_seen_frame
+                overlap_start = max(f_i_min, f_j_min)
+                overlap_end = min(f_i_max, f_j_max)
                 overlap_frames = max(0, overlap_end - overlap_start)
-                duration_i = frame_i_max - frame_i_min + 1
-                duration_j = frame_j_max - frame_j_min + 1
-                overlap_ratio = overlap_frames / min(duration_i, duration_j) if min(duration_i, duration_j) > 0 else 0
-                
-                # Special case: merge low-observation entities of same class (likely HDBSCAN over-splitting)
-                is_low_obs_merge = (
-                    len(entity_i.observations) <= 3 or len(entity_j.observations) <= 3
-                ) and sim >= 0.10
-                
-                # Merge if: high similarity OR (moderate similarity + high temporal overlap) OR (same class + very high temporal overlap) OR low-obs same-class
+                dur_i = f_i_max - f_i_min + 1
+                dur_j = f_j_max - f_j_min + 1
+                overlap_ratio = overlap_frames / min(dur_i, dur_j) if min(dur_i, dur_j) > 0 else 0.0
+                # Spatial distance veto (normalized)
+                dx = centroids[i][0] - centroids[j][0]
+                dy = centroids[i][1] - centroids[j][1]
+                spatial_dist_norm = ((dx*dx + dy*dy) ** 0.5) / diag
+                spatial_veto = spatial_dist_norm > 0.60 and sim < (threshold_i + 0.05)
+                # Low observation merge heuristic
+                low_obs_merge = (len(ent_i.observations) <= 3 or len(ent_j.observations) <= 3) and sim >= (threshold_i * 0.4)
+                # Merge conditions
                 should_merge = (
-                    sim >= similarity_threshold or
-                    (sim >= 0.35 and overlap_ratio >= temporal_overlap_threshold) or
-                    (sim >= 0.15 and overlap_ratio >= 0.80) or  # Very high overlap suggests same object
-                    is_low_obs_merge  # Merge sparse detections of same class
+                    (sim >= threshold_i and not spatial_veto) or
+                    (sim >= threshold_i * 0.85 and overlap_ratio >= temporal_overlap_base) or
+                    (sim >= threshold_i * 0.5 and overlap_ratio >= 0.85) or
+                    low_obs_merge
                 )
-                
                 if should_merge:
                     similar_indices.append(j)
                     merged_flags[j] = True
-                    print(f"  Merging: {entity_i.entity_id} + {entity_j.entity_id} (sim={sim:.3f}, overlap={overlap_ratio:.2f})")
-            
-            # Merge all similar entities
+                    merges_count += 1
+                    per_class_merge_counts[cls_i] += 1
+                    if getattr(self.config.embedding, 'reid_debug', False):
+                        print(f"  MERGE {ent_i.entity_id} + {ent_j.entity_id} sim={sim:.3f} overlap={overlap_ratio:.2f} dist={spatial_dist_norm:.2f} th={threshold_i:.3f}")
             if len(similar_indices) == 1:
-                merged_entities.append(valid_entities[i])
-            else:
-                # Merge multiple entities
-                all_obs = []
-                for idx in similar_indices:
-                    all_obs.extend(valid_entities[idx].observations)
-                
-                # Create merged entity
-                merged = PerceptionEntity(
-                    entity_id=f"merged_{valid_entities[i].entity_id}",
-                    object_class=valid_entities[i].object_class,
-                    observations=all_obs,
-                )
-                
-                # Recompute average embedding
-                obs_embeddings = [obs.visual_embedding for obs in all_obs]
-                merged.average_embedding = np.mean(obs_embeddings, axis=0)
-                
-                merged_entities.append(merged)
-                logger.info(f"  Merged {len(similar_indices)} entities into {merged.entity_id} ({merged.object_class.value})")
-        
-        logger.info(f"Output entities: {len(merged_entities)} (reduced by {len(valid_entities) - len(merged_entities)})")
+                merged_entities.append(ent_i)
+                continue
+            # Consolidate observations
+            all_obs: List[Observation] = []
+            for idx in similar_indices:
+                all_obs.extend(valid_entities[idx].observations)
+            merged = PerceptionEntity(
+                entity_id=f"merged_{ent_i.entity_id}",
+                object_class=ent_i.object_class,
+                observations=all_obs,
+            )
+            # Compute average embedding with optional downsampling
+            obs_embeddings = [obs.visual_embedding for obs in all_obs]
+            if max_embeddings_per_entity and len(obs_embeddings) > max_embeddings_per_entity:
+                # Random but deterministic subset (seed could be configurable)
+                subset_idx = np.random.choice(len(obs_embeddings), size=max_embeddings_per_entity, replace=False)
+                obs_embeddings = [obs_embeddings[k] for k in subset_idx]
+            avg_emb = np.mean(obs_embeddings, axis=0)
+            norm = np.linalg.norm(avg_emb)
+            merged.average_embedding = avg_emb / norm if norm > 0 else avg_emb
+            merged_entities.append(merged)
+            logger.info(f"  Merged {len(similar_indices)} entities into {merged.entity_id} ({cls_i})")
+
+        reduction = len(valid_entities) - len(merged_entities)
+        logger.info(f"Output entities: {len(merged_entities)} (reduced by {reduction})")
         logger.info("="*80 + "\n")
-        
+
+        # Store metrics for inclusion in final result
+        self._reid_metrics = {
+            "backend": backend,
+            "base_threshold": base_threshold,
+            "class_thresholds": class_thresholds,
+            "similarity_stats": similarity_stats,
+            "merges_total": merges_count,
+            "per_class_merges": per_class_merge_counts,
+            "reduction": reduction,
+        }
+
         return merged_entities
     
     def _detections_to_observations(self, detections: List[dict]) -> List[Observation]:

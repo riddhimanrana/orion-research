@@ -28,13 +28,6 @@ from .types import (
     Observation,
     PerceptionEntity,
     PerceptionResult,
-    # Phase 1: 3D types
-    HandPose,
-    VisibilityState,
-    CameraIntrinsics,
-    Hand,
-    EntityState3D,
-    Perception3DResult,
 )
 
 from .config import (
@@ -47,13 +40,8 @@ from .config import (
     get_accurate_config,
 )
 
-# Phase 1: 3D perception modules
 from .depth import DepthEstimator
-from .hand_tracking import HandTracker
-from .occlusion import OcclusionDetector
 from .engine import PerceptionEngine
-from .perception_3d import Perception3DEngine
-from . import camera_intrinsics
 
 __all__ = [
     # Types
@@ -63,21 +51,12 @@ __all__ = [
     "Observation",
     "PerceptionEntity",
     "PerceptionResult",
-    # Phase 1: 3D types
-    "HandPose",
-    "VisibilityState",
-    "CameraIntrinsics",
-    "Hand",
-    "EntityState3D",
-    "Perception3DResult",
     # Config
     "DetectionConfig",
     "EmbeddingConfig",
     "DescriptionConfig",
-    # Phase 1: 3D modules
+    # Modules
     "DepthEstimator",
-    "HandTracker",
-    "OcclusionDetector",
     "Perception3DEngine",
     "PerceptionEngine",
     "camera_intrinsics",

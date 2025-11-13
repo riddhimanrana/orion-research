@@ -8,7 +8,7 @@ exclude = ["tests*", "scripts*", "docs*", "src*"]
 [project]
 name = "orion"
 version = "0.1.0"
-description = "Research for orion"
+description = "Minimal Orion perception pipeline (YOLO + DINO/CLIP + FastVLM + DepthAnything)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
@@ -20,113 +20,18 @@ authors = [
 keywords = ["research", "orion", "computer-vision", "transformers"]
 dependencies = [
     "torch==2.6.0", "torchvision==0.21.0",
-    "transformers>=4.47.1", "tokenizers==0.21.0", "sentencepiece==0.1.99", "shortuuid", "sentence-transformers>=3.0.0",
-    "accelerate==1.6.0", "peft>=0.10.0,<0.14.0", "bitsandbytes",
-    "pydantic", "markdown2[all]", "numpy==1.26.4", "scikit-learn==1.2.2",
-    "gradio==5.11.0", "requests", "uvicorn", "fastapi",
-    "einops==0.6.1", "einops-exts==0.0.4", "timm==1.0.15",
-    "coremltools==8.2","neo4j==6.0.2",
-    "mlx-vlm @ file:./mlx-vlm", "ultralytics==8.3.217",
-    "ollama", "hdbscan", "httpx"
+    "transformers>=4.47.1", "tokenizers==0.21.0", "sentencepiece==0.1.99",
+    "numpy==1.26.4", "scikit-learn==1.2.2", "opencv-python>=4.8.0",
+    "timm==1.0.15", "einops==0.6.1", "ultralytics==8.3.217",
+    "hdbscan", "mlx-vlm @ file:./mlx-vlm"
 ]
 
 [project.optional-dependencies]
-# Development: testing, linting, code quality
-dev = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
-    "pytest-xdist>=3.3.0",
-    "black>=24.8.0",
-    "isort>=5.12.0",
-    "flake8>=6.0.0",
-    "mypy>=1.0.0",
-    "pre-commit>=3.0.0",
-]
-
-# Research: benchmarking, visualization, notebooks, 3D visualization
-research = [
-    "jupyter>=1.0.0",
-    "jupyterlab>=4.0.0",
-    "matplotlib>=3.8.0",
-    "seaborn>=0.12.0",
-    "pandas>=2.0.0",
-    "scipy>=1.11.0",
-    "rerun-sdk>=0.26.0",  # 3D visualization (0.26.x - latest stable)
-]
-
-# Perception: depth models, hand tracking, visual processing
-perception = [
-    "mediapipe>=0.10.0",
-    "timm>=0.9.0",
-    "scikit-image>=0.21.0",
-]
-
-# QA & NLP: question parsing, LLM inference
-qa = [
-    "llama-cpp-python>=0.2.0",  # Local LLM inference
-]
-
-# Video: ffmpeg integration, video I/O
-video = [
-    "ffmpeg-python>=0.2.1",
-    "av>=10.0.0",
-]
-
-# Database: optional graph database for causal queries
-memgraph = [
-    "pymgclient>=0.2.0",
-]
-
-# Profiling: performance analysis
-profiling = [
-    "py-spy>=0.3.14",
-    "memory-profiler>=0.61.0",
-]
-
-# Documentation: API docs
-docs = [
-    "sphinx>=5.0.0",
-    "sphinx-rtd-theme>=1.2.0",
-    "myst-parser>=2.0.0",
-    "pdoc>=14.0.0",
-]
-
-# All optional dependencies
-all = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
-    "pytest-xdist>=3.3.0",
-    "black>=24.8.0",
-    "isort>=5.12.0",
-    "flake8>=6.0.0",
-    "mypy>=1.0.0",
-    "pre-commit>=3.0.0",
-    "jupyter>=1.0.0",
-    "jupyterlab>=4.0.0",
-    "matplotlib>=3.8.0",
-    "seaborn>=0.12.0",
-    "pandas>=2.0.0",
-    "scipy>=1.11.0",
-    "mediapipe>=0.10.0",
-    "timm>=0.9.0",
-    "scikit-image>=0.21.0",
-    "llama-cpp-python>=0.2.0",
-    "ffmpeg-python>=0.2.1",
-    "av>=10.0.0",
-    "pymgclient>=0.2.0",
-    "py-spy>=0.3.14",
-    "memory-profiler>=0.61.0",
-    "sphinx>=5.0.0",
-    "sphinx-rtd-theme>=1.2.0",
-    "myst-parser>=2.0.0",
-    "pdoc>=14.0.0",
-]
+dev = ["pytest>=7.0.0", "black>=24.8.0", "mypy>=1.0.0"]
 
 [project.urls]
-Homepage = "https://orionlive.ai/research"
 Repository = "https://github.com/riddhimanrana/orion-research"
 Issues = "https://github.com/riddhimanrana/orion-research/issues"
-Documentation = "https://github.com/riddhimanrana/orion-research#readme"
 
 [project.scripts]
 orion = "orion.cli:main"

@@ -12,7 +12,7 @@ Date: October 2025
 """
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, Optional
 
 import logging
 
@@ -82,8 +82,22 @@ class EmbeddingConfig:
     embedding_dim: int = 512
     """Output embedding dimension"""
     
-    backend: Literal["clip", "dino"] = "clip"
-    """Embedding backend to use ('clip' for CLIP, 'dino' for DINOv3)."""
+    backend: Literal["clip", "dino", "dinov3"] = "clip"
+    """Embedding backend to use ('clip' for CLIP, 'dino' legacy, 'dinov3' for video encoder)."""
+
+    # Cluster / memory efficiency settings
+    use_cluster_embeddings: bool = False
+    """If True, aggregate overlapping detections per frame into cluster embeddings to reduce memory."""
+
+    cluster_similarity_threshold: float = 0.65
+    """IoU threshold (0-1) to merge detections into same cluster before embedding extraction."""
+
+    max_embeddings_per_entity: int = 25
+    """Cap number of stored observation embeddings per entity (older ones downsampled)."""
+
+    # Debug / verbosity
+    reid_debug: bool = False
+    """If True, print detailed pairwise similarity and merge decisions in Re-ID phase."""
     
 
     # Device selection
@@ -114,13 +128,22 @@ class EmbeddingConfig:
                 f"embedding_dim must be one of {valid_dims}, got {self.embedding_dim}"
             )
         
-        if self.backend not in {"clip", "dino"}:
-            raise ValueError(f"backend must be 'clip' or 'dino', got {self.backend}")
+        if self.backend not in {"clip", "dino", "dinov3"}:
+            raise ValueError(f"backend must be 'clip', 'dino', or 'dinov3', got {self.backend}")
         
-        if self.backend == "dino" and self.use_text_conditioning:
-            # DINO does not support multimodal conditioning; warn and disable
+        if self.backend in {"dino", "dinov3"} and self.use_text_conditioning:
+            # DINO variants are vision-only; disable conditioning
             logger.warning("Text conditioning requested with DINO backend; disabling use_text_conditioning.")
             self.use_text_conditioning = False
+
+        if not (0.0 <= self.cluster_similarity_threshold <= 1.0):
+            raise ValueError(
+                f"cluster_similarity_threshold must be in [0,1], got {self.cluster_similarity_threshold}"
+            )
+        if self.max_embeddings_per_entity < 1:
+            raise ValueError(
+                f"max_embeddings_per_entity must be >=1, got {self.max_embeddings_per_entity}"
+            )
         
         if self.batch_size < 1:
             raise ValueError(f"batch_size must be >= 1, got {self.batch_size}")

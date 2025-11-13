@@ -1,8 +1,9 @@
-"""Analyze command - process video with the Orion pipeline."""
+"""Analyze command - process video with minimal Orion perception pipeline."""
 
 from __future__ import annotations
 
 import argparse
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -11,55 +12,27 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from ..display import display_pipeline_results
-from ..utils import prepare_runtime
-
 if TYPE_CHECKING:
     from ...settings import OrionSettings
 
 console = Console()
 
 
-def _start_standard_qa(args, settings, neo4j_uri, neo4j_user, neo4j_password, console):
-    """Start standard Q&A session (fallback when spatial intelligence not available)"""
-    try:
-        from ...video_qa import VideoQASystem
-
-        qa = VideoQASystem(
-            neo4j_uri=neo4j_uri,
-            neo4j_user=neo4j_user,
-            neo4j_password=neo4j_password,
-            llm_model=getattr(args, "qa_model", None) or settings.qa_model,
-        )
-        qa.start_interactive_session()
-    except ImportError:
-        console.print("[red]✗ Q&A not available. Install: pip install ollama[/red]")
-    except Exception as e:
-        console.print(f"[red]✗ Q&A session failed: {e}[/red]")
-
-
 def handle_analyze(args: argparse.Namespace, settings: OrionSettings) -> None:
-    """Handle the analyze command - process video with the new modular pipeline."""
-    # Import the new VideoPipeline
-    from ...pipeline import VideoPipeline
-
-    # Prepare runtime
-    try:
-        backend, _ = prepare_runtime(args.runtime or settings.runtime_backend)
-    except Exception:
-        return
-
-    # Get Neo4j credentials
-    neo4j_uri = args.neo4j_uri or settings.neo4j_uri
-    neo4j_user = args.neo4j_user or settings.neo4j_user
-    neo4j_password = args.neo4j_password or settings.get_neo4j_password()
+    """Handle the analyze command - run perception pipeline and optionally export to graph."""
+    from ...perception import PerceptionEngine
+    from ...perception.config import get_fast_config, get_balanced_config, get_accurate_config
 
     # Determine processing mode
-    config = "balanced"
     if args.fast:
-        config = "fast"
+        config = get_fast_config()
+        mode_name = "fast"
     elif args.accurate:
-        config = "accurate"
+        config = get_accurate_config()
+        mode_name = "accurate"
+    else:
+        config = get_balanced_config()
+        mode_name = "balanced"
 
     # Display analysis parameters
     params_table = Table(box=box.ROUNDED, show_header=False, border_style="cyan")
@@ -67,129 +40,101 @@ def handle_analyze(args: argparse.Namespace, settings: OrionSettings) -> None:
     params_table.add_column("Value", style="yellow", width=60)
 
     params_table.add_row("Video", str(args.video))
-    params_table.add_row("Mode", config)
-    params_table.add_row("Runtime", backend)
+    params_table.add_row("Mode", mode_name)
     params_table.add_row("Output", args.output)
-
-    # Show stage configuration
-    skip_perception = getattr(args, "skip_perception", False)
-    skip_semantic = getattr(args, "skip_semantic", False)
-    skip_graph = getattr(args, "skip_graph", False)
-
-    if skip_perception:
-        params_table.add_row("Perception Stage", "[red]Skipped[/red]")
-    if skip_semantic:
-        params_table.add_row("Semantic Stage", "[red]Skipped[/red]")
-    if skip_graph:
-        params_table.add_row("Graph Stage", "[red]Skipped[/red]")
-
-    if getattr(args, "keep_db", False):
-        params_table.add_row("Database", "[yellow]Keeping existing data[/yellow]")
     
-    # Show spatial memory if enabled
-    if getattr(args, "use_spatial_memory", False):
-        params_table.add_row("Spatial Memory", f"[green]✓ Enabled[/green] ({getattr(args, 'memory_dir', 'memory/spatial_intelligence')})")
-    if getattr(args, "export_memgraph", False):
-        params_table.add_row("Memgraph Export", "[green]✓ Enabled[/green]")
-
-    # Show inspection mode if enabled
-    if hasattr(args, "inspect") and args.inspect:
-        params_table.add_row("Inspection Mode", f"[yellow]{args.inspect}[/yellow]")
-
     console.print("\n")
-    console.print(Panel(params_table, title="[bold]Analysis Configuration[/bold]", border_style="cyan"))
+    console.print(Panel(params_table, title="[bold]Perception Analysis[/bold]", border_style="cyan"))
     console.print("\n")
 
-    # Create pipeline configuration
-    config_dict = {
-        "video_path": str(args.video),
-        "output_dir": args.output,
-        "neo4j": {
-            "uri": neo4j_uri,
-            "user": neo4j_user,
-            "password": neo4j_password,
-            "clear_db": not getattr(args, "keep_db", False),
-        },
-        "perception": {
-            "mode": config,
-            "runtime": backend,
-        },
-        "semantic": {
-            "mode": config,
-        },
-    }
+    # Create output directory
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Initialize pipeline
+    # Run perception pipeline
     try:
-        with VideoPipeline.from_config(config_dict) as pipeline:
-            # Set inspection mode if requested
-            if hasattr(args, "inspect") and args.inspect:
-                pipeline.set_inspection_mode(args.inspect)
-
-            # Run the pipeline
-            console.print("[bold cyan]Starting pipeline execution...[/bold cyan]\n")
-
-            # Skip stages based on arguments
-            if skip_perception:
-                console.print("[yellow]⊘ Skipping perception stage[/yellow]")
-            if skip_semantic:
-                console.print("[yellow]⊘ Skipping semantic stage[/yellow]")
-            if skip_graph:
-                console.print("[yellow]⊘ Skipping graph stage[/yellow]")
-
-            # Execute pipeline
-            results = pipeline.run(
-                skip_perception=skip_perception,
-                skip_semantic=skip_semantic,
-                skip_graph=skip_graph,
-            )
-
-            # Display results
-            if not getattr(args, "verbose", False):
-                display_pipeline_results(results)
-
-            # Start interactive mode if requested
-            if getattr(args, "interactive", False) and results.get("success"):
-                console.print("\n[bold cyan]════════════════════════════════════════════════[/bold cyan]")
+        start_time = time.time()
+        console.print("[bold cyan]Starting perception pipeline...[/bold cyan]\n")
+        
+        engine = PerceptionEngine(config=config, verbose=getattr(args, "verbose", False))
+        result = engine.process_video(
+            str(args.video),
+            save_visualizations=True,
+            output_dir=str(output_dir)
+        )
+        
+        elapsed = time.time() - start_time
+        
+        # Display results
+        results_table = Table(box=box.ROUNDED, show_header=True, border_style="green")
+        results_table.add_column("Metric", style="cyan bold")
+        results_table.add_column("Value", style="yellow")
+        
+        results_table.add_row("Unique Entities", str(result.unique_entities))
+        results_table.add_row("Total Observations", str(result.total_detections))
+        results_table.add_row("Frames Processed", str(result.total_frames))
+        results_table.add_row("Duration", f"{result.duration_seconds:.2f}s")
+        results_table.add_row("Processing Time", f"{elapsed:.2f}s")
+        results_table.add_row("Speed", f"{result.total_frames / elapsed:.1f} fps")
+        
+        if result.metrics:
+            timings = result.metrics.get("timings", {})
+            if timings:
+                results_table.add_row("─" * 20, "─" * 20)
+                results_table.add_row("Detection", f"{timings.get('detection_seconds', 0):.2f}s")
+                results_table.add_row("Embedding", f"{timings.get('embedding_seconds', 0):.2f}s")
+                results_table.add_row("Clustering", f"{timings.get('clustering_seconds', 0):.2f}s")
+                results_table.add_row("Re-ID", f"{timings.get('reid_seconds', 0):.2f}s")
+                results_table.add_row("Description", f"{timings.get('description_seconds', 0):.2f}s")
+            
+            reid_metrics = result.metrics.get("reid")
+            if reid_metrics:
+                results_table.add_row("─" * 20, "─" * 20)
+                results_table.add_row("Re-ID Merges", str(reid_metrics.get("merges_total", 0)))
+                results_table.add_row("Re-ID Reduction", str(reid_metrics.get("reduction", 0)))
+        
+        console.print("\n")
+        console.print(Panel(results_table, title="[bold green]✓ Perception Complete[/bold green]", border_style="green"))
+        console.print("\n")
+        
+        # Show entities summary
+        console.print("[cyan]Detected Entities:[/cyan]")
+        class_counts = {}
+        for entity in result.entities:
+            cls = entity.object_class.value if hasattr(entity.object_class, 'value') else str(entity.object_class)
+            class_counts[cls] = class_counts.get(cls, 0) + 1
+        
+        for cls, count in sorted(class_counts.items()):
+            console.print(f"  • {cls}: {count}")
+        
+        console.print(f"\n[green]✓ Results saved to: {output_dir}[/green]")
+        
+        # Export to graph if requested
+        if not getattr(args, "skip_graph", False):
+            try:
+                from ...graph.builder import GraphBuilder
                 
-                # Check if spatial memory/Memgraph export is requested
-                use_spatial = getattr(args, "use_spatial_memory", False)
-                use_memgraph = getattr(args, "export_memgraph", False)
+                neo4j_uri = args.neo4j_uri or settings.neo4j_uri
+                neo4j_user = args.neo4j_user or settings.neo4j_user
+                neo4j_password = args.neo4j_password or settings.get_neo4j_password()
                 
-                if use_spatial or use_memgraph:
-                    console.print("[bold cyan]   Starting Spatial Intelligence Assistant[/bold cyan]")
-                    console.print("[bold cyan]════════════════════════════════════════════════[/bold cyan]\n")
-                    console.print("[yellow]NOTE: Spatial memory requires processing with 'orion research slam'[/yellow]")
-                    console.print("[yellow]      The 'analyze' command uses Neo4j graph backend.[/yellow]\n")
-                    
-                    import subprocess
-                    import sys
-                    
-                    assistant_script = Path(__file__).parent.parent.parent.parent / "scripts" / "spatial_intelligence_assistant.py"
-                    
-                    if assistant_script.exists():
-                        console.print("[cyan]Checking for existing spatial memory...[/cyan]")
-                        
-                        memory_dir = Path(getattr(args, "memory_dir", "memory/spatial_intelligence"))
-                        if memory_dir.exists() and (memory_dir / "entities.json").exists():
-                            console.print(f"[green]✓ Found existing spatial memory at {memory_dir}[/green]\n")
-                            
-                            # Start interactive assistant
-                            subprocess.run([sys.executable, str(assistant_script), "--interactive"])
-                        else:
-                            console.print(f"[yellow]⚠ No spatial memory found at {memory_dir}[/yellow]")
-                            console.print("[yellow]  Process video with: orion research slam --video X --use-spatial-memory[/yellow]\n")
-                            
-                            # Fall back to standard Q&A
-                            console.print("[cyan]Starting standard Q&A mode instead...[/cyan]\n")
-                            _start_standard_qa(args, settings, neo4j_uri, neo4j_user, neo4j_password, console)
-                    else:
-                        console.print("[yellow]⚠ Spatial intelligence assistant not found. Using standard Q&A...[/yellow]\n")
-                        _start_standard_qa(args, settings, neo4j_uri, neo4j_user, neo4j_password, console)
-                else:
-                    console.print("[bold cyan]       Starting Interactive Q&A Mode[/bold cyan]")
-                    console.print("[bold cyan]════════════════════════════════════════════════[/bold cyan]\n")
-                    _start_standard_qa(args, settings, neo4j_uri, neo4j_user, neo4j_password, console)
+                console.print("\n[cyan]Building knowledge graph...[/cyan]")
+                builder = GraphBuilder(
+                    neo4j_uri=neo4j_uri,
+                    neo4j_user=neo4j_user,
+                    neo4j_password=neo4j_password
+                )
+                
+                if not getattr(args, "keep_db", False):
+                    builder.clear_database()
+                
+                builder.build_from_perception(result)
+                console.print("[green]✓ Graph built successfully[/green]\n")
+                
+            except ImportError as e:
+                console.print(f"[yellow]⚠ Graph export skipped: {e}[/yellow]\n")
+            except Exception as e:
+                console.print(f"[red]✗ Graph export failed: {e}[/red]\n")
 
     except FileNotFoundError as e:
         console.print(f"[red]✗ Video file not found: {e}[/red]")
@@ -197,5 +142,7 @@ def handle_analyze(args: argparse.Namespace, settings: OrionSettings) -> None:
         console.print(f"[red]✗ Pipeline execution failed: {e}[/red]")
         if getattr(args, "verbose", False):
             import traceback
+            traceback.print_exc()
+
 
             console.print(f"[dim]{traceback.format_exc()}[/dim]")
