@@ -15,26 +15,37 @@ Date: October 2025
 """
 
 import logging
+import math
 import time
+from pathlib import Path
 import numpy as np
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # Initialise logger early so try/except blocks can use it
 logger = logging.getLogger(__name__)
 
-from orion.perception.types import Observation, PerceptionEntity, PerceptionResult, ObjectClass
+from orion.perception.types import (
+    Observation,
+    PerceptionEntity,
+    PerceptionResult,
+    ObjectClass,
+    EntityState3D,
+    Perception3DResult,
+    CameraIntrinsics,
+    VisibilityState,
+    Hand,
+    HandPose,
+)
 from orion.perception.config import PerceptionConfig
+from orion.perception.camera_intrinsics import backproject_point
 from orion.perception.observer import FrameObserver
 from orion.perception.embedder import VisualEmbedder
 from orion.perception.tracker import EntityTracker
 from orion.perception.describer import EntityDescriber
+from orion.perception.depth import DepthEstimator
 
-# Phase 2: Tracking imports (legacy tracker may be archived)
-try:
-    from orion.perception.tracking import EntityTracker3D, TrackingConfig, BayesianEntityBelief  # type: ignore
-    TRACKING_AVAILABLE = True
-except ImportError:
-    TRACKING_AVAILABLE = False
+# Phase 2: Tracking imports (legacy tracker removed)
+TRACKING_AVAILABLE = False
 
 from orion.managers.model_manager import ModelManager
 from orion.perception.tracker import TrackerProtocol
@@ -60,6 +71,15 @@ try:
 except Exception:
     TAPNET_AVAILABLE = False
 
+# Memgraph Backend
+try:
+    from orion.graph.memgraph_backend import MemgraphBackend
+    MEMGRAPH_AVAILABLE = True
+except ImportError:
+    MEMGRAPH_AVAILABLE = False
+
+from orion.perception.spatial_zones import ZoneManager
+from orion.utils.profiling import profile, Profiler
 
 class PerceptionEngine:
     """
@@ -97,13 +117,33 @@ class PerceptionEngine:
         self.enhanced_tracker: Optional[TrackerProtocol] = None
         self.slam_engine: Optional[SLAMEngine] = None
         self.tapnet_tracker: Optional['TapNetTracker'] = None
+        self.depth_estimator: Optional[DepthEstimator] = None
         
+        # Memgraph & Spatial Zones
+        self.memgraph: Optional[MemgraphBackend] = None
+        self.zone_manager: ZoneManager = ZoneManager()
+
+        if getattr(self.config, "use_memgraph", False):
+            if MEMGRAPH_AVAILABLE:
+                try:
+                    self.memgraph = MemgraphBackend(
+                        host=self.config.memgraph_host,
+                        port=self.config.memgraph_port,
+                    )
+                    # Create vector index sized to embedding dim for semantic search
+                    self.memgraph.create_vector_index(
+                        dimension=self.config.embedding.embedding_dim
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to initialize MemgraphBackend: {e}")
+                    self.memgraph = None
+            else:
+                logger.warning(
+                    "Memgraph requested but MemgraphBackend not available (install pymgclient)."
+                )
+
         # Phase 2: Tracking component
-        self.tracker_3d: Optional[EntityTracker3D] = None
-        if self.config.enable_tracking and TRACKING_AVAILABLE:
-            logger.info("  Tracking: Enabled (Phase 2)")
-        elif self.config.enable_tracking and not TRACKING_AVAILABLE:
-            logger.warning("  Tracking: Requested but not available!")
+        self.tracker_3d = None
 
         if self.config.enable_tracking and ENHANCED_TRACKER_AVAILABLE:
             logger.info("  EnhancedTracker: Enabled (appearance Re-ID + 3D KF)")
@@ -116,10 +156,20 @@ class PerceptionEngine:
             logger.warning("  SLAM requested but import failed")
         
         logger.info("PerceptionEngine initialized")
-        logger.info(f"  Detection: {self.config.detection.model}")
+        detector_desc = (
+            self.config.detection.model
+            if self.config.detection.backend == "yolo"
+            else self.config.detection.groundingdino_model_id
+        )
+        logger.info(
+            "  Detection: backend=%s model=%s",
+            self.config.detection.backend,
+            detector_desc,
+        )
         logger.info(f"  Embedding: backend={self.config.embedding.backend}, dim={self.config.embedding.embedding_dim}")
         logger.info(f"  Target FPS: {self.config.target_fps}")
     
+    @profile("engine_process_video")
     def process_video(self, video_path: str, save_visualizations: bool = False, output_dir: str = "results") -> PerceptionResult:
         """
         Process video through complete perception pipeline.
@@ -132,6 +182,9 @@ class PerceptionEngine:
         Returns:
             PerceptionResult with entities and observations
         """
+        # Ensure output directory exists
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+
         logger.info("\n" + "="*80)
         logger.info("PERCEPTION ENGINE - PHASE 1")
         logger.info("="*80)
@@ -146,6 +199,11 @@ class PerceptionEngine:
         t0 = time.time()
         detections = self.observer.process_video(video_path)
         metrics_timings["detection_seconds"] = time.time() - t0
+        
+        # Retrieve SLAM engine from observer if it was used (Phase 1 3D)
+        if self.observer.perception_engine and self.observer.perception_engine.slam_engine:
+            self.slam_engine = self.observer.perception_engine.slam_engine
+            logger.info(f"  ✓ Retrieved SLAM trajectory ({len(self.slam_engine.poses)} poses)")
         
         # Step 2: Embed detections
         t0 = time.time()
@@ -189,6 +247,12 @@ class PerceptionEngine:
         t0 = time.time()
         entities = self.describer.describe_entities(entities)
         metrics_timings["description_seconds"] = time.time() - t0
+
+        if self.config.use_memgraph and self.memgraph is not None:
+            try:
+                self._sync_memgraph_entities(entities)
+            except Exception as e:
+                logger.warning(f"Memgraph sync failed: {e}")
         
         # Get video metadata (approximate from observations)
         total_frames = max([obs.frame_number for obs in observations]) if observations else 0
@@ -208,6 +272,10 @@ class PerceptionEngine:
         # Add aggregate timings and run stats
         elapsed_total = time.time() - start_time
         metrics_timings["total_seconds"] = elapsed_total
+        
+        # Save profiling stats
+        Profiler().save_stats(Path(output_dir) / "profiling_stats.json")
+
         # Frame and detection stats
         try:
             sampled_frames = len({int(d["frame_number"]) for d in detections})
@@ -219,7 +287,12 @@ class PerceptionEngine:
             "detections_per_sampled_frame": (len(detections) / sampled_frames) if sampled_frames else 0.0,
             "embedding_backend": getattr(self.config.embedding, "backend", "clip"),
             "embedding_dim": self.config.embedding.embedding_dim,
-            "yolo_model": self.config.detection.model,
+            "detector_backend": self.config.detection.backend,
+            "detector_model": (
+                self.config.detection.model
+                if self.config.detection.backend == "yolo"
+                else self.config.detection.groundingdino_model_id
+            ),
             "tracker_backend": self.config.tracker_backend,
             "tapnet_tracks": len(self.tapnet_tracker.get_active_tracks()) if self.tapnet_tracker else 0,
             "cluster_embeddings": int(sum(1 for d in detections if 'cluster_rep_id' in d and d.get('cluster_size'))),
@@ -259,9 +332,20 @@ class PerceptionEngine:
         """Initialize all pipeline components with models."""
         logger.info("Loading models...")
         
-        # YOLO
-        yolo = self.model_manager.yolo
-        logger.info("  ✓ YOLO11x loaded")
+        # Detector backend (YOLO or GroundingDINO)
+        yolo = None
+        grounding_dino = None
+        if self.config.detection.backend == "groundingdino":
+            self.model_manager.groundingdino_model_id = self.config.detection.groundingdino_model_id
+            grounding_dino = self.model_manager.groundingdino
+            logger.info(
+                "  ✓ GroundingDINO loaded (%s)",
+                self.config.detection.groundingdino_model_id,
+            )
+        else:
+            self.model_manager.yolo_model_name = self.config.detection.model
+            yolo = self.model_manager.yolo
+            logger.info("  ✓ YOLO detector loaded (%s)", self.config.detection.model)
         
         # CLIP (only load if requested by backend or text conditioning)
         clip = None
@@ -290,8 +374,10 @@ class PerceptionEngine:
         
         # Create components
         self.observer = FrameObserver(
-            yolo_model=yolo,
             config=self.config.detection,
+            detector_backend=self.config.detection.backend,
+            yolo_model=yolo,
+            grounding_dino=grounding_dino,
             target_fps=self.config.target_fps,
             show_progress=True,
             enable_3d=self.config.enable_3d,
@@ -314,24 +400,10 @@ class PerceptionEngine:
             config=self.config.description,
         )
         
-        # Phase 2: Initialize tracking if enabled
-        if self.config.enable_tracking and TRACKING_AVAILABLE:
-            # Get YOLO class names from model
-            yolo_classes = list(yolo.names.values()) if hasattr(yolo, 'names') else []
-            
-            tracking_config = TrackingConfig(
-                max_distance_pixels=self.config.tracking_max_distance_pixels,
-                max_distance_3d_mm=self.config.tracking_max_distance_3d_mm,
-                ttl_frames=self.config.tracking_ttl_frames,
-                reid_window_frames=self.config.tracking_reid_window_frames,
-                class_belief_lr=self.config.tracking_class_belief_lr,
-            )
-            
-            self.tracker_3d = EntityTracker3D(
-                config=tracking_config,
-                yolo_classes=yolo_classes
-            )
-            logger.info("  ✓ EntityTracker3D initialized (Phase 2)")
+        if self.config.enable_depth:
+            self._get_depth_estimator()
+
+
         
         # Enhanced tracker (StrongSORT-inspired)
         if self.config.enable_tracking and ENHANCED_TRACKER_AVAILABLE:
@@ -412,20 +484,24 @@ class PerceptionEngine:
         else:
             logger.warning("  ✗ No SLAM trajectory to export (SLAM not active or no poses)")
         
-        # 2. Export camera intrinsics
+        # 2. Export camera intrinsics (preset or config derived)
         intrinsics_file = output_path / "camera_intrinsics.json"
-        # Default intrinsics (adjust based on your camera/video)
-        intrinsics = {
-            "fx": 525.0,  # Focal length X
-            "fy": 525.0,  # Focal length Y
-            "cx": 319.5,  # Principal point X
-            "cy": 239.5,  # Principal point Y
-            "width": 640,
-            "height": 480,
-            "note": "Default intrinsics - adjust based on actual camera calibration"
+        camera_intrinsics = self.config.camera.resolve_intrinsics(
+            width=self.config.camera.width,
+            height=self.config.camera.height,
+        )
+        intrinsics_payload = {
+            "fx": camera_intrinsics.fx,
+            "fy": camera_intrinsics.fy,
+            "cx": camera_intrinsics.cx,
+            "cy": camera_intrinsics.cy,
+            "width": camera_intrinsics.width,
+            "height": camera_intrinsics.height,
+            "preset": self.config.camera.intrinsics_preset,
+            "note": "Values derived from selected intrinsics preset or overrides",
         }
-        with open(intrinsics_file, 'w') as f:
-            json.dump(intrinsics, f, indent=2)
+        with open(intrinsics_file, "w") as f:
+            json.dump(intrinsics_payload, f, indent=2)
         logger.info(f"  ✓ Saved camera intrinsics: {intrinsics_file}")
         
         # 3. Export tracking data (entities with re-tracking events)
@@ -466,6 +542,276 @@ class PerceptionEngine:
         
         logger.info("✓ Visualization data export complete\n")
     
+    def process_frame(
+        self,
+        frame: np.ndarray,
+        detections: List[dict],
+        frame_number: int = 0,
+        timestamp: float = 0.0,
+    ) -> Perception3DResult:
+        """Lightweight per-frame processing used in unit tests and debugging.
+
+        This path bypasses the heavy observer/embedder stack and instead consumes
+        caller-provided detections (typically synthetic). It still produces
+        structured 3D metadata so downstream tests can exercise depth/occlusion
+        logic without requiring full model execution.
+        """
+        start = time.time()
+        height, width = frame.shape[:2]
+        intrinsics = self._resolve_intrinsics(width, height)
+
+        depth_value = None
+        depth_map: Optional[np.ndarray] = None
+        if self.config.enable_depth:
+            estimator = self._get_depth_estimator()
+            if estimator is not None:
+                try:
+                    depth_map, _ = estimator.estimate(frame)
+                    if depth_map is not None:
+                        depth_map = depth_map.astype(np.float32)
+                        depth_map = np.clip(depth_map, 0.0, self.config.depth.max_depth_mm)
+                        valid = depth_map[(depth_map > 0) & np.isfinite(depth_map)]
+                        if valid.size > 0:
+                            depth_value = float(np.median(valid))
+                        else:
+                            depth_value = None
+                except Exception as exc:
+                    logger.warning(f"Depth estimation failed for frame {frame_number}: {exc}")
+            if depth_map is None:
+                depth_value = min(self.config.depth.max_depth_mm, 1500.0)
+                depth_map = np.full((height, width), depth_value, dtype=np.float32)
+
+        entities: List[EntityState3D] = []
+        for idx, det in enumerate(detections):
+            bbox = det.get("bbox") or det.get("bbox_2d_px")
+            if bbox is None:
+                continue
+            x1, y1, x2, y2 = map(float, bbox)
+            centroid_u = (x1 + x2) / 2.0
+            centroid_v = (y1 + y2) / 2.0
+            centroid_2d = (centroid_u, centroid_v)
+
+            centroid_3d = None
+            bbox_3d = None
+            depth_mean_mm = None
+            depth_variance = None
+            if depth_value is not None:
+                centroid_3d = backproject_point(centroid_u, centroid_v, depth_value, intrinsics)
+                bbox_3d = (
+                    backproject_point(x1, y1, depth_value, intrinsics),
+                    backproject_point(x2, y2, depth_value, intrinsics),
+                )
+                depth_mean_mm = depth_value
+                depth_variance = 25.0  # Stub variance for tests
+
+            entities.append(
+                EntityState3D(
+                    entity_id=str(det.get("entity_id", f"entity_{idx}")),
+                    frame_number=frame_number,
+                    timestamp=timestamp,
+                    class_label=str(det.get("class", det.get("label", "unknown"))),
+                    class_confidence=float(det.get("confidence", 0.0)),
+                    bbox_2d_px=(int(x1), int(y1), int(x2), int(y2)),
+                    centroid_2d_px=centroid_2d,
+                    centroid_3d_mm=centroid_3d,
+                    bbox_3d_mm=bbox_3d,
+                    depth_mean_mm=depth_mean_mm,
+                    depth_variance_mm2=depth_variance,
+                    visibility_state=VisibilityState.FULLY_VISIBLE,
+                    occlusion_ratio=0.0,
+                    occluded_by=None,
+                    metadata={"source": det.get("source", "mock")},
+                )
+            )
+
+        hands: List[Hand] = []
+        if self.config.enable_hands:
+            palm_depth = depth_value or 800.0
+            landmarks_2d = [(0.5, 0.5)] * 21
+            landmarks_3d = [(0.0, 0.0, palm_depth)] * 21
+            hands.append(
+                Hand(
+                    id="hand_stub",
+                    landmarks_2d=landmarks_2d,
+                    landmarks_3d=landmarks_3d,
+                    palm_center_3d=(0.0, 0.0, palm_depth),
+                    pose=HandPose.UNKNOWN,
+                    confidence=0.0,
+                    handedness="Unknown",
+                )
+            )
+
+        processing_ms = (time.time() - start) * 1000.0
+        return Perception3DResult(
+            frame_number=frame_number,
+            timestamp=timestamp,
+            entities=entities,
+            hands=hands,
+            depth_map=depth_map,
+            camera_intrinsics=intrinsics,
+            processing_time_ms=processing_ms,
+            metadata={
+                "detections_processed": len(entities),
+                "depth_enabled": self.config.enable_depth,
+                "hands_enabled": self.config.enable_hands,
+            },
+        )
+
+    def _resolve_intrinsics(self, width: int, height: int) -> CameraIntrinsics:
+        """Resolve camera intrinsics using the runtime camera config."""
+        return self.config.camera.resolve_intrinsics(width=width, height=height)
+
+    def _get_depth_estimator(self) -> Optional[DepthEstimator]:
+        """Lazily initialize and return the shared depth estimator."""
+        if not self.config.enable_depth:
+            return None
+        if self.depth_estimator is not None:
+            return self.depth_estimator
+
+        depth_cfg = getattr(self.config, "depth", None)
+        model_name = getattr(depth_cfg, "model_name", "depth_anything_v3")
+        model_size = getattr(depth_cfg, "model_size", "small")
+        device = getattr(depth_cfg, "device", None)
+        half_precision = getattr(depth_cfg, "half_precision", True)
+
+        try:
+            self.depth_estimator = DepthEstimator(
+                model_name=model_name,
+                model_size=model_size,
+                device=device,
+                half_precision=half_precision,
+            )
+            logger.info(f"  ✓ DepthEstimator initialized ({model_name}/{model_size})")
+        except Exception as exc:
+            logger.warning(f"  ✗ Failed to initialize DepthEstimator: {exc}")
+            self.depth_estimator = None
+        return self.depth_estimator
+    
+    def _sync_memgraph_entities(self, entities: List[PerceptionEntity]):
+        """Push entity observations and relations to Memgraph."""
+        if not self.memgraph:
+            return
+
+        frame_entries: Dict[int, List[Tuple[int, Observation]]] = {}
+
+        for entity in entities:
+            try:
+                entity_numeric_id = self._entity_str_to_int(entity.entity_id)
+            except Exception:
+                logger.debug(f"Unable to parse entity_id {entity.entity_id} for Memgraph")
+                continue
+
+            zone_id = self.zone_manager.assign_zone(entity)
+
+            embedding = entity.average_embedding
+            if embedding is None:
+                try:
+                    embedding = entity.compute_average_embedding()
+                except Exception:
+                    embedding = None
+
+            embedding_payload = (
+                embedding.astype(float).tolist()
+                if isinstance(embedding, np.ndarray)
+                else (embedding.tolist() if hasattr(embedding, "tolist") else None)
+            )
+
+            class_name = (
+                entity.object_class.value
+                if hasattr(entity.object_class, "value")
+                else str(entity.object_class)
+            )
+            caption_payload = entity.description
+            caption_written = False
+            embedding_written = False
+
+            for obs in entity.observations:
+                bbox = obs.bounding_box.to_list()
+                try:
+                    self.memgraph.add_entity_observation(
+                        entity_id=entity_numeric_id,
+                        frame_idx=obs.frame_number,
+                        timestamp=obs.timestamp,
+                        bbox=bbox,
+                        class_name=class_name,
+                        confidence=float(obs.confidence),
+                        zone_id=zone_id,
+                        caption=(
+                            caption_payload
+                            if caption_payload and not caption_written
+                            else None
+                        ),
+                        embedding=embedding_payload if not embedding_written else None,
+                    )
+                    embedding_written = True if embedding_payload and not embedding_written else embedding_written
+                    caption_written = True if caption_payload and not caption_written else caption_written
+                    frame_entries.setdefault(obs.frame_number, []).append((entity_numeric_id, obs))
+                except Exception as exc:
+                    logger.debug(
+                        f"Memgraph observation write failed for {entity.entity_id}: {exc}"
+                    )
+
+        self._emit_spatial_relationships(frame_entries)
+
+    def _emit_spatial_relationships(
+        self, frame_entries: Dict[int, List[Tuple[int, Observation]]]
+    ):
+        """Derive simple NEAR relationships per frame and send to Memgraph."""
+        if not self.memgraph:
+            return
+
+        near_threshold = getattr(self.config, "memgraph_near_threshold", 0.15)
+
+        for frame_idx, entries in frame_entries.items():
+            if len(entries) < 2:
+                continue
+            for i in range(len(entries)):
+                entity_a, obs_a = entries[i]
+                center_a = obs_a.bounding_box.center
+                for j in range(i + 1, len(entries)):
+                    entity_b, obs_b = entries[j]
+                    center_b = obs_b.bounding_box.center
+                    dist = math.dist(center_a, center_b)
+                    diag = self._estimate_frame_diag(obs_a, obs_b)
+                    if diag <= 0:
+                        continue
+                    norm_dist = dist / diag
+                    if norm_dist <= near_threshold:
+                        confidence = max(
+                            0.1,
+                            1.0 - (norm_dist / max(near_threshold, 1e-3))
+                        )
+                        try:
+                            self.memgraph.add_spatial_relationship(
+                                entity1_id=entity_a,
+                                entity2_id=entity_b,
+                                relationship_type="NEAR",
+                                confidence=float(confidence),
+                                frame_idx=frame_idx,
+                            )
+                        except Exception as exc:
+                            logger.debug(f"Memgraph relation write failed: {exc}")
+
+    @staticmethod
+    def _estimate_frame_diag(obs_a: Observation, obs_b: Observation) -> float:
+        """Best-effort estimate of frame diagonal for normalization."""
+        for obs in (obs_a, obs_b):
+            if obs.frame_width and obs.frame_height:
+                return math.hypot(obs.frame_width, obs.frame_height)
+        width = max(obs_a.bounding_box.width, obs_b.bounding_box.width)
+        height = max(obs_a.bounding_box.height, obs_b.bounding_box.height)
+        return math.hypot(width, height) * 3.0
+
+    @staticmethod
+    def _entity_str_to_int(entity_id: str) -> int:
+        """Convert entity_id strings like 'entity_12' into stable ints."""
+        if entity_id.isdigit():
+            return int(entity_id)
+        digits = "".join(ch for ch in entity_id if ch.isdigit())
+        if digits:
+            return int(digits)
+        return abs(hash(entity_id)) % (2 ** 31)
+
     def _reid_deduplicate_entities(self, entities: List[PerceptionEntity]) -> List[PerceptionEntity]:
         """Phase 5: Adaptive Re-ID semantic deduplication.
 
@@ -623,6 +969,11 @@ class PerceptionEngine:
                 object_class=ent_i.object_class,
                 observations=all_obs,
             )
+            
+            # Back-populate merged entity_id to observations
+            for obs in all_obs:
+                obs.entity_id = merged.entity_id
+                
             # Compute average embedding with optional downsampling
             obs_embeddings = [obs.visual_embedding for obs in all_obs]
             if max_embeddings_per_entity and len(obs_embeddings) > max_embeddings_per_entity:

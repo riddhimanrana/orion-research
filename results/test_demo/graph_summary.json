@@ -1,0 +1,11 @@
+{
+  "total_frames": 66,
+  "total_nodes": 95,
+  "total_edges": 7,
+  "relation_counts": {
+    "near": 6,
+    "on": 1
+  },
+  "avg_nodes_per_frame": 1.44,
+  "avg_edges_per_frame": 0.11
+}

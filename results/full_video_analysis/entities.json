@@ -1,0 +1,136 @@
+{
+  "total_entities": 14,
+  "entities": [
+    {
+      "id": 0,
+      "class": "book",
+      "confidence": 0.9750760793685913,
+      "observation_count": 101,
+      "first_frame": 315,
+      "last_frame": 1925,
+      "description": "The image depicts a person holding a spiral-bound notebook. The notebook is light blue in color and has a spiral binding on the left side. The cover of the notebook features text in a vertical orientation, with the words \"MILANO\" and \"HOLLYWOOD\" prominently displayed. The text is in a white font, and there is a barcode located at the top of the notebook. The person's hand is visible, with a thumb and fingers gripping the notebook. The background appears to be a light-colored surface, possibly a table or desk. The overall appearance suggests that the notebook is likely a travel or journaling notebook, given the mention of \"MILANO\" and \"HOLLYWOOD,\" which are known locations."
+    },
+    {
+      "id": 1,
+      "class": "person",
+      "confidence": 0.9351511597633362,
+      "observation_count": 95,
+      "first_frame": 224,
+      "last_frame": 1855,
+      "description": "The image depicts a close-up view of a person's arm, specifically focusing on the hand gripping a metal object. The hand is positioned in a way that suggests the person is either holding or manipulating the object. The metal object appears to be a tool, possibly a drill or a similar device, given its cylindrical shape and the presence of a handle. The person's skin tone is light, and they are wearing a yellow bracelet on their wrist. The background is a plain, light-colored surface, likely a wall or a ceiling, which provides a neutral backdrop that highlights the hand and the object. The image captures the interaction between the person and the tool, emphasizing the action of holding or using the object."
+    },
+    {
+      "id": 2,
+      "class": "mouse",
+      "confidence": 0.9229762554168701,
+      "observation_count": 30,
+      "first_frame": 0,
+      "last_frame": 1946,
+      "description": "The image depicts a black, round object with a yellow, irregularly shaped design on its surface. The object appears to be a piece of clothing, possibly a shirt or a jacket, given its shape and the presence of a collar. The yellow design is somewhat abstract and resembles a stylized bird or a similar figure, adding a unique visual element to the otherwise plain black fabric. The background is blurred, making it difficult to discern any additional details about the surroundings. The overall impression is that of a simple, yet distinctive piece of clothing with a distinctive design."
+    },
+    {
+      "id": 3,
+      "class": "tv",
+      "confidence": 0.9589593410491943,
+      "observation_count": 24,
+      "first_frame": 0,
+      "last_frame": 1967,
+      "description": "The image depicts a computer monitor displaying a large, black screen filled with white lines. The lines appear to be text, possibly code or a command-line interface, and are arranged in a grid-like pattern. The monitor itself is a Dell model, identifiable by the logo at the bottom center. The background is a plain, light-colored wall, and there are some indistinct objects and cables visible at the bottom of the image. The overall appearance suggests that the monitor is turned on and in use, with the white lines on the screen likely representing some form of data or output."
+    },
+    {
+      "id": 4,
+      "class": "keyboard",
+      "confidence": 0.9603363275527954,
+      "observation_count": 26,
+      "first_frame": 0,
+      "last_frame": 1974,
+      "description": "The image depicts a black computer keyboard with a sleek, modern design. The keyboard features a full set of keys, including a numeric keypad on the right side. The keys are black with white lettering, and there are several colored keys, including red, green, and purple, which are likely programmable for various functions. The keyboard also has a wrist rest attached to the bottom, which is black and appears to be made of a soft material for comfort. The keys are arranged in a standard QWERTY layout, and there are additional function keys on the top row. The overall appearance of the keyboard is clean and professional, suggesting it is designed for use in a home or office setting."
+    },
+    {
+      "id": 5,
+      "class": "bed",
+      "confidence": 0.9514368176460266,
+      "observation_count": 43,
+      "first_frame": 581,
+      "last_frame": 1792,
+      "description": "The image depicts a person's hand holding a spiral-bound notebook. The notebook has a light blue cover with a white spiral binding. The cover features a printed page with text, although the specific content of the text is not clearly visible. The notebook is resting on a textured, metallic surface that has a grid-like pattern. In the background, there is a piece of clothing, possibly a white t-shirt, and a blue garment, which appears to be a shirt or a jacket. The overall scene suggests a casual setting, possibly outdoors or in a public space. The focus is on the notebook, highlighting its importance or the act of reading or writing."
+    },
+    {
+      "id": 6,
+      "class": "backpack",
+      "confidence": 0.9276206493377686,
+      "observation_count": 12,
+      "first_frame": 112,
+      "last_frame": 1883,
+      "description": "The image depicts a black backpack with a white stripe running down its side. The backpack is positioned on a white chair, which is placed on a gray carpeted floor. The backpack appears to be made of a durable fabric, likely nylon or polyester, and has a zipper closure. The white stripe adds a contrasting detail to the otherwise monochromatic black backpack. The chair has a simple design with a white frame and a black seat. The carpet has a textured pattern, and the overall setting suggests an indoor environment, possibly an office or a waiting area. The lighting in the image is soft, casting gentle shadows and giving the scene a calm atmosphere."
+    },
+    {
+      "id": 7,
+      "class": "cell phone",
+      "confidence": 0.8581085205078125,
+      "observation_count": 11,
+      "first_frame": 0,
+      "last_frame": 1967,
+      "description": "The image depicts a black, rectangular object with rounded corners, resembling a tablet or a similar electronic device. The device has a dark, possibly black, screen that is currently turned off, and it appears to be resting on a surface with a patterned design. The screen is slightly tilted, and there is a visible button or control on the front of the device. The overall appearance suggests a modern, sleek design, commonly associated with tablets used for various purposes such as reading, browsing the internet, or using applications. The background is blurred, drawing attention to the device itself."
+    },
+    {
+      "id": 8,
+      "class": "handbag",
+      "confidence": 0.5788695216178894,
+      "observation_count": 3,
+      "first_frame": 140,
+      "last_frame": 1106,
+      "description": "The image depicts a black, long, and narrow object with a smooth, curved surface. The object appears to be a piece of clothing, possibly a jacket or a coat, given its shape and the way it drapes. The fabric seems to be of a dark color, likely black, and the material looks soft and slightly shiny, suggesting it might be made of a synthetic blend or a high-quality fabric. The object is positioned on a light-colored surface, which could be a table or a floor, and there is a small, yellow object partially visible in the top right corner of the image. The overall appearance is that of a simple, everyday item, possibly a piece of casual or semi-formal attire."
+    },
+    {
+      "id": 9,
+      "class": "cat",
+      "confidence": 0.7286633253097534,
+      "observation_count": 3,
+      "first_frame": 147,
+      "last_frame": 1190,
+      "description": "The image depicts a small, white, spiral-bound notebook with a blue cover, lying on a bed with a striped pattern. The notebook appears to be slightly tilted, with its pages visible and slightly curled. The bed has a gray and white striped pattern, and there are some indistinct objects in the background, including what looks like a yellow garment and a white cloth. The overall scene suggests a casual, possibly hurried setting, with the notebook being the central focus."
+    },
+    {
+      "id": 10,
+      "class": "potted plant",
+      "confidence": 0.6853727102279663,
+      "observation_count": 2,
+      "first_frame": 581,
+      "last_frame": 588,
+      "description": "The image depicts a white, star-shaped object with a central point and eight radiating arms. The object appears to be made of a material with a matte finish, and it is set against a white background. The arms of the object are thin and elongated, converging towards the center. The central point is slightly darker than the arms, creating a contrast that highlights the central area. The overall shape is symmetrical and resembles a stylized representation of a star or a similar geometric figure. The image is slightly blurred, making it difficult to discern finer details."
+    },
+    {
+      "id": 11,
+      "class": "suitcase",
+      "confidence": 0.46870964765548706,
+      "observation_count": 2,
+      "first_frame": 1197,
+      "last_frame": 1211,
+      "description": "The image depicts a black tire with a red reflector on its rim. The tire appears to be in motion, as suggested by the blurred background. The red reflector is positioned on the outer edge of the tire, which is a common safety feature to enhance visibility. The tire's tread pattern is visible, indicating it is designed for road use. The background is blurred, emphasizing the motion of the tire and creating a sense of speed. The overall appearance suggests that the tire is likely part of a vehicle, possibly a car or a motorcycle, given the context and the design of the reflector."
+    },
+    {
+      "id": 12,
+      "class": "truck",
+      "confidence": 0.2621111273765564,
+      "observation_count": 1,
+      "first_frame": 567,
+      "last_frame": 567,
+      "description": "The image depicts a small, rectangular object with a maroon or dark red hue. The object appears to be a jar or container, given its shape and the presence of a lid. The lid is slightly ajar, revealing a white interior. The jar is placed on a flat surface, and the background is blurred, making it difficult to discern any additional details. The overall appearance suggests that the jar could be used for storing food items or other substances. The maroon color is uniform, and the jar's surface appears smooth. The image does not provide any clear text or distinguishing features that could be used to identify the object or its contents."
+    },
+    {
+      "id": 13,
+      "class": "bird",
+      "confidence": 0.25373855233192444,
+      "observation_count": 1,
+      "first_frame": 1183,
+      "last_frame": 1183,
+      "description": "The image depicts a large, white cloud floating on a body of water. The cloud appears to be in motion, creating a dynamic and somewhat ethereal effect. The water beneath the cloud is dark and rippled, suggesting a sense of movement and possibly indicating that the cloud is either rising or falling. The contrast between the white cloud and the dark water enhances the visual impact of the image. The overall scene conveys a sense of tranquility and natural beauty, with the cloud's movement adding a sense of life and energy to the otherwise still image."
+    }
+  ],
+  "tracking_stats": {
+    "total_tracks": 5,
+    "confirmed_tracks": 5,
+    "id_switches": 0
+  }
+}

@@ -16,59 +16,106 @@ from typing import Literal, Optional
 
 import logging
 
+from .intrinsics_presets import DEFAULT_INTRINSICS_PRESET, INTRINSICS_PRESETS
+
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class DetectionConfig:
-    """YOLO11 detection configuration"""
-    
-    # Model variant
+    """Detection backend configuration (YOLO or GroundingDINO)."""
+
+    backend: Literal["yolo", "groundingdino"] = "yolo"
+    """Primary detector to use for frame observations."""
+
+    # YOLO-specific settings
     model: Literal["yolo11n", "yolo11s", "yolo11m", "yolo11x"] = "yolo11x"
-    """YOLO model size (n=fastest, x=most accurate)"""
-    
-    # Detection thresholds
+    """YOLO model size (n=fastest, x=most accurate)."""
+
+    # Detection thresholds (shared)
     confidence_threshold: float = 0.25
-    """Minimum detection confidence (0-1, lower = more detections)"""
-    
+    """Minimum detection confidence (0-1, lower = more detections)."""
+
     iou_threshold: float = 0.45
-    """NMS IoU threshold for overlapping boxes"""
-    
+    """NMS IoU threshold for overlapping boxes."""
+
     # Filtering
     min_object_size: int = 32
-    """Minimum object size in pixels (smaller ignored)"""
-    
+    """Minimum object size in pixels (smaller ignored)."""
+
     # Cropping
     bbox_padding_percent: float = 0.1
-    """Padding to add around bounding boxes when cropping (as percentage of box size)"""
-    
+    """Padding to add around bounding boxes when cropping (percentage of box size)."""
+
+    # GroundingDINO-specific options
+    groundingdino_model_id: str = "IDEA-Research/grounding-dino-base"
+    """Hugging Face model identifier for GroundingDINO."""
+
+    groundingdino_prompt: str = (
+        "person . chair . couch . dining table . tv . laptop . keyboard . monitor . "
+        "book . cup . bottle . plant . refrigerator . microwave . oven . sink . bed . "
+        "counter . cabinet . dog . cat . backpack . suitcase . chair"
+    )
+    """Dot-separated open-vocabulary prompt used by GroundingDINO."""
+
+    groundingdino_box_threshold: float = 0.30
+    """Box confidence threshold for GroundingDINO post-processing."""
+
+    groundingdino_text_threshold: float = 0.25
+    """Text confidence threshold for GroundingDINO token matching."""
+
+    groundingdino_max_detections: int = 100
+    """Upper bound on detections returned per frame when using GroundingDINO."""
+
     def __post_init__(self):
-        """Validate detection config"""
+        """Validate detection config."""
+        if self.backend not in {"yolo", "groundingdino"}:
+            raise ValueError(f"backend must be 'yolo' or 'groundingdino', got {self.backend}")
+
         # Model validation
         valid_models = {"yolo11n", "yolo11s", "yolo11m", "yolo11x"}
         if self.model not in valid_models:
             raise ValueError(f"Invalid model: {self.model}. Must be one of {valid_models}")
-        
+
         # Threshold validation
         if not (0 <= self.confidence_threshold <= 1):
             raise ValueError(f"confidence_threshold must be in [0, 1], got {self.confidence_threshold}")
-        
+
         if not (0 <= self.iou_threshold <= 1):
             raise ValueError(f"iou_threshold must be in [0, 1], got {self.iou_threshold}")
-        
+
+        if not (0 <= self.groundingdino_box_threshold <= 1):
+            raise ValueError(
+                f"groundingdino_box_threshold must be in [0, 1], got {self.groundingdino_box_threshold}"
+            )
+
+        if not (0 <= self.groundingdino_text_threshold <= 1):
+            raise ValueError(
+                f"groundingdino_text_threshold must be in [0, 1], got {self.groundingdino_text_threshold}"
+            )
+
         # Size validation
         if self.min_object_size < 1:
             raise ValueError(f"min_object_size must be >= 1, got {self.min_object_size}")
-        
+
         # Padding validation
         if self.bbox_padding_percent < 0:
             raise ValueError(f"bbox_padding_percent must be >= 0, got {self.bbox_padding_percent}")
-        
+
+        if self.backend == "groundingdino":
+            if not self.groundingdino_prompt.strip():
+                raise ValueError("groundingdino_prompt cannot be empty when backend='groundingdino'")
+            if self.groundingdino_max_detections < 1:
+                raise ValueError("groundingdino_max_detections must be >= 1")
+
         logger.debug(
-            f"DetectionConfig validated: model={self.model}, "
-            f"conf_thresh={self.confidence_threshold}, "
-            f"iou_thresh={self.iou_threshold}"
+            f"DetectionConfig validated: backend={self.backend}, model={self.model}, "
+            f"conf_thresh={self.confidence_threshold}, iou_thresh={self.iou_threshold}"
         )
+
+    def grounding_categories(self) -> list[str]:
+        """Return normalized category list for GroundingDINO prompts."""
+        return [token.strip() for token in self.groundingdino_prompt.split('.') if token.strip()]
 
 
 @dataclass
@@ -168,6 +215,9 @@ class DescriptionConfig:
     
     temperature: float = 0.3
     """Sampling temperature (lower = deterministic, higher = creative)"""
+
+    prompt_template: str = "Describe this object in detail."
+    """Prompt template for VLM description generation."""
     
     # Optimization
     describe_once: bool = True
@@ -228,12 +278,121 @@ class DescriptionConfig:
 
 
 @dataclass
+class DepthConfig:
+    """Depth estimation configuration for Phase 1 3D perception."""
+
+    model_name: Literal["depth_anything_v3"] = "depth_anything_v3"
+    model_size: Literal["small", "base", "large"] = "small"
+    device: Optional[str] = None  # auto-detect by default
+    half_precision: bool = True
+    max_depth_mm: float = 10000.0
+
+    def __post_init__(self):
+        if self.max_depth_mm <= 0:
+            raise ValueError(f"max_depth_mm must be > 0, got {self.max_depth_mm}")
+        if self.model_size not in {"small", "base", "large"}:
+            raise ValueError(
+                f"model_size must be one of ['small', 'base', 'large'], got {self.model_size}"
+            )
+
+
+@dataclass
+class HandTrackingConfig:
+    """MediaPipe hand tracking configuration."""
+
+    max_num_hands: int = 2
+    min_detection_confidence: float = 0.5
+    min_tracking_confidence: float = 0.5
+    device: Optional[str] = None
+
+    def __post_init__(self):
+        if self.max_num_hands < 1:
+            raise ValueError("max_num_hands must be >= 1")
+        for name, value in (
+            ("min_detection_confidence", self.min_detection_confidence),
+            ("min_tracking_confidence", self.min_tracking_confidence),
+        ):
+            if not (0.0 <= value <= 1.0):
+                raise ValueError(f"{name} must be in [0,1], got {value}")
+
+
+@dataclass
+class OcclusionConfig:
+    """Occlusion detection configuration."""
+
+    depth_margin_mm: float = 100.0
+    occlusion_threshold: float = 0.3
+
+    def __post_init__(self):
+        if self.depth_margin_mm < 0:
+            raise ValueError("depth_margin_mm must be >= 0")
+        if not (0.0 <= self.occlusion_threshold <= 1.0):
+            raise ValueError("occlusion_threshold must be in [0,1]")
+
+
+@dataclass
+class CameraConfig:
+    """Camera metadata for auto estimating intrinsics."""
+
+    width: int = 1920
+    height: int = 1080
+    fx: Optional[float] = None
+    fy: Optional[float] = None
+    cx: Optional[float] = None
+    cy: Optional[float] = None
+    auto_estimate: bool = True
+    intrinsics_preset: Optional[str] = DEFAULT_INTRINSICS_PRESET
+
+    def __post_init__(self):
+        if self.width <= 0 or self.height <= 0:
+            raise ValueError("width and height must be positive")
+        if self.intrinsics_preset and self.intrinsics_preset not in INTRINSICS_PRESETS:
+            raise ValueError(
+                f"Unknown intrinsics preset '{self.intrinsics_preset}'. "
+                f"Valid presets: {list(INTRINSICS_PRESETS.keys())}"
+            )
+
+    def resolve_intrinsics(self, width: int, height: int) -> "CameraIntrinsics":
+        """Resolve intrinsics using preset or manual overrides."""
+        from .types import CameraIntrinsics
+
+        if self.intrinsics_preset:
+            preset = INTRINSICS_PRESETS[self.intrinsics_preset]
+            return CameraIntrinsics(
+                fx=preset.fx,
+                fy=preset.fy,
+                cx=preset.cx,
+                cy=preset.cy,
+                width=width,
+                height=height,
+            )
+
+        if not self.auto_estimate and all(
+            value is not None for value in (self.fx, self.fy, self.cx, self.cy)
+        ):
+            return CameraIntrinsics(
+                fx=float(self.fx),
+                fy=float(self.fy),
+                cx=float(self.cx),
+                cy=float(self.cy),
+                width=width,
+                height=height,
+            )
+
+        return CameraIntrinsics.auto_estimate(width=width, height=height)
+
+
+@dataclass
 class PerceptionConfig:
     """Complete perception engine configuration"""
     
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     description: DescriptionConfig = field(default_factory=DescriptionConfig)
+    depth: DepthConfig = field(default_factory=DepthConfig)
+    hand_tracking: HandTrackingConfig = field(default_factory=HandTrackingConfig)
+    occlusion: OcclusionConfig = field(default_factory=OcclusionConfig)
+    camera: CameraConfig = field(default_factory=CameraConfig)
     
     # General settings
     target_fps: float = 4.0
@@ -243,17 +402,23 @@ class PerceptionConfig:
     """Enable intelligent scene change detection for frame sampling"""
     
     # 3D Perception settings
-    enable_3d: bool = False
+    enable_3d: bool = True
     """Enable 3D perception (depth, 3D coordinates, occlusion)"""
     
-    depth_model: Literal["midas", "zoe"] = "midas"
-    """Depth estimation model (deprecated; DepthAnythingV2 is now used internally)"""
+    depth_model: Literal["depth_anything_v3", "depth_anything_v2"] = "depth_anything_v3"
+    """Depth estimation model (DepthAnything V3 primary, V2 fallback)."""
+    
+    enable_depth: bool = True
+    """Enable depth estimation stage (Phase 1 3D)."""
+    
+    enable_hands: bool = True
+    """Enable hand tracking (MediaPipe)"""
     
     # TODO: Hand tracking (future implementation with HOT3D dataset)
     # enable_hands: bool = False
     # """Enable hand tracking (requires HOT3D-trained model, not yet implemented)"""
     
-    enable_occlusion: bool = False
+    enable_occlusion: bool = True
     """Enable occlusion detection (requires enable_3d=True)"""
     
     # Phase 2: Tracking settings
@@ -281,23 +446,31 @@ class PerceptionConfig:
 
     # TapNet configuration (only used when tracker_backend='tapnet')
     tapnet_checkpoint_path: Optional[str] = None
-    """Local path to TapNet / BootsTAPIR causal checkpoint (e.g., models/tapnet/causal_bootstapir_checkpoint.pt). Required for tapnet backend."""
-
-    tapnet_max_points: int = 256
-    """Maximum number of query points to track (sampled from detections centroids)."""
-
-    tapnet_resolution: int = 256
-    """Inference resolution (square). 256 for speed, 512 for accuracy."""
-
-    tapnet_online_mode: bool = True
-    """Use causal/online TapNet variant (per-frame). Set False for full-video batch (higher latency)."""
-
-    tapnet_min_track_length: int = 3
-    """Minimum length (frames) before promoting a point track to a persistent entity candidate."""
-
-    tapnet_reid_merge_similarity: float = 0.35
-    """Cosine similarity threshold between DINOv3 embeddings of track endpoints to merge trajectories (entity persistence)."""
+    """Path to TapNet checkpoint (e.g. 'models/tapnet/tapir_checkpoint_panning.npy')"""
     
+    tapnet_resolution: int = 256
+    """Resolution for TapNet tracking (256 or 512)"""
+
+    # Clustering / HDBSCAN tuning
+    clustering_min_cluster_size: int = 4
+    """Minimum cluster size for HDBSCAN entity grouping (>=2)."""
+
+    clustering_min_samples: int = 1
+    """Minimum samples parameter for HDBSCAN (>=1)."""
+
+    clustering_cluster_selection_epsilon: float = 0.25
+    """Epsilon for HDBSCAN cluster selection (lower = more clusters)."""
+
+    # Memgraph configuration
+    use_memgraph: bool = False
+    """Enable Memgraph backend for real-time graph updates"""
+    
+    memgraph_host: str = "127.0.0.1"
+    """Memgraph host address"""
+    
+    memgraph_port: int = 7687
+    """Memgraph port"""
+
     def __post_init__(self):
         """Validate perception config"""
         if self.target_fps <= 0:
@@ -310,6 +483,11 @@ class PerceptionConfig:
                 "Setting enable_3d=True automatically."
             )
             self.enable_3d = True
+        if self.enable_occlusion and not self.enable_depth:
+            logger.warning(
+                "enable_occlusion=True requires enable_depth=True. Enabling depth automatically."
+            )
+            self.enable_depth = True
         
         logger.debug(
             f"PerceptionConfig validated: target_fps={self.target_fps}, "
@@ -330,6 +508,23 @@ class PerceptionConfig:
                     f"tapnet_resolution={self.tapnet_resolution} unsupported; forcing 256"
                 )
                 self.tapnet_resolution = 256
+
+        # Clustering parameter validation
+        if self.clustering_min_cluster_size < 2:
+            logger.warning(
+                f"clustering_min_cluster_size={self.clustering_min_cluster_size} too small; forcing 2"
+            )
+            self.clustering_min_cluster_size = 2
+        if self.clustering_min_samples < 1:
+            logger.warning(
+                f"clustering_min_samples={self.clustering_min_samples} invalid; forcing 1"
+            )
+            self.clustering_min_samples = 1
+        if self.clustering_cluster_selection_epsilon < 0:
+            logger.warning(
+                f"clustering_cluster_selection_epsilon={self.clustering_cluster_selection_epsilon} < 0; forcing 0.0"
+            )
+            self.clustering_cluster_selection_epsilon = 0.0
 
 
 # Preset configurations

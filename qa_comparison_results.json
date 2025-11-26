@@ -1,0 +1,122 @@
+[
+  {
+    "video": "test.mp4",
+    "question": "Is there a bird in the video?",
+    "orion_answer": "I detected a bird, but upon closer inspection, it appears to be a false detection.",
+    "gemini_answer": "Based on the video, there's no indication of a bird in the video...."
+  },
+  {
+    "video": "test.mp4",
+    "question": "Where is the cat?",
+    "orion_answer": "I detected a cat, but upon closer inspection, it appears to be a false detection.",
+    "gemini_answer": "Okay, I can help with that! I've analyzed the video and the cat is located in the upstairs bedroom a..."
+  },
+  {
+    "video": "test.mp4",
+    "question": "Is there a traffic light?",
+    "orion_answer": "The image depicts a traffic light, which is a device used to control the flow of traffic at intersections. The traffic light is mounted on a pole and consists of three distinct lights: red, yellow, and green. The red light is at the top, the yellow light is in the middle, and the green light is at the bottom. The traffic light is currently displaying a yellow light, indicating that vehicles should prepare to stop. The background of the image is blurred, making it difficult to discern any additional details about the surroundings. The traffic light itself appears to be in good condition, with clear and distinct colors. The pole supporting the traffic light is also visible, providing a stable base for the device. The overall appearance of the traffic light is typical of standard traffic lights found in many urban and suburban areas.",
+    "gemini_answer": "It is difficult to see whether a traffic light is present...."
+  },
+  {
+    "video": "test.mp4",
+    "question": "Describe the potted plant.",
+    "orion_answer": "I detected a potted plant, but upon closer inspection, it appears to be a false detection.",
+    "gemini_answer": "Here are the descriptions of the potted plants from the video:  - There are several small potted pla..."
+  },
+  {
+    "video": "test.mp4",
+    "question": "Is there a chandelier?",
+    "orion_answer": "I couldn't identify which object you're asking about. Try: 'What color was the book?'",
+    "gemini_answer": "Yes, there is a chandelier in the living room...."
+  },
+  {
+    "video": "test.mp4",
+    "question": "Where is the computer monitor?",
+    "orion_answer": "I didn't see any monitor in the video.",
+    "gemini_answer": "Here are the bounding box detections: ```json [   {\"box_2d\": [0, 0, 434, 814], \"label\": \"computer mo..."
+  },
+  {
+    "video": "test.mp4",
+    "question": "Is there a keyboard?",
+    "orion_answer": "I didn't see any keyboard in the video.",
+    "gemini_answer": "Yes, there is a keyboard in the video...."
+  },
+  {
+    "video": "test.mp4",
+    "question": "What color is the sofa?",
+    "orion_answer": "I didn't see any sofa in the video.",
+    "gemini_answer": "The sofa is brown...."
+  },
+  {
+    "video": "test.mp4",
+    "question": "Is there a refrigerator?",
+    "orion_answer": "I didn't see any refrigerator in the video.",
+    "gemini_answer": "Yes, there is a refrigerator in the kitchen visible at 0:35...."
+  },
+  {
+    "video": "test.mp4",
+    "question": "How many chairs are there?",
+    "orion_answer": "The image depicts a close-up view of a chair. The chair has a dark brown or black color, with a visible texture that suggests it might be made of wood or a similar material. The chair's backrest is slightly curved, and the seat appears to be cushioned, indicating a comfortable seating arrangement. The chair is positioned against a backdrop that includes a light-colored wall and a portion of a blue and white checkered object, possibly a tablecloth or a piece of fabric. The overall appearance of the chair is simple and functional, with no additional decorative elements visible in the image.",
+    "gemini_answer": "Based on the video, there are at least 8 chairs: * 4 chairs are in the first living room * 4 chairs ..."
+  },
+  {
+    "video": "video.mp4",
+    "question": "Is there a truck?",
+    "orion_answer": "I detected a truck, but upon closer inspection, it appears to be a false detection.",
+    "gemini_answer": "I'm designed to be helpful, but I'm limited in what I can do. That request falls outside of those li..."
+  },
+  {
+    "video": "video.mp4",
+    "question": "Where is the book?",
+    "orion_answer": "I saw the book in the scene at 0:35. The image depicts a person holding a spiral-bound notebook. The notebook is light blue in color and has a spiral binding on the left side. The cover of the notebook features text in a vertical orientation, with the words \"MILANO\" and \"HOLLYWOOD\" prominently displayed. The text is in a white font, and there is a barcode located at the top of the notebook. The person's hand is visible, with a thumb and fingers gripping the notebook. The background appears to be a light-colored surface, possibly a table or desk. The overall appearance suggests that the notebook is likely a travel or journaling notebook, given the mention of \"MILANO\" and \"HOLLYWOOD,\" which are known locations.",
+    "gemini_answer": "Here are the bounding box detections: ```json [   {\"box_2d\": [256, 251, 368, 427], \"label\": \"back co..."
+  },
+  {
+    "video": "video.mp4",
+    "question": "Describe the notebook.",
+    "orion_answer": "The image depicts a person holding a spiral-bound notebook. The notebook is light blue in color and has a spiral binding on the left side. The cover of the notebook features text in a vertical orientation, with the words \"MILANO\" and \"HOLLYWOOD\" prominently displayed. The text is in a white font, and there is a barcode located at the top of the notebook. The person's hand is visible, with a thumb and fingers gripping the notebook. The background appears to be a light-colored surface, possibly a table or desk. The overall appearance suggests that the notebook is likely a travel or journaling notebook, given the mention of \"MILANO\" and \"HOLLYWOOD,\" which are known locations.",
+    "gemini_answer": "Here are some details about the notebook from the video:  *   It is a light blue, spiral-bound noteb..."
+  },
+  {
+    "video": "video.mp4",
+    "question": "Is there a person?",
+    "orion_answer": "The image depicts a close-up view of a person's arm, specifically focusing on the hand gripping a metal object. The hand is positioned in a way that suggests the person is either holding or manipulating the object. The metal object appears to be a tool, possibly a drill or a similar device, given its cylindrical shape and the presence of a handle. The person's skin tone is light, and they are wearing a yellow bracelet on their wrist. The background is a plain, light-colored surface, likely a wall or a ceiling, which provides a neutral backdrop that highlights the hand and the object. The image captures the interaction between the person and the tool, emphasizing the action of holding or using the object.",
+    "gemini_answer": "Yes, there is a person in this video. The person's arm and hand are visible multiple times from [00:..."
+  },
+  {
+    "video": "video.mp4",
+    "question": "What is the person holding?",
+    "orion_answer": "The image depicts a close-up view of a person's arm, specifically focusing on the hand gripping a metal object. The hand is positioned in a way that suggests the person is either holding or manipulating the object. The metal object appears to be a tool, possibly a drill or a similar device, given its cylindrical shape and the presence of a handle. The person's skin tone is light, and they are wearing a yellow bracelet on their wrist. The background is a plain, light-colored surface, likely a wall or a ceiling, which provides a neutral backdrop that highlights the hand and the object. The image captures the interaction between the person and the tool, emphasizing the action of holding or using the object.",
+    "gemini_answer": "The person is holding a notebook with the words \"Scout Oath\" and \"Scout Law\" printed on the cover...."
+  },
+  {
+    "video": "video.mp4",
+    "question": "Is there a bird?",
+    "orion_answer": "I detected a bird, but upon closer inspection, it appears to be a false detection.",
+    "gemini_answer": "Here are the bounding box detections: ```json [   {\"box_2d\": [220, 552, 248, 621], \"label\": \"bird\"} ..."
+  },
+  {
+    "video": "video.mp4",
+    "question": "Is there a keyboard?",
+    "orion_answer": "The image depicts a black computer keyboard with a sleek, modern design. The keyboard features a full set of keys, including a numeric keypad on the right side. The keys are black with white lettering, and there are several colored keys, including red, green, and purple, which are likely programmable for various functions. The keyboard also has a wrist rest attached to the bottom, which is black and appears to be made of a soft material for comfort. The keys are arranged in a standard QWERTY layout, and there are additional function keys on the top row. The overall appearance of the keyboard is clean and professional, suggesting it is designed for use in a home or office setting.",
+    "gemini_answer": "Yes, there is a keyboard...."
+  },
+  {
+    "video": "video.mp4",
+    "question": "What color is the backpack?",
+    "orion_answer": "The backpack is black. The image depicts a black backpack with a white stripe running down its side. The backpack is positioned on a white chair, which is placed on a gray carpeted floor. The backpack appears to be made of a durable fabric, likely nylon or polyester, and has a zipper closure. The white stripe adds a contrasting detail to the otherwise monochromatic black backpack. The chair has a simple design with a white frame and a black seat. The carpet has a textured pattern, and the overall setting suggests an indoor environment, possibly an office or a waiting area. The lighting in the image is soft, casting gentle shadows and giving the scene a calm atmosphere.",
+    "gemini_answer": "The backpack is black...."
+  },
+  {
+    "video": "video.mp4",
+    "question": "Is there a bed?",
+    "orion_answer": "I detected a bed, but upon closer inspection, it appears to be a false detection.",
+    "gemini_answer": "Yes, there are several beds shown in the video...."
+  },
+  {
+    "video": "video.mp4",
+    "question": "Is there a tv?",
+    "orion_answer": "The image depicts a computer monitor displaying a large, black screen filled with white lines. The lines appear to be text, possibly code or a command-line interface, and are arranged in a grid-like pattern. The monitor itself is a Dell model, identifiable by the logo at the bottom center. The background is a plain, light-colored wall, and there are some indistinct objects and cables visible at the bottom of the image. The overall appearance suggests that the monitor is turned on and in use, with the white lines on the screen likely representing some form of data or output.",
+    "gemini_answer": "Based on the video, there are computer monitors, but no televisions are visible...."
+  }
+]

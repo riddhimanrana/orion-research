@@ -22,6 +22,7 @@ import numpy as np
 from PIL import Image
 
 from orion.perception.config import EmbeddingConfig
+from orion.utils.profiling import profile
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,7 @@ class VisualEmbedder:
                 model_name = "facebook/dinov2-base" if backend == "dino" else "facebook/dinov2-base"  # placeholder for dinov3 local
                 self.dino = DINOEmbedder(model_name=model_name, device=device)
     
+    @profile("embedder_embed_detections")
     def embed_detections(self, detections: List[dict]) -> List[dict]:
         """
         Add embeddings to detections.
@@ -121,6 +123,7 @@ class VisualEmbedder:
         
         return detections
     
+    @profile("embedder_embed_batch")
     def _embed_batch(self, batch: List[dict]) -> List[np.ndarray]:
         """
         Generate embeddings for a batch of detections.

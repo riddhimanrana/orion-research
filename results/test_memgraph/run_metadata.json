@@ -1,0 +1,28 @@
+{
+  "episode_id": "test_memgraph",
+  "video_path": "data/examples/test.mp4",
+  "processing_time_seconds": 33.04298996925354,
+  "target_fps": 5.0,
+  "detector": {
+    "model_name": "yolo11m",
+    "num_classes": 80,
+    "confidence_threshold": 0.25,
+    "device": "mps",
+    "batch_size": 8
+  },
+  "hand_detector": null,
+  "tracker": {
+    "iou_threshold": 0.3,
+    "max_age": 30,
+    "total_tracks": 164,
+    "active_tracks": 5,
+    "all_tracks": 9,
+    "frame_count": 237
+  },
+  "statistics": {
+    "total_detections": 763,
+    "total_track_observations": 233,
+    "unique_tracks": 164,
+    "frames_processed": 237
+  }
+}

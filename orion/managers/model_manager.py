@@ -90,9 +90,11 @@ class ModelManager:
         self._clip: Optional[Any] = None
         self._fastvlm: Optional[Any] = None
         self._dino: Optional[Any] = None
+        self._groundingdino: Optional[Any] = None
         
         # Model configuration
         self.yolo_model_name = "yolo11m"  # Default to medium (balanced)
+        self.groundingdino_model_id = "IDEA-Research/grounding-dino-base"
         
         # LLM for contextual understanding
         self._ollama_client: Optional[Any] = None
@@ -263,6 +265,39 @@ class ModelManager:
         except Exception as e:
             logger.error(f"Failed to load DINO: {e}")
             raise
+
+    # ========================================================================
+    # GroundingDINO Zero-Shot Detector
+    # ========================================================================
+
+    @property
+    def groundingdino(self) -> Any:
+        """Get GroundingDINO detector wrapper (lazy loaded)."""
+        if self._groundingdino is None:
+            self._groundingdino = self._load_groundingdino()
+        return self._groundingdino
+
+    def _load_groundingdino(self) -> Any:
+        """Load GroundingDINO detector via Hugging Face."""
+        try:
+            from orion.perception.groundingdino_wrapper import GroundingDINOWrapper
+
+            logger.info(
+                "Loading GroundingDINO wrapper (%s)…",
+                self.groundingdino_model_id,
+            )
+
+            detector = GroundingDINOWrapper(
+                model_id=self.groundingdino_model_id,
+                device=self.device,
+                use_half_precision=self.device != "cpu",
+            )
+
+            logger.info("✓ GroundingDINO ready")
+            return detector
+        except Exception as e:
+            logger.error(f"Failed to load GroundingDINO: {e}")
+            raise
     
     # ========================================================================
     # FastVLM Describer
@@ -333,6 +368,9 @@ class ModelManager:
         if self._dino is not None:
             del self._dino
             self._dino = None
+        if self._groundingdino is not None:
+            del self._groundingdino
+            self._groundingdino = None
         
         # Clear GPU memory
         if torch.cuda.is_available():
@@ -349,6 +387,7 @@ class ModelManager:
             "clip_loaded": self._clip is not None,
             "fastvlm_loaded": self._fastvlm is not None,
             "dino_loaded": self._dino is not None,
+                "groundingdino_loaded": self._groundingdino is not None,
         }
         
         if torch.cuda.is_available():

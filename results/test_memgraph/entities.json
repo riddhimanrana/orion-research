@@ -1,0 +1,194 @@
+{
+  "total_entities": 21,
+  "entities": [
+    {
+      "id": 0,
+      "class": "potted plant",
+      "confidence": 0.783644437789917,
+      "observation_count": 99,
+      "first_frame": 406,
+      "last_frame": 1218,
+      "description": "An object detected by YOLO as potted plant"
+    },
+    {
+      "id": 1,
+      "class": "chair",
+      "confidence": 0.9292574524879456,
+      "observation_count": 57,
+      "first_frame": 7,
+      "last_frame": 1169,
+      "description": "An object detected by YOLO as chair"
+    },
+    {
+      "id": 2,
+      "class": "person",
+      "confidence": 0.870513379573822,
+      "observation_count": 44,
+      "first_frame": 7,
+      "last_frame": 1820,
+      "description": "An object detected by YOLO as person"
+    },
+    {
+      "id": 3,
+      "class": "couch",
+      "confidence": 0.9268644452095032,
+      "observation_count": 47,
+      "first_frame": 553,
+      "last_frame": 1687,
+      "description": "An object detected by YOLO as couch"
+    },
+    {
+      "id": 4,
+      "class": "book",
+      "confidence": 0.6959892511367798,
+      "observation_count": 21,
+      "first_frame": 609,
+      "last_frame": 1743,
+      "description": "An object detected by YOLO as book"
+    },
+    {
+      "id": 5,
+      "class": "bottle",
+      "confidence": 0.7728399634361267,
+      "observation_count": 16,
+      "first_frame": 0,
+      "last_frame": 1820,
+      "description": "An object detected by YOLO as bottle"
+    },
+    {
+      "id": 6,
+      "class": "refrigerator",
+      "confidence": 0.9163624048233032,
+      "observation_count": 15,
+      "first_frame": 1008,
+      "last_frame": 1106,
+      "description": "An object detected by YOLO as refrigerator"
+    },
+    {
+      "id": 7,
+      "class": "toilet",
+      "confidence": 0.8814486861228943,
+      "observation_count": 17,
+      "first_frame": 175,
+      "last_frame": 1631,
+      "description": "An object detected by YOLO as toilet"
+    },
+    {
+      "id": 8,
+      "class": "keyboard",
+      "confidence": 0.8352511525154114,
+      "observation_count": 12,
+      "first_frame": 0,
+      "last_frame": 1820,
+      "description": "An object detected by YOLO as keyboard"
+    },
+    {
+      "id": 9,
+      "class": "mouse",
+      "confidence": 0.9206334948539734,
+      "observation_count": 16,
+      "first_frame": 0,
+      "last_frame": 1820,
+      "description": "An object detected by YOLO as mouse"
+    },
+    {
+      "id": 10,
+      "class": "sink",
+      "confidence": 0.6212121248245239,
+      "observation_count": 12,
+      "first_frame": 679,
+      "last_frame": 1750,
+      "description": "An object detected by YOLO as sink"
+    },
+    {
+      "id": 11,
+      "class": "bowl",
+      "confidence": 0.6407307386398315,
+      "observation_count": 12,
+      "first_frame": 1008,
+      "last_frame": 1722,
+      "description": "An object detected by YOLO as bowl"
+    },
+    {
+      "id": 12,
+      "class": "vase",
+      "confidence": 0.7820175886154175,
+      "observation_count": 15,
+      "first_frame": 406,
+      "last_frame": 1316,
+      "description": "An object detected by YOLO as vase"
+    },
+    {
+      "id": 13,
+      "class": "tv",
+      "confidence": 0.9137074947357178,
+      "observation_count": 33,
+      "first_frame": 0,
+      "last_frame": 1820,
+      "description": "An object detected by YOLO as tv"
+    },
+    {
+      "id": 14,
+      "class": "bed",
+      "confidence": 0.846668541431427,
+      "observation_count": 21,
+      "first_frame": 280,
+      "last_frame": 1715,
+      "description": "An object detected by YOLO as bed"
+    },
+    {
+      "id": 15,
+      "class": "oven",
+      "confidence": 0.5298768281936646,
+      "observation_count": 8,
+      "first_frame": 560,
+      "last_frame": 1785,
+      "description": "An object detected by YOLO as oven"
+    },
+    {
+      "id": 16,
+      "class": "dining table",
+      "confidence": 0.6965785026550293,
+      "observation_count": 16,
+      "first_frame": 637,
+      "last_frame": 1064,
+      "description": "An object detected by YOLO as bed"
+    },
+    {
+      "id": 17,
+      "class": "clock",
+      "confidence": 0.5919844508171082,
+      "observation_count": 11,
+      "first_frame": 224,
+      "last_frame": 1533,
+      "description": "An object detected by YOLO as clock"
+    },
+    {
+      "id": 18,
+      "class": "suitcase",
+      "confidence": 0.5552690029144287,
+      "observation_count": 7,
+      "first_frame": 539,
+      "last_frame": 1624,
+      "description": "An object detected by YOLO as handbag"
+    },
+    {
+      "id": 19,
+      "class": "backpack",
+      "confidence": 0.4726265072822571,
+      "observation_count": 4,
+      "first_frame": 581,
+      "last_frame": 1806,
+      "description": "An object detected by YOLO as backpack"
+    },
+    {
+      "id": 20,
+      "class": "bird",
+      "confidence": 0.8568357825279236,
+      "observation_count": 4,
+      "first_frame": 910,
+      "last_frame": 931,
+      "description": "An object detected by YOLO as bird"
+    }
+  ]
+}

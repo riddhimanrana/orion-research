@@ -1,0 +1,345 @@
+import json
+import logging
+from pathlib import Path
+from typing import Dict, List, Tuple, Any, Optional
+
+import numpy as np
+import cv2
+
+from orion.managers.model_manager import ModelManager
+
+logger = logging.getLogger(__name__)
+
+
+def _read_tracks_jsonl(tracks_path: Path) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    with open(tracks_path, "r") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            items.append(json.loads(line))
+    return items
+
+
+def _group_by(items: List[Dict[str, Any]], key: str) -> Dict[Any, List[Dict[str, Any]]]:
+    groups: Dict[Any, List[Dict[str, Any]]] = {}
+    for it in items:
+        groups.setdefault(it[key], []).append(it)
+    return groups
+
+
+def _cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
+    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-8))
+
+
+def _ensure_int_bbox(b: List[float], w: int, h: int) -> Tuple[int, int, int, int]:
+    x1, y1, x2, y2 = [int(round(v)) for v in b]
+    x1 = max(0, min(w - 1, x1))
+    y1 = max(0, min(h - 1, y1))
+    x2 = max(0, min(w - 1, x2))
+    y2 = max(0, min(h - 1, y2))
+    if x2 <= x1:
+        x2 = min(w - 1, x1 + 1)
+    if y2 <= y1:
+        y2 = min(h - 1, y1 + 1)
+    return x1, y1, x2, y2
+
+
+def _read_frames_for_ids(video_path: Path, frame_ids: List[int]) -> Dict[int, np.ndarray]:
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise FileNotFoundError(f"Cannot open video: {video_path}")
+    frames: Dict[int, np.ndarray] = {}
+    wanted = set(frame_ids)
+    # We assume frame_id is the sampled frame index used earlier
+    # We'll decode sequentially for simplicity
+    idx = 0
+    while wanted and True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        if idx in wanted:
+            frames[idx] = frame
+            wanted.remove(idx)
+        idx += 1
+    cap.release()
+    return frames
+
+
+def compute_track_embeddings(
+    video_path: Path,
+    tracks: List[Dict[str, Any]],
+    max_crops_per_track: int = 5,
+) -> Dict[int, np.ndarray]:
+    """
+    Compute an average embedding per track by cropping detections from frames.
+
+    Args:
+        video_path: Path to source video
+        tracks: Parsed list of track observations (from tracks.jsonl)
+        max_crops_per_track: Cap number of crops per track for speed
+
+    Returns:
+        Dict mapping track_id -> embedding vector (np.ndarray)
+    """
+    mm = ModelManager.get_instance()
+    dino = mm.dino
+
+    by_frame = _group_by(tracks, "frame_id")
+    needed_frames = sorted(by_frame.keys())
+    frames = _read_frames_for_ids(video_path, needed_frames)
+
+    # Collect per-track embeddings
+    per_track_embs: Dict[int, List[np.ndarray]] = {}
+
+    for fid in needed_frames:
+        frame = frames.get(fid)
+        if frame is None:
+            continue
+        H, W = frame.shape[:2]
+        obs = by_frame[fid]
+        # For efficiency, batch crops per frame when backend supports batch
+        crops: List[np.ndarray] = []
+        meta: List[Tuple[int, Tuple[int, int, int, int]]] = []  # (track_id, bbox)
+        for det in obs:
+            tid = int(det.get("track_id", -1))
+            if tid < 0:
+                continue
+            # Limit samples per track
+            if len(per_track_embs.get(tid, [])) >= max_crops_per_track:
+                continue
+            x1, y1, x2, y2 = _ensure_int_bbox(det["bbox"], W, H)
+            crop = frame[y1:y2, x1:x2]
+            if crop.size == 0:
+                continue
+            crops.append(crop)
+            meta.append((tid, (x1, y1, x2, y2)))
+
+        if not crops:
+            continue
+
+        # Encode in batch if possible
+        try:
+            embs = dino.encode_images_batch(crops)
+        except Exception:
+            embs = [dino.encode_image(c) for c in crops]
+
+        for (tid, _), emb in zip(meta, embs):
+            per_track_embs.setdefault(tid, []).append(emb.astype(np.float32))
+
+    # Average per track
+    track_proto: Dict[int, np.ndarray] = {}
+    for tid, embs in per_track_embs.items():
+        if not embs:
+            continue
+        arr = np.stack(embs, axis=0)
+        mean = arr.mean(axis=0)
+        # Normalize
+        mean = mean / (np.linalg.norm(mean) + 1e-8)
+        track_proto[tid] = mean.astype(np.float32)
+
+    return track_proto
+
+
+def cluster_tracks(
+    track_embeddings: Dict[int, np.ndarray],
+    tracks: List[Dict[str, Any]],
+    cosine_threshold: float = 0.75,
+    class_thresholds: Optional[Dict[str, float]] = None,
+) -> Tuple[Dict[str, Dict[str, Any]], Dict[int, str], Dict[str, np.ndarray]]:
+    """
+    Cluster per-track embeddings into persistent memory objects.
+
+    Args:
+        track_embeddings: track_id -> embedding vector
+        tracks: original observations for metadata aggregation
+        cosine_threshold: similarity threshold for merging into same memory
+
+    Returns:
+        memory_objects: memory_id -> object dict (without embeddings map)
+        track_to_memory: track_id -> memory_id
+        embeddings_map: emb_id -> prototype embedding (np.ndarray)
+    """
+    # Aggregate per-track stats
+    by_track = _group_by(tracks, "track_id")
+    track_meta: Dict[int, Dict[str, Any]] = {}
+    for tid_str, obs in by_track.items():
+        tid = int(tid_str)
+        cats = [o.get("category", "object") for o in obs]
+        category = max(set(cats), key=cats.count) if cats else "object"
+        frames = [int(o.get("frame_id", 0)) for o in obs]
+        track_meta[tid] = {
+            "category": category,
+            "first": min(frames) if frames else 0,
+            "last": max(frames) if frames else 0,
+            "count": len(obs),
+        }
+
+    # Greedy clustering per category
+    memory_objects: Dict[str, Dict[str, Any]] = {}
+    embeddings_map: Dict[str, np.ndarray] = {}
+    track_to_memory: Dict[int, str] = {}
+
+    mem_counter = 1
+    emb_counter = 1
+
+    # Group track ids by category
+    cat_to_tids: Dict[str, List[int]] = {}
+    for tid, meta in track_meta.items():
+        if tid in track_embeddings:
+            cat_to_tids.setdefault(meta["category"], []).append(tid)
+
+    for category, tids in cat_to_tids.items():
+        # Select threshold for this category
+        cat_thresh = cosine_threshold
+        if class_thresholds and category in class_thresholds:
+            cat_thresh = float(class_thresholds[category])
+        clusters: List[Tuple[str, np.ndarray, List[int]]] = []  # (mem_id, proto, members)
+        for tid in sorted(tids):
+            emb = track_embeddings[tid]
+            assigned = False
+            # Find best cluster
+            best_idx = -1
+            best_sim = -1.0
+            for idx, (_, proto, _) in enumerate(clusters):
+                sim = _cosine_sim(emb, proto)
+                if sim > best_sim:
+                    best_sim = sim
+                    best_idx = idx
+            if best_idx >= 0 and best_sim >= cat_thresh:
+                # Merge into existing cluster and update prototype (running mean)
+                mem_id, proto, members = clusters[best_idx]
+                members.append(tid)
+                new_proto = proto * (len(members) - 1) / len(members) + emb / len(members)
+                new_proto = new_proto / (np.linalg.norm(new_proto) + 1e-8)
+                clusters[best_idx] = (mem_id, new_proto.astype(np.float32), members)
+                assigned = True
+            if not assigned:
+                mem_id = f"mem_{mem_counter:03d}"
+                mem_counter += 1
+                clusters.append((mem_id, emb, [tid]))
+
+        # Finalize clusters into memory objects
+        for mem_id, proto, members in clusters:
+            emb_id = f"emb_{emb_counter:03d}"
+            emb_counter += 1
+            embeddings_map[emb_id] = proto.astype(np.float32)
+            # Aggregate metadata
+            first = min(track_meta[tid]["first"] for tid in members)
+            last = max(track_meta[tid]["last"] for tid in members)
+            total_obs = sum(track_meta[tid]["count"] for tid in members)
+            appearance_history = []
+            for tid in members:
+                appearance_history.append({
+                    "track_id": tid,
+                    "first_frame": track_meta[tid]["first"],
+                    "last_frame": track_meta[tid]["last"],
+                    "observations": track_meta[tid]["count"],
+                })
+                track_to_memory[tid] = mem_id
+
+            memory_objects[mem_id] = {
+                "memory_id": mem_id,
+                "class": category,
+                "first_seen_frame": first,
+                "last_seen_frame": last,
+                "total_observations": total_obs,
+                "prototype_embedding": emb_id,
+                "appearance_history": appearance_history,
+                "current_state": "visible",
+            }
+
+    return memory_objects, track_to_memory, embeddings_map
+
+
+def build_memory_from_tracks(
+    episode_id: str,
+    video_path: Path,
+    tracks_path: Path,
+    results_dir: Path,
+    cosine_threshold: float = 0.75,
+    max_crops_per_track: int = 5,
+    class_thresholds: Optional[Dict[str, float]] = None,
+) -> Path:
+    """
+    Phase 2: Build memory.json and update tracks with embedding ids.
+
+    Returns:
+        Path to saved memory.json
+    """
+    logger.info("[Phase 2] Building memory from tracks…")
+    tracks = _read_tracks_jsonl(tracks_path)
+
+    # Compute per-track embeddings
+    logger.info("Computing per-track embeddings (cropped DINO encodings)…")
+    track_embs = compute_track_embeddings(video_path, tracks, max_crops_per_track)
+    logger.info(f"✓ Got embeddings for {len(track_embs)} tracks")
+
+    # Cluster tracks into memory objects
+    logger.info("Clustering tracks into persistent objects (cosine)…")
+    memory_objects, track_to_memory, embeddings_map = cluster_tracks(
+        track_embs, tracks, cosine_threshold, class_thresholds
+    )
+    logger.info(f"✓ Built {len(memory_objects)} memory objects")
+
+    # Save memory.json
+    memory = {
+        "objects": list(memory_objects.values()),
+        "embeddings": {k: v.tolist() for k, v in embeddings_map.items()},
+        "statistics": {
+            "total_objects": len(memory_objects),
+            "active_objects": sum(1 for o in memory_objects.values() if o.get("current_state") == "visible"),
+        },
+    }
+    results_dir.mkdir(parents=True, exist_ok=True)
+    memory_path = results_dir / "memory.json"
+    with open(memory_path, "w") as f:
+        json.dump(memory, f, indent=2)
+    logger.info(f"✓ Saved memory.json → {memory_path}")
+
+    # Update tracks.jsonl with embedding_id (prototype of assigned memory)
+    updated_tracks_path = update_tracks_with_embeddings(tracks_path, memory_objects)
+    logger.info(f"✓ Updated tracks with embedding_id → {updated_tracks_path}")
+
+    # Also save a simple cluster mapping
+    clusters = {mem_id: [h["track_id"] for h in obj["appearance_history"]] for mem_id, obj in memory_objects.items()}
+    with open(results_dir / "reid_clusters.json", "w") as f:
+        json.dump(clusters, f, indent=2)
+    logger.info(f"✓ Saved reid_clusters.json → {results_dir / 'reid_clusters.json'}")
+
+    return memory_path
+
+
+def update_tracks_with_embeddings(tracks_path: Path, memory_objects: Dict[str, Dict[str, Any]]) -> Path:
+    """
+    Overwrite tracks.jsonl inserting embedding_id per observation based on memory mapping.
+    Creates a backup file alongside.
+    """
+    # Build track_id -> emb_id mapping
+    track_to_emb: Dict[int, str] = {}
+    for obj in memory_objects.values():
+        emb_id = obj.get("prototype_embedding")
+        for h in obj.get("appearance_history", []):
+            track_to_emb[int(h["track_id"])] = emb_id
+
+    # Backup
+    orig_path = tracks_path.with_suffix(".orig.jsonl")
+    if not orig_path.exists():
+        orig_path.write_bytes(tracks_path.read_bytes())
+
+    # Write updated
+    tmp_path = tracks_path.with_suffix(".tmp.jsonl")
+    with open(orig_path, "r") as fin, open(tmp_path, "w") as fout:
+        for line in fin:
+            if not line.strip():
+                continue
+            item = json.loads(line)
+            tid = int(item.get("track_id", -1))
+            emb_id = track_to_emb.get(tid)
+            if emb_id is not None:
+                item["embedding_id"] = emb_id
+            fout.write(json.dumps(item) + "\n")
+
+    # Replace
+    tmp_path.replace(tracks_path)
+    return tracks_path

@@ -66,6 +66,26 @@ CANONICAL_MAPPINGS = {
     'tumbler': 'cup',
     'dish': 'bowl',
     'plate': 'bowl',
+    
+    # Personal items
+    'phone': 'cell phone',
+    'smartphone': 'cell phone',
+    'mobile': 'cell phone',
+    'bag': 'handbag',
+    'purse': 'handbag',
+    'wallet': 'handbag',
+    'luggage': 'suitcase',
+    'case': 'suitcase',
+    
+    # Sports
+    'ball': 'sports ball',
+    'racket': 'tennis racket',
+    'bat': 'baseball bat',
+    
+    # Animals
+    'puppy': 'dog',
+    'kitten': 'cat',
+    'pony': 'horse',
 }
 
 
@@ -328,14 +348,20 @@ class ClassCorrector:
         """
         desc_lower = description.lower()
         
-        # Check for direct canonical terms
-        for term, coco_class in CANONICAL_MAPPINGS.items():
-            if term in desc_lower:
+        # Sort mappings by length (descending) to match "baseball bat" before "bat"
+        sorted_mappings = sorted(CANONICAL_MAPPINGS.items(), key=lambda x: len(x[0]), reverse=True)
+        
+        # Check for direct canonical terms (using word boundaries)
+        for term, coco_class in sorted_mappings:
+            # Use regex to match whole words only
+            if re.search(r'\b' + re.escape(term) + r'\b', desc_lower):
                 return coco_class
         
         # Check for COCO classes directly in description
-        for coco_class in VALID_COCO_CLASSES:
-            if coco_class in desc_lower:
+        # Also sort by length to match "sports ball" before "ball" (if ball was a class)
+        sorted_coco = sorted(list(VALID_COCO_CLASSES), key=len, reverse=True)
+        for coco_class in sorted_coco:
+            if re.search(r'\b' + re.escape(coco_class) + r'\b', desc_lower):
                 return coco_class
         
         return None

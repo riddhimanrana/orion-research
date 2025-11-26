@@ -1,0 +1,188 @@
+{
+  "total_samples": 10,
+  "validated_at": "2025-11-17 23:15:26",
+  "samples": [
+    {
+      "frame": 10,
+      "validations": [
+        {
+          "relation": "on",
+          "subject": "mem_004",
+          "object": "mem_001",
+          "verdict": "CORRECT",
+          "reason": "The mouse is on the keyboard."
+        }
+      ],
+      "missing_relations": [
+        "keyboard near tv",
+        "mouse near tv"
+      ],
+      "overall_quality": "HIGH",
+      "notes": "All objects are detected with good bounding boxes. The spatial relationship is correctly detected as well."
+    },
+    {
+      "frame": 15,
+      "validations": [
+        {
+          "relation": "on",
+          "subject": "mem_004",
+          "object": "mem_001",
+          "verdict": "INCORRECT",
+          "reason": "The mouse is not on the keyboard. The mouse is next to the keyboard on the table."
+        }
+      ],
+      "missing_relations": [
+        "The tv (mem_002) is behind the keyboard (mem_001).",
+        "The tv (mem_002) is behind the mouse (mem_004)."
+      ],
+      "overall_quality": "LOW",
+      "notes": "The 'on' relation is incorrect in this instance. The bounding box for keyboard is very large relative to the mouse. The IoU and norm_dist confirm that this relationship does not work. Missing relations are fairly obvious."
+    },
+    {
+      "frame": 20,
+      "validations": [
+        {
+          "relation": "on",
+          "subject": "mem_004",
+          "object": "mem_001",
+          "verdict": "CORRECT",
+          "reason": "The mouse is on the keyboard."
+        }
+      ],
+      "missing_relations": [
+        "tv behind keyboard",
+        "tv behind mouse"
+      ],
+      "overall_quality": "HIGH",
+      "notes": "The detected relation is accurate, and the objects are well localized."
+    },
+    {
+      "frame": 35,
+      "validations": [
+        {
+          "relation": "on",
+          "subject": "mem_004",
+          "object": "mem_001",
+          "verdict": "INCORRECT",
+          "reason": "The mouse is near but not on the keyboard."
+        }
+      ],
+      "missing_relations": [
+        "None"
+      ],
+      "overall_quality": "LOW",
+      "notes": "The 'on' relationship is incorrect due to the spatial arrangement of the mouse and keyboard. The IoU is also very low, indicating a problem with the bounding box overlap."
+    },
+    {
+      "frame": 40,
+      "validations": [
+        {
+          "relation": "on",
+          "subject": "mem_004",
+          "object": "mem_001",
+          "verdict": "CORRECT",
+          "reason": "The mouse is on the keyboard."
+        }
+      ],
+      "missing_relations": [],
+      "overall_quality": "HIGH",
+      "notes": "There isn't a clear spatial relationship between the tv and the other objects to define. The quality is high since only one relationship is present and that one is correct."
+    },
+    {
+      "frame": 45,
+      "validations": [
+        {
+          "relation": "on",
+          "subject": "mem_004",
+          "object": "mem_001",
+          "verdict": "CORRECT",
+          "reason": "The mouse is on the keyboard."
+        }
+      ],
+      "missing_relations": [],
+      "overall_quality": "HIGH",
+      "notes": "No missing relations detected."
+    },
+    {
+      "frame": 50,
+      "validations": [
+        {
+          "relation": "on",
+          "subject": "mem_004",
+          "object": "mem_001",
+          "verdict": "CORRECT",
+          "reason": "The mouse is on the keyboard."
+        }
+      ],
+      "missing_relations": [],
+      "overall_quality": "HIGH",
+      "notes": "The detection and spatial reasoning are accurate."
+    },
+    {
+      "frame": 665,
+      "validations": [
+        {
+          "relation": "near",
+          "subject": "mem_010",
+          "object": "mem_014",
+          "verdict": "CORRECT",
+          "reason": "The book is near the bed (it is on the bed)."
+        },
+        {
+          "relation": "near",
+          "subject": "mem_014",
+          "object": "mem_010",
+          "verdict": "CORRECT",
+          "reason": "The bed is near the book (the book is on it)."
+        }
+      ],
+      "missing_relations": [
+        "mem_014 is on mem_010"
+      ],
+      "overall_quality": "HIGH",
+      "notes": "The 'near' relations are valid given that the book is on the bed."
+    },
+    {
+      "frame": 670,
+      "validations": [
+        {
+          "relation": "near",
+          "subject": "mem_010",
+          "object": "mem_014",
+          "verdict": "CORRECT",
+          "reason": "The book is near the bed."
+        },
+        {
+          "relation": "near",
+          "subject": "mem_014",
+          "object": "mem_010",
+          "verdict": "CORRECT",
+          "reason": "The bed is near the book."
+        }
+      ],
+      "missing_relations": [
+        "mem_014 (book) is on mem_010 (bed)"
+      ],
+      "overall_quality": "MEDIUM",
+      "notes": "The bounding box for the bed is very large, encompassing most of the image. While the near relations are technically correct, a more precise 'on' relation would be more informative."
+    },
+    {
+      "frame": 710,
+      "validations": [
+        {
+          "relation": "held_by",
+          "subject": "mem_014",
+          "object": "mem_008",
+          "verdict": "CORRECT",
+          "reason": "The book is held by the person. This is clearly seen in the image."
+        }
+      ],
+      "missing_relations": [
+        "mem_008 (person) is on mem_010 (bed)",
+        "mem_014 (book) is on mem_010 (bed)"
+      ],
+      "overall_quality": "HIGH",
+      "notes": "The edge detection is accurate. The person and bed bounding boxes are unusually large, however. This does not impact the validity of the 'held_by' relation in this case."
+    }
+  ]
+}

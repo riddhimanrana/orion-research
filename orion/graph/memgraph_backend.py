@@ -125,7 +125,8 @@ class MemgraphBackend:
         confidence: float,
         zone_id: Optional[int] = None,
         caption: Optional[str] = None,
-        crop_path: Optional[str] = None  # NEW: For query-time captioning
+        crop_path: Optional[str] = None,  # NEW: For query-time captioning
+        embedding: Optional[List[float]] = None  # NEW: For vector search
     ):
         """
         Add an entity observation to the graph
@@ -140,14 +141,23 @@ class MemgraphBackend:
             cursor = self.connection.cursor()
             
             # Create/update Entity node
+            # Note: We only update embedding if provided. 
+            # In a real system, we might want to average them or keep a history.
             entity_query = """
             MERGE (e:Entity {id: $entity_id})
             SET e.class_name = $class_name
             """
-            cursor.execute(entity_query, {
+            
+            params = {
                 'entity_id': entity_id,
                 'class_name': class_name
-            })
+            }
+
+            if embedding is not None:
+                entity_query += ", e.embedding = $embedding"
+                params['embedding'] = embedding
+
+            cursor.execute(entity_query, params)
             self.connection.commit()
             
             # Create/update Frame node
@@ -201,8 +211,8 @@ class MemgraphBackend:
             # Add zone relationship if provided
             if zone_id is not None:
                 zone_query = """
-                MERGE (z:Zone {id: $zone_id})
                 MATCH (e:Entity {id: $entity_id})
+                MERGE (z:Zone {id: $zone_id})
                 MERGE (e)-[:IN_ZONE]->(z)
                 """
                 cursor.execute(zone_query, {
@@ -479,3 +489,75 @@ class MemgraphBackend:
         if self.connection:
             self.connection.close()
             logger.info("✓ Memgraph connection closed")
+    
+    def create_vector_index(self, dimension: int = 512, metric: str = "cosine"):
+        """
+        Create a vector index on Entity embeddings for fast similarity search.
+        Requires Memgraph MAGE or vector search support.
+        """
+        try:
+            cursor = self.connection.cursor()
+            # Check if index exists or just try to create it.
+            # Syntax depends on Memgraph version. Using a generic approach or MAGE.
+            # For now, we'll assume standard Memgraph vector index syntax if available,
+            # or just rely on the property being there for manual cosine sim if needed.
+            
+            # Example for Memgraph 2.14+ native vector index:
+            # CREATE VECTOR INDEX ON :Entity(embedding) WITH CONFIG {"dimension": 512, "metric": "cosine"}
+            
+            query = f"""
+            CREATE VECTOR INDEX ON :Entity(embedding) 
+            WITH CONFIG {{"dimension": {dimension}, "metric": "{metric}"}}
+            """
+            cursor.execute(query)
+            self.connection.commit()
+            logger.info(f"✓ Vector index created on Entity(embedding) with dim={dimension}")
+        except Exception as e:
+            logger.warning(f"Failed to create vector index (might already exist or not supported): {e}")
+
+    def search_similar_entities(
+        self, 
+        query_embedding: List[float], 
+        limit: int = 5, 
+        min_score: float = 0.7
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for entities with similar embeddings using vector search.
+        """
+        cursor = self.connection.cursor()
+        
+        # Using Memgraph's vector search syntax
+        # CALL vector_search.search(index_name, query_vector, limit)
+        # Or native Cypher if supported.
+        
+        # We'll try the native Cypher syntax for Memgraph 2.14+
+        query = """
+        MATCH (e:Entity)
+        WHERE e.embedding IS NOT NULL
+        WITH e, vector.similarity.cosine(e.embedding, $query_embedding) AS score
+        WHERE score >= $min_score
+        RETURN e.id as entity_id, 
+               e.class_name as class_name, 
+               score
+        ORDER BY score DESC
+        LIMIT $limit
+        """
+        
+        try:
+            cursor.execute(query, {
+                "query_embedding": query_embedding,
+                "min_score": min_score,
+                "limit": limit
+            })
+            
+            results = []
+            for row in cursor.fetchall():
+                results.append({
+                    "entity_id": row[0],
+                    "class_name": row[1],
+                    "score": row[2]
+                })
+            return results
+        except Exception as e:
+            logger.error(f"Vector search failed: {e}")
+            return []

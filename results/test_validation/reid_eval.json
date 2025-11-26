@@ -1,0 +1,154 @@
+{
+  "global": {
+    "total_tracks": 23,
+    "total_memory_objects": 19,
+    "overall_fragmentation_ratio": 1.2105263157894737,
+    "classes": [
+      "bed",
+      "chair",
+      "couch",
+      "keyboard",
+      "mouse",
+      "person",
+      "potted plant",
+      "refrigerator",
+      "sink",
+      "toilet",
+      "tv"
+    ]
+  },
+  "per_class": {
+    "bed": {
+      "tracks_count": 2,
+      "memory_count": 2,
+      "fragmentation_ratio": 1.0,
+      "merge_rate": 0.0,
+      "avg_tracks_per_memory": 1,
+      "avg_track_len": 4,
+      "median_track_len": 4.0,
+      "avg_memory_obs": 4,
+      "reappearance_rate": 0,
+      "avg_gap_frames": null
+    },
+    "chair": {
+      "tracks_count": 4,
+      "memory_count": 3,
+      "fragmentation_ratio": 1.3333333333333333,
+      "merge_rate": 0.3333333333333333,
+      "avg_tracks_per_memory": 1.3333333333333333,
+      "avg_track_len": 4.5,
+      "median_track_len": 5.0,
+      "avg_memory_obs": 6,
+      "reappearance_rate": 0.3333333333333333,
+      "avg_gap_frames": null
+    },
+    "couch": {
+      "tracks_count": 3,
+      "memory_count": 3,
+      "fragmentation_ratio": 1.0,
+      "merge_rate": 0.0,
+      "avg_tracks_per_memory": 1,
+      "avg_track_len": 4.333333333333333,
+      "median_track_len": 1,
+      "avg_memory_obs": 4.333333333333333,
+      "reappearance_rate": 0,
+      "avg_gap_frames": null
+    },
+    "keyboard": {
+      "tracks_count": 1,
+      "memory_count": 1,
+      "fragmentation_ratio": 1.0,
+      "merge_rate": 0.0,
+      "avg_tracks_per_memory": 1,
+      "avg_track_len": 4,
+      "median_track_len": 4,
+      "avg_memory_obs": 4,
+      "reappearance_rate": 0,
+      "avg_gap_frames": null
+    },
+    "mouse": {
+      "tracks_count": 1,
+      "memory_count": 1,
+      "fragmentation_ratio": 1.0,
+      "merge_rate": 0.0,
+      "avg_tracks_per_memory": 1,
+      "avg_track_len": 2,
+      "median_track_len": 2,
+      "avg_memory_obs": 2,
+      "reappearance_rate": 0,
+      "avg_gap_frames": null
+    },
+    "person": {
+      "tracks_count": 3,
+      "memory_count": 2,
+      "fragmentation_ratio": 1.5,
+      "merge_rate": 0.5,
+      "avg_tracks_per_memory": 1.5,
+      "avg_track_len": 4,
+      "median_track_len": 3,
+      "avg_memory_obs": 6,
+      "reappearance_rate": 0.5,
+      "avg_gap_frames": 10
+    },
+    "potted plant": {
+      "tracks_count": 1,
+      "memory_count": 1,
+      "fragmentation_ratio": 1.0,
+      "merge_rate": 0.0,
+      "avg_tracks_per_memory": 1,
+      "avg_track_len": 2,
+      "median_track_len": 2,
+      "avg_memory_obs": 2,
+      "reappearance_rate": 0,
+      "avg_gap_frames": null
+    },
+    "refrigerator": {
+      "tracks_count": 1,
+      "memory_count": 1,
+      "fragmentation_ratio": 1.0,
+      "merge_rate": 0.0,
+      "avg_tracks_per_memory": 1,
+      "avg_track_len": 18,
+      "median_track_len": 18,
+      "avg_memory_obs": 18,
+      "reappearance_rate": 0,
+      "avg_gap_frames": null
+    },
+    "sink": {
+      "tracks_count": 1,
+      "memory_count": 1,
+      "fragmentation_ratio": 1.0,
+      "merge_rate": 0.0,
+      "avg_tracks_per_memory": 1,
+      "avg_track_len": 3,
+      "median_track_len": 3,
+      "avg_memory_obs": 3,
+      "reappearance_rate": 0,
+      "avg_gap_frames": null
+    },
+    "toilet": {
+      "tracks_count": 2,
+      "memory_count": 2,
+      "fragmentation_ratio": 1.0,
+      "merge_rate": 0.0,
+      "avg_tracks_per_memory": 1,
+      "avg_track_len": 6.5,
+      "median_track_len": 6.5,
+      "avg_memory_obs": 6.5,
+      "reappearance_rate": 0,
+      "avg_gap_frames": null
+    },
+    "tv": {
+      "tracks_count": 4,
+      "memory_count": 2,
+      "fragmentation_ratio": 2.0,
+      "merge_rate": 0.5,
+      "avg_tracks_per_memory": 2,
+      "avg_track_len": 3,
+      "median_track_len": 3.0,
+      "avg_memory_obs": 6,
+      "reappearance_rate": 0.5,
+      "avg_gap_frames": 1775
+    }
+  }
+}

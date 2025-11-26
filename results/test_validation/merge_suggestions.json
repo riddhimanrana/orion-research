@@ -1,0 +1,15 @@
+{
+  "suggestions": [
+    {
+      "memory_ids": [
+        "mem_001",
+        "mem_002"
+      ],
+      "class": "tv",
+      "similarity": 0.8776,
+      "gap_frames": 85,
+      "distance": 0.3734,
+      "score": 0.7193
+    }
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "total_samples": 4,
+  "validated_at": "2025-11-16 22:25:59",
+  "samples": [
+    {
+      "frame": 960,
+      "validations": [
+        {
+          "relation": "on",
+          "subject": "mem_013",
+          "object": "mem_013",
+          "verdict": "INCORRECT",
+          "reason": "The object detections are incorrect. They're detecting the notebook as 'chair', and the relation is between the same object, which doesn't make sense. Moreover, the 'on' relation doesn't correspond to any sensible relationship here."
+        }
+      ],
+      "missing_relations": [],
+      "overall_quality": "LOW",
+      "notes": "The object detection is completely off and hallucinating objects that are not present in the image, leading to incorrect spatial relations."
+    },
+    {
+      "frame": 965,
+      "validations": [
+        {
+          "relation": "on",
+          "subject": "mem_013",
+          "object": "mem_013",
+          "verdict": "INCORRECT",
+          "reason": "The object detections are incorrect (mislabeling the text/writing) and the relation of on with two identical objects is nonsensical."
+        }
+      ],
+      "missing_relations": [],
+      "overall_quality": "LOW",
+      "notes": "The object detections are clearly wrong - labeling part of text on a page as 'chair'. Therefore all relationships based on these detections are invalid. No chairs appear in the image."
+    },
+    {
+      "frame": 970,
+      "validations": [
+        {
+          "relation": "on",
+          "subject": "mem_013",
+          "object": "mem_013",
+          "verdict": "INCORRECT",
+          "reason": "The object \"mem_013\" cannot be \"on\" itself. This appears to be a misinterpretation from the layout of the words in the OCR. The notebook is on a table, this could be the intended object."
+        }
+      ],
+      "missing_relations": [
+        "The bottom notebook (mem_013) is on the table."
+      ],
+      "overall_quality": "LOW",
+      "notes": "The \"chair\" labels are incorrect. Both bounding boxes surround the notebook."
+    },
+    {
+      "frame": 975,
+      "validations": [
+        {
+          "relation": "on",
+          "subject": "mem_013",
+          "object": "mem_013",
+          "verdict": "INCORRECT",
+          "reason": "The objects are overlapping and the relation 'on' makes no sense between them."
+        }
+      ],
+      "missing_relations": [],
+      "overall_quality": "LOW",
+      "notes": "The object detection seems to be incorrect. Both objects are detected as chairs, but there is only one object (a notebook) in the image. The 'on' relation between them is incorrect because the objects overlap."
+    }
+  ]
+}

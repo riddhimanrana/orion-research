@@ -230,61 +230,85 @@ class EntityTracker:
         
         if not HDBSCAN_AVAILABLE:
             return self._fallback_clustering(observations)
+
+        min_cluster_size = getattr(self.config, "clustering_min_cluster_size", 4)
+        min_samples = getattr(self.config, "clustering_min_samples", 1)
+        epsilon = getattr(self.config, "clustering_cluster_selection_epsilon", 0.25)
+        min_cluster_size = max(2, int(min_cluster_size))
+        min_samples = max(1, int(min_samples))
+        epsilon = max(0.0, float(epsilon))
         
-        # Extract and normalize embeddings for cosine similarity via euclidean
-        embeddings = np.array([obs.visual_embedding for obs in observations])
-        logger.info(f"  Embedding shape: {embeddings.shape}")
-        
-        # Normalize embeddings (euclidean distance on normalized vectors = cosine distance)
-        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-        embeddings_normalized = embeddings / (norms + 1e-8)
-        
-        # Run HDBSCAN with loose parameters - create large cohesive clusters for cross-view Re-ID
-        clusterer = hdbscan.HDBSCAN(
-            min_cluster_size=2,
-            min_samples=1,
-            metric="euclidean",  # Euclidean on normalized vectors = cosine similarity
-            cluster_selection_epsilon=0.65,  # Very loose - let Phase 5 handle fine-grained merging
-            cluster_selection_method="eom",
-        )
-        
-        labels = clusterer.fit_predict(embeddings_normalized)
-        
-        # Analyze clustering results
-        unique_labels = set(labels)
-        noise_count = np.sum(labels == -1)
-        entity_count = len(unique_labels) - (1 if -1 in unique_labels else 0)
-        
-        logger.info(f"  Clusters found: {entity_count}")
-        logger.info(f"  Noise points: {noise_count} ({100 * noise_count / len(labels):.1f}%)")
-        
-        # Group observations by cluster
-        clusters = defaultdict(list)
-        for obs, label in zip(observations, labels):
-            if label != -1:  # Skip noise
-                clusters[label].append(obs)
-        
-        # Create entities
-        entities = []
-        for label, cluster_obs in clusters.items():
-            # Determine entity class (majority vote)
-            class_counts = defaultdict(int)
-            for obs in cluster_obs:
-                class_counts[obs.object_class] += 1
+        # Group observations by class to prevent cross-class clustering
+        observations_by_class = defaultdict(list)
+        for obs in observations:
+            observations_by_class[obs.object_class].append(obs)
             
-            entity_class = max(class_counts, key=class_counts.get)
+        all_entities = []
+        global_cluster_id = 0
+        
+        for obj_class, class_obs in observations_by_class.items():
+            if not class_obs:
+                continue
+                
+            logger.info(f"  Clustering {len(class_obs)} observations for class '{obj_class}'...")
             
-            # Create entity
-            entity = PerceptionEntity(
-                entity_id=f"entity_{label}",
-                object_class=entity_class,
-                observations=cluster_obs,
-            )
+            # Extract and normalize embeddings for this class
+            embeddings = np.array([obs.visual_embedding for obs in class_obs])
+            norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+            embeddings_normalized = embeddings / (norms + 1e-8)
             
-            # Compute average embedding
-            entity.compute_average_embedding()
+            # Run HDBSCAN for this class
+            if HDBSCAN_AVAILABLE and len(class_obs) >= min_cluster_size:
+                clusterer = hdbscan.HDBSCAN(
+                    min_cluster_size=min_cluster_size,
+                    min_samples=min_samples,
+                    metric="euclidean",
+                    cluster_selection_epsilon=epsilon,
+                    cluster_selection_method="eom",
+                )
+                labels = clusterer.fit_predict(embeddings_normalized)
+            else:
+                # Fallback if too few samples or HDBSCAN missing
+                logger.debug(f"    Using fallback clustering for {obj_class} (n={len(class_obs)})")
+                # Simple fallback: just group by temporal proximity if needed, 
+                # but for now we can just assign them all to one cluster if they are few,
+                # or use the fallback logic.
+                # Let's reuse the fallback logic but applied to this subset.
+                # However, _fallback_clustering expects a list of observations and returns entities.
+                # We can't easily call it here without refactoring.
+                # So we'll implement a simple version here: 
+                # If very few items, assume they are the same entity if they are close in time?
+                # Or just treat them as one entity for now if n < min_cluster_size?
+                # Actually, if n < min_cluster_size, HDBSCAN might mark them as noise (-1).
+                # Let's just assign them all to cluster 0 if they are few but > 0.
+                labels = np.zeros(len(class_obs), dtype=int)
+
+            # Process clusters for this class
+            unique_labels = set(labels)
             
-            entities.append(entity)
+            # Group by cluster label
+            clusters = defaultdict(list)
+            for obs, label in zip(class_obs, labels):
+                if label != -1:
+                    clusters[label].append(obs)
+            
+            # Create entities
+            for label, cluster_obs in clusters.items():
+                entity_id = f"entity_{global_cluster_id}"
+                
+                # Back-populate entity_id to observations
+                for obs in cluster_obs:
+                    obs.entity_id = entity_id
+                    
+                entity = PerceptionEntity(
+                    entity_id=entity_id,
+                    object_class=obj_class, # Guaranteed to be this class
+                    observations=cluster_obs,
+                )
+                all_entities.append(entity)
+                global_cluster_id += 1
+                
+        entities = all_entities
         
         # Sort by appearance count (descending)
         entities.sort(key=lambda e: e.appearance_count, reverse=True)

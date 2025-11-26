@@ -72,7 +72,7 @@ class GraphBuilder:
                     """
                     CREATE (e:Entity {
                         id: $id,
-                        class: $class,
+                        class: $class_name,
                         observation_count: $obs_count,
                         first_frame: $first_frame,
                         last_frame: $last_frame,
@@ -80,7 +80,7 @@ class GraphBuilder:
                     })
                     """,
                     id=entity.entity_id,
-                    **class**=cls,
+                    class_name=cls,
                     obs_count=len(entity.observations),
                     first_frame=entity.first_seen_frame,
                     last_frame=entity.last_seen_frame,

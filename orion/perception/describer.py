@@ -26,6 +26,7 @@ from PIL import Image
 from orion.perception.types import PerceptionEntity, Observation, BoundingBox
 from orion.perception.config import DescriptionConfig
 from orion.perception.corrector import ClassCorrector
+from orion.utils.profiling import profile
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,7 @@ class EntityDescriber:
             f"class_correction={enable_class_correction}, spatial_analysis={enable_spatial_analysis}"
         )
     
+    @profile("describer_describe_entities")
     def describe_entities(
         self,
         entities: List[PerceptionEntity],
@@ -219,67 +221,49 @@ class EntityDescriber:
         
         return entities
     
+    @profile("describer_describe_observation")
     def describe_observation(self, observation: Observation) -> str:
         """
-        Generate UNBIASED description for a single observation.
-        
-        **CRITICAL:** Does NOT provide YOLO class hint to avoid confirmation bias.
-        The VLM describes what it sees independently, then we verify against YOLO.
+        Generate description for a single observation.
         
         Args:
             observation: Observation to describe
             
         Returns:
-            Natural language description (unbiased by YOLO label)
+            Generated description string
         """
-        # Get crop image
-        crop = observation.image_patch
-        if crop is None:
-            logger.warning(f"No image patch for observation at frame {observation.frame_number}")
-            return f"An object detected by YOLO as {observation.object_class.value}"
-
-        if not self._is_crop_valid(crop):
-            logger.warning(
-                "Image patch failed sanity checks (frame=%s, size=%sx%s, std=%.2f)", 
-                observation.frame_number,
-                crop.shape[1],
-                crop.shape[0],
-                float(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY).std()) if crop.size else 0.0,
-            )
-            return (
-                f"An object with unclear visual signal, originally detected as "
-                f"{observation.object_class.value}"
-            )
-        
-        # Convert BGR to RGB
-        rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-        pil_image = Image.fromarray(rgb_crop)
-        
-        # UNBIASED PROMPT - No class hint!
-        # This allows FastVLM to describe what it actually sees
-        prompt = "Describe what you see in this image in detail. Focus on the main object, its appearance, color, shape, and any distinguishing features."
-        
+        if observation.image_patch is None:
+            return "No visual data available."
+            
+        return self._generate_description(
+            observation.image_patch,
+            observation.object_class,
+        )
+    
+    @profile("describer_generate_description")
+    def _generate_description(self, crop: np.ndarray, object_class: str) -> str:
+        """Generate description using FastVLM."""
         try:
+            # Convert to PIL
+            crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+            pil_image = Image.fromarray(crop_rgb)
+            
+            # Generate prompt
+            prompt = self.config.prompt_template.format(object_class=object_class)
+            
+            # Run VLM
             description = self.vlm.generate_description(
-                image=pil_image,
-                prompt=prompt,
+                pil_image,
+                prompt,
                 max_tokens=self.config.max_tokens,
                 temperature=self.config.temperature,
             )
             
-            # Clean up description
-            description = description.strip()
-            
-            # Validate description
-            if not description or len(description) < 10:
-                logger.warning(f"Short/empty description generated, using fallback")
-                description = f"An object with characteristics suggesting {observation.object_class.value}"
-            
             return description
-        
+            
         except Exception as e:
-            logger.error(f"Failed to generate description: {e}")
-            return f"An object detected by YOLO as {observation.object_class.value}"
+            logger.error(f"VLM generation failed: {e}")
+            return f"Failed to describe {object_class}."
     
     def select_best_observation(self, entity: PerceptionEntity) -> Optional[Observation]:
         """

@@ -51,6 +51,12 @@ class VideoIndex:
         self.index_path = Path(index_path)
         self.video_path = Path(video_path)
         self.conn: Optional[sqlite3.Connection] = None
+
+    def connect(self):
+        """Connect to existing database"""
+        if not self.index_path.exists():
+            raise FileNotFoundError(f"Index not found at {self.index_path}")
+        self.conn = sqlite3.connect(self.index_path)
         
     def create_schema(self):
         """Create database schema"""

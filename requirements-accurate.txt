@@ -21,6 +21,7 @@ torchvision>=0.15.0
 # Scene Understanding
 scipy>=1.10.0  # For spatial clustering and distance computation
 scikit-learn>=1.3.0  # For HDBSCAN and clustering
+mediapipe>=0.10.14  # Hand detection + landmarks
 
 # Graph Database
 # Memgraph connector for scene graph export

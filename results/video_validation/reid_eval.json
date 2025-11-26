@@ -1,0 +1,102 @@
+{
+  "global": {
+    "total_tracks": 19,
+    "total_memory_objects": 15,
+    "overall_fragmentation_ratio": 1.2666666666666666,
+    "classes": [
+      "bed",
+      "book",
+      "chair",
+      "keyboard",
+      "mouse",
+      "person",
+      "tv"
+    ]
+  },
+  "per_class": {
+    "bed": {
+      "tracks_count": 4,
+      "memory_count": 3,
+      "fragmentation_ratio": 1.3333333333333333,
+      "merge_rate": 0.3333333333333333,
+      "avg_tracks_per_memory": 1.3333333333333333,
+      "avg_track_len": 14,
+      "median_track_len": 9.5,
+      "avg_memory_obs": 18.666666666666668,
+      "reappearance_rate": 0.3333333333333333,
+      "avg_gap_frames": 5
+    },
+    "book": {
+      "tracks_count": 2,
+      "memory_count": 2,
+      "fragmentation_ratio": 1.0,
+      "merge_rate": 0.0,
+      "avg_tracks_per_memory": 1,
+      "avg_track_len": 49.5,
+      "median_track_len": 49.5,
+      "avg_memory_obs": 49.5,
+      "reappearance_rate": 0,
+      "avg_gap_frames": null
+    },
+    "chair": {
+      "tracks_count": 1,
+      "memory_count": 1,
+      "fragmentation_ratio": 1.0,
+      "merge_rate": 0.0,
+      "avg_tracks_per_memory": 1,
+      "avg_track_len": 12,
+      "median_track_len": 12,
+      "avg_memory_obs": 12,
+      "reappearance_rate": 0,
+      "avg_gap_frames": null
+    },
+    "keyboard": {
+      "tracks_count": 2,
+      "memory_count": 1,
+      "fragmentation_ratio": 2.0,
+      "merge_rate": 1.0,
+      "avg_tracks_per_memory": 2,
+      "avg_track_len": 18,
+      "median_track_len": 18.0,
+      "avg_memory_obs": 36,
+      "reappearance_rate": 1,
+      "avg_gap_frames": 1795
+    },
+    "mouse": {
+      "tracks_count": 2,
+      "memory_count": 2,
+      "fragmentation_ratio": 1.0,
+      "merge_rate": 0.0,
+      "avg_tracks_per_memory": 1,
+      "avg_track_len": 4.5,
+      "median_track_len": 4.5,
+      "avg_memory_obs": 4.5,
+      "reappearance_rate": 0,
+      "avg_gap_frames": null
+    },
+    "person": {
+      "tracks_count": 6,
+      "memory_count": 4,
+      "fragmentation_ratio": 1.5,
+      "merge_rate": 0.25,
+      "avg_tracks_per_memory": 1.5,
+      "avg_track_len": 19.166666666666668,
+      "median_track_len": 8.0,
+      "avg_memory_obs": 28.75,
+      "reappearance_rate": 0.25,
+      "avg_gap_frames": 667.5
+    },
+    "tv": {
+      "tracks_count": 2,
+      "memory_count": 2,
+      "fragmentation_ratio": 1.0,
+      "merge_rate": 0.0,
+      "avg_tracks_per_memory": 1,
+      "avg_track_len": 19.5,
+      "median_track_len": 19.5,
+      "avg_memory_obs": 19.5,
+      "reappearance_rate": 0,
+      "avg_gap_frames": null
+    }
+  }
+}

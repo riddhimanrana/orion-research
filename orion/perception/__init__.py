@@ -2,19 +2,20 @@
 Perception Engine Package
 =========================
 
-Phase 1 of the Orion pipeline: Detection, Embedding, Tracking, Description + 3D Perception.
+Phase 1 of the Orion pipeline: detection, embeddings, tracking, descriptions, and optional 3D perception.
+
+This package now focuses purely on the perception stage. Graph/scene memory utilities moved to
+``orion.graph`` so the folder surface is limited to the active runtime components listed below:
 
 Modules:
     - types: Data structures (Observation, PerceptionEntity, Hand, EntityState3D, etc.)
     - config: Configuration for perception components
-    - observer: Frame sampling and YOLO detection
+    - observer: Frame sampling and YOLO/GroundingDINO detection
     - embedder: CLIP embedding generation
     - tracker: HDBSCAN clustering into entities
     - describer: FastVLM description generation
-    - depth: Monocular depth estimation (MiDaS/ZoeDepth)
-    - hand_tracking: MediaPipe hand tracking with 3D projection
+    - depth: Monocular depth estimation helpers
     - camera_intrinsics: 3D backprojection utilities
-    - occlusion: Depth-based occlusion detection
     - engine: High-level orchestration
 
 Author: Orion Research Team
@@ -28,6 +29,8 @@ from .types import (
     Observation,
     PerceptionEntity,
     PerceptionResult,
+    CameraIntrinsics,
+    EntityState,
 )
 
 from .config import (
@@ -35,6 +38,10 @@ from .config import (
     EmbeddingConfig,
     DescriptionConfig,
     PerceptionConfig,
+    DepthConfig,
+    HandTrackingConfig,
+    OcclusionConfig,
+    CameraConfig,
     get_fast_config,
     get_balanced_config,
     get_accurate_config,
@@ -42,6 +49,14 @@ from .config import (
 
 from .depth import DepthEstimator
 from .engine import PerceptionEngine
+
+# Try to import 3D perception components
+try:
+    from .perception_3d import Perception3DEngine
+    PERCEPTION_3D_AVAILABLE = True
+except ImportError:
+    Perception3DEngine = None
+    PERCEPTION_3D_AVAILABLE = False
 
 __all__ = [
     # Types
@@ -51,10 +66,16 @@ __all__ = [
     "Observation",
     "PerceptionEntity",
     "PerceptionResult",
+    "CameraIntrinsics",
+    "EntityState",
     # Config
     "DetectionConfig",
     "EmbeddingConfig",
     "DescriptionConfig",
+    "DepthConfig",
+    "HandTrackingConfig",
+    "OcclusionConfig",
+    "CameraConfig",
     # Modules
     "DepthEstimator",
     "Perception3DEngine",

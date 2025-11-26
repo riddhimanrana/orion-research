@@ -353,8 +353,8 @@ def main():
     yolo = YOLO("yolo11n.pt")
     print("  ✅ YOLO loaded")
     
-    depth_est = DepthEstimator(model_name="depth_anything_v2", model_size="small")
-    print("  ✅ Depth Anything V2 loaded")
+    depth_est = DepthEstimator(model_name="depth_anything_v3", model_size="small")
+    print("  ✅ Depth Anything V3 loaded")
     
     slam = OpenCVSLAM(config=SLAMConfig())
     print("  ✅ SLAM initialized")

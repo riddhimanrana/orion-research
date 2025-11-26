@@ -15,7 +15,7 @@ Date: October 2025
 """
 
 import logging
-from typing import Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional, Literal
 
 import cv2
 import numpy as np
@@ -23,6 +23,15 @@ from tqdm import tqdm
 
 from orion.perception.types import ObjectClass, BoundingBox
 from orion.perception.config import DetectionConfig
+from orion.utils.profiling import profile
+
+# Check if 3D perception is available
+try:
+    from orion.perception.perception_3d import Perception3DEngine
+    PERCEPTION_3D_AVAILABLE = True
+except ImportError:
+    Perception3DEngine = None
+    PERCEPTION_3D_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +46,10 @@ class FrameObserver:
     
     def __init__(
         self,
-        yolo_model,
         config: DetectionConfig,
+        detector_backend: Literal["yolo", "groundingdino"] = "yolo",
+        yolo_model: Optional[Any] = None,
+        grounding_dino: Optional[Any] = None,
         target_fps: float = 4.0,
         show_progress: bool = True,
         enable_3d: bool = False,
@@ -49,7 +60,9 @@ class FrameObserver:
         Initialize observer.
         
         Args:
+            detector_backend: Detection backend identifier
             yolo_model: YOLO model instance from ModelManager
+            grounding_dino: GroundingDINO wrapper when backend='groundingdino'
             config: Detection configuration
             target_fps: Target frames per second for processing
             show_progress: Show progress bar
@@ -57,10 +70,26 @@ class FrameObserver:
             depth_model: Depth model to use ("zoe" or "midas")
             enable_occlusion: Enable occlusion detection (requires enable_3d=True)
         """
-        self.yolo = yolo_model
+        self.detector_backend = detector_backend
+        self.yolo = yolo_model if detector_backend == "yolo" else None
+        self.grounding_dino = grounding_dino if detector_backend == "groundingdino" else None
         self.config = config
         self.target_fps = target_fps
         self.show_progress = show_progress
+
+        if self.detector_backend == "yolo" and self.yolo is None:
+            raise ValueError("YOLO backend selected but yolo_model was not provided")
+        if self.detector_backend == "groundingdino" and self.grounding_dino is None:
+            raise ValueError("GroundingDINO backend selected but wrapper was not provided")
+
+        # Detector class registry (used by downstream trackers)
+        if self.detector_backend == "yolo" and hasattr(self.yolo, "names"):
+            self.detector_classes: List[str] = list(self.yolo.names.values())
+        else:
+            self.detector_classes = list(self.config.grounding_categories())
+        self._grounding_label_map = {
+            label.lower(): idx for idx, label in enumerate(self.detector_classes)
+        }
         
         # Initialize 3D perception engine if requested
         self.perception_engine = None
@@ -70,9 +99,9 @@ class FrameObserver:
                     enable_depth=True,
                     enable_hands=False,  # Hand tracking disabled (future work with HOT3D)
                     enable_occlusion=enable_occlusion,
-                    depth_model=depth_model,
+                    enable_slam=True, # Enable SLAM by default if 3D is enabled
                 )
-                logger.info(f"3D perception enabled: depth={depth_model}, occlusion={enable_occlusion}")
+                logger.info("  ✓ Perception3DEngine initialized")
             except Exception as e:
                 logger.warning(f"Failed to initialize 3D perception: {e}")
                 self.perception_engine = None
@@ -80,11 +109,13 @@ class FrameObserver:
             logger.warning("3D perception requested but not available")
         
         logger.debug(
-            f"FrameObserver initialized: model={config.model}, "
-            f"conf_thresh={config.confidence_threshold}, target_fps={target_fps}, "
-            f"3d_enabled={self.perception_engine is not None}"
+            "FrameObserver initialized: backend=%s, target_fps=%s, 3d_enabled=%s",
+            self.detector_backend,
+            target_fps,
+            self.perception_engine is not None,
         )
     
+    @profile("observer_process_video")
     def process_video(self, video_path: str) -> List[Dict]:
         """
         Process video and detect objects in sampled frames.
@@ -167,7 +198,77 @@ class FrameObserver:
         logger.info("="*80 + "\n")
         
         return detections
+
+    def _run_detection_backend(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+        """Dispatch to the configured detection backend."""
+        if self.detector_backend == "groundingdino":
+            return self._detect_with_groundingdino(frame)
+        return self._detect_with_yolo(frame)
+
+    @profile("observer_detect_with_yolo")
+    def _detect_with_yolo(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+        """Run YOLO inference and normalize outputs."""
+        if self.yolo is None:
+            return []
+
+        results = self.yolo(
+            frame,
+            conf=self.config.confidence_threshold,
+            iou=self.config.iou_threshold,
+            verbose=False,
+        )
+
+        detections: List[Dict[str, Any]] = []
+        for result in results:
+            boxes = result.boxes
+            for i in range(len(boxes)):
+                bbox_xyxy = boxes.xyxy[i].cpu().numpy().astype(float).tolist()
+                detections.append(
+                    {
+                        "bbox": bbox_xyxy,
+                        "confidence": float(boxes.conf[i]),
+                        "class_id": int(boxes.cls[i]),
+                        "class_name": result.names[int(boxes.cls[i])],
+                    }
+                )
+        return detections
+
+    def _detect_with_groundingdino(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+        """Run GroundingDINO inference and normalize outputs."""
+        if self.grounding_dino is None:
+            return []
+
+        raw_detections = self.grounding_dino.detect(
+            frame_bgr=frame,
+            prompt=self.config.groundingdino_prompt,
+            box_threshold=self.config.groundingdino_box_threshold,
+            text_threshold=self.config.groundingdino_text_threshold,
+            max_detections=self.config.groundingdino_max_detections,
+        )
+
+        normalized: List[Dict[str, Any]] = []
+        for det in raw_detections:
+            label = det.get("label", "object").strip() or "object"
+            class_id = self._register_grounding_label(label)
+            normalized.append(
+                {
+                    "bbox": det.get("bbox", [0, 0, 0, 0]),
+                    "confidence": det.get("confidence", 0.0),
+                    "class_id": class_id,
+                    "class_name": label,
+                }
+            )
+        return normalized
+
+    def _register_grounding_label(self, label: str) -> int:
+        """Register unseen GroundingDINO labels for downstream components."""
+        normalized = label.lower()
+        if normalized not in self._grounding_label_map:
+            self._grounding_label_map[normalized] = len(self.detector_classes)
+            self.detector_classes.append(label)
+        return self._grounding_label_map[normalized]
     
+    @profile("observer_detect_objects")
     def detect_objects(
         self,
         frame: np.ndarray,
@@ -189,41 +290,25 @@ class FrameObserver:
         Returns:
             List of detection dictionaries
         """
-        # Run YOLO
-        results = self.yolo(
-            frame,
-            conf=self.config.confidence_threshold,
-            iou=self.config.iou_threshold,
-            verbose=False,
-        )
+        detection_candidates = self._run_detection_backend(frame)
         
         # Run 3D perception if enabled
         perception_3d = None
         if self.perception_engine is not None:
             # Convert YOLO results to format expected by PerceptionEngine
             yolo_detections = []
-            for result in results:
-                boxes = result.boxes
-                for i in range(len(boxes)):
-                    bbox_xyxy = boxes.xyxy[i].cpu().numpy().astype(int).tolist()
-                    x1, y1, x2, y2 = bbox_xyxy
-                    
-                    # Filter by minimum size
-                    width = x2 - x1
-                    height = y2 - y1
-                    if width < self.config.min_object_size or height < self.config.min_object_size:
-                        continue
-                    
-                    confidence = float(boxes.conf[i])
-                    class_id = int(boxes.cls[i])
-                    class_name = result.names[class_id]
-                    
-                    yolo_detections.append({
-                        'entity_id': f'det_{frame_number}_{i}',
-                        'class': class_name,
-                        'confidence': confidence,
-                        'bbox': (x1, y1, x2, y2),
-                    })
+            for idx, detection in enumerate(detection_candidates):
+                x1, y1, x2, y2 = [int(v) for v in detection["bbox"]]
+                width = x2 - x1
+                height = y2 - y1
+                if width < self.config.min_object_size or height < self.config.min_object_size:
+                    continue
+                yolo_detections.append({
+                    'entity_id': f'det_{frame_number}_{idx}',
+                    'class': detection["class_name"],
+                    'confidence': detection["confidence"],
+                    'bbox': (x1, y1, x2, y2),
+                })
             
             # Process with 3D perception
             try:
@@ -236,73 +321,55 @@ class FrameObserver:
         
         detections = []
         
-        for result in results:
-            boxes = result.boxes
-            
-            for i in range(len(boxes)):
-                # Extract bbox coordinates
-                bbox_xyxy = boxes.xyxy[i].cpu().numpy().astype(int).tolist()
-                x1, y1, x2, y2 = bbox_xyxy
-                
-                # Filter by minimum size
-                width = x2 - x1
-                height = y2 - y1
-                if width < self.config.min_object_size or height < self.config.min_object_size:
-                    continue
-                
-                # Extract detection info
-                confidence = float(boxes.conf[i])
-                class_id = int(boxes.cls[i])
-                class_name = result.names[class_id]
-                
-                # Create bounding box
-                bbox = BoundingBox(x1=float(x1), y1=float(y1), x2=float(x2), y2=float(y2))
-                
-                # Compute centroid
-                centroid = bbox.center
-                
-                # Crop object region with padding
-                crop, padded_bbox = self._crop_with_padding(frame, bbox)
-                
-                # Determine spatial zone
-                spatial_zone = self._compute_spatial_zone(centroid, frame_width, frame_height)
-                
-                detection = {
-                    "frame_number": frame_number,
-                    "timestamp": timestamp,
-                    "bounding_box": bbox,
-                    "centroid": centroid,
-                    "object_class": class_name,
-                    "class_id": class_id,
-                    "confidence": confidence,
-                    "crop": crop,
-                    "padded_bbox": padded_bbox,
-                    "frame_width": frame_width,
-                    "frame_height": frame_height,
-                    "spatial_zone": spatial_zone,
-                }
-                
-                # Add 3D information if available
-                if perception_3d is not None and perception_3d.entities:
-                    # Find matching entity by class and bbox proximity
-                    for entity_3d in perception_3d.entities:
-                        if entity_3d.class_label == class_name:
-                            # Check if bboxes are close (simple matching)
-                            e_x1, e_y1, e_x2, e_y2 = entity_3d.bbox_2d_px
-                            if abs(e_x1 - x1) < 20 and abs(e_y1 - y1) < 20:
-                                detection["depth_mm"] = entity_3d.depth_mean_mm
-                                detection["centroid_3d_mm"] = entity_3d.centroid_3d_mm
-                                detection["visibility_state"] = entity_3d.visibility_state.value
-                                detection["occlusion_ratio"] = entity_3d.occlusion_ratio
-                                detection["occluded_by"] = entity_3d.occluded_by
-                                break
-                
-                # Add hand information if available
-                if perception_3d is not None and perception_3d.hands:
-                    detection["hands_detected"] = len(perception_3d.hands)
-                    detection["hands"] = [h.to_dict() for h in perception_3d.hands]
-                
-                detections.append(detection)
+        for detection_source in detection_candidates:
+            x1, y1, x2, y2 = [int(v) for v in detection_source["bbox"]]
+
+            width = x2 - x1
+            height = y2 - y1
+            if width < self.config.min_object_size or height < self.config.min_object_size:
+                continue
+
+            confidence = float(detection_source["confidence"])
+            class_id = int(detection_source.get("class_id", -1))
+            class_name = detection_source["class_name"]
+
+            bbox = BoundingBox(x1=float(x1), y1=float(y1), x2=float(x2), y2=float(y2))
+            centroid = bbox.center
+            crop, padded_bbox = self._crop_with_padding(frame, bbox)
+            spatial_zone = self._compute_spatial_zone(centroid, frame_width, frame_height)
+
+            detection = {
+                "frame_number": frame_number,
+                "timestamp": timestamp,
+                "bounding_box": bbox,
+                "centroid": centroid,
+                "object_class": class_name,
+                "class_id": class_id,
+                "confidence": confidence,
+                "crop": crop,
+                "padded_bbox": padded_bbox,
+                "frame_width": frame_width,
+                "frame_height": frame_height,
+                "spatial_zone": spatial_zone,
+            }
+
+            if perception_3d is not None and perception_3d.entities:
+                for entity_3d in perception_3d.entities:
+                    if entity_3d.class_label == class_name:
+                        e_x1, e_y1, e_x2, e_y2 = entity_3d.bbox_2d_px
+                        if abs(e_x1 - x1) < 20 and abs(e_y1 - y1) < 20:
+                            detection["depth_mm"] = entity_3d.depth_mean_mm
+                            detection["centroid_3d_mm"] = entity_3d.centroid_3d_mm
+                            detection["visibility_state"] = entity_3d.visibility_state.value
+                            detection["occlusion_ratio"] = entity_3d.occlusion_ratio
+                            detection["occluded_by"] = entity_3d.occluded_by
+                            break
+
+            if perception_3d is not None and perception_3d.hands:
+                detection["hands_detected"] = len(perception_3d.hands)
+                detection["hands"] = [h.to_dict() for h in perception_3d.hands]
+
+            detections.append(detection)
         
         return detections
     

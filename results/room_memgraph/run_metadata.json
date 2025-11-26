@@ -1,0 +1,28 @@
+{
+  "episode_id": "room_memgraph",
+  "video_path": "data/examples/room.mp4",
+  "processing_time_seconds": 20.841264247894287,
+  "target_fps": 5.0,
+  "detector": {
+    "model_name": "yolo11m",
+    "num_classes": 80,
+    "confidence_threshold": 0.25,
+    "device": "mps",
+    "batch_size": 8
+  },
+  "hand_detector": null,
+  "tracker": {
+    "iou_threshold": 0.3,
+    "max_age": 30,
+    "total_tracks": 82,
+    "active_tracks": 8,
+    "all_tracks": 8,
+    "frame_count": 157
+  },
+  "statistics": {
+    "total_detections": 604,
+    "total_track_observations": 331,
+    "unique_tracks": 82,
+    "frames_processed": 157
+  }
+}

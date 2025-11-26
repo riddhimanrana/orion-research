@@ -1,0 +1,104 @@
+{
+  "total_entities": 11,
+  "entities": [
+    {
+      "id": 0,
+      "class": "keyboard",
+      "confidence": 0.9213439226150513,
+      "observation_count": 69,
+      "first_frame": 385,
+      "last_frame": 1141,
+      "description": "An object detected by YOLO as keyboard"
+    },
+    {
+      "id": 1,
+      "class": "tv",
+      "confidence": 0.9104831218719482,
+      "observation_count": 53,
+      "first_frame": 392,
+      "last_frame": 1141,
+      "description": "An object detected by YOLO as tv"
+    },
+    {
+      "id": 2,
+      "class": "book",
+      "confidence": 0.5350977182388306,
+      "observation_count": 51,
+      "first_frame": 217,
+      "last_frame": 1057,
+      "description": "An object detected by YOLO as book"
+    },
+    {
+      "id": 3,
+      "class": "mouse",
+      "confidence": 0.9247657060623169,
+      "observation_count": 49,
+      "first_frame": 385,
+      "last_frame": 1141,
+      "description": "An object detected by YOLO as mouse"
+    },
+    {
+      "id": 4,
+      "class": "bottle",
+      "confidence": 0.7933555245399475,
+      "observation_count": 47,
+      "first_frame": 427,
+      "last_frame": 1113,
+      "description": "An object detected by YOLO as bottle"
+    },
+    {
+      "id": 5,
+      "class": "bed",
+      "confidence": 0.9481333494186401,
+      "observation_count": 37,
+      "first_frame": 273,
+      "last_frame": 1029,
+      "description": "An object detected by YOLO as bed"
+    },
+    {
+      "id": 6,
+      "class": "chair",
+      "confidence": 0.9428867697715759,
+      "observation_count": 58,
+      "first_frame": 336,
+      "last_frame": 1071,
+      "description": "An object detected by YOLO as chair"
+    },
+    {
+      "id": 7,
+      "class": "teddy bear",
+      "confidence": 0.8188340067863464,
+      "observation_count": 23,
+      "first_frame": 301,
+      "last_frame": 1022,
+      "description": "An object detected by YOLO as teddy bear"
+    },
+    {
+      "id": 8,
+      "class": "backpack",
+      "confidence": 0.8451422452926636,
+      "observation_count": 21,
+      "first_frame": 434,
+      "last_frame": 679,
+      "description": "An object detected by YOLO as backpack"
+    },
+    {
+      "id": 9,
+      "class": "couch",
+      "confidence": 0.6763824820518494,
+      "observation_count": 8,
+      "first_frame": 259,
+      "last_frame": 987,
+      "description": "An object detected by YOLO as couch"
+    },
+    {
+      "id": 10,
+      "class": "cup",
+      "confidence": 0.3719773292541504,
+      "observation_count": 4,
+      "first_frame": 504,
+      "last_frame": 693,
+      "description": "An object detected by YOLO as cup"
+    }
+  ]
+}

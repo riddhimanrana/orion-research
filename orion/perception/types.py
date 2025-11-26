@@ -484,6 +484,10 @@ class EntityState3D:
         }
 
 
+# Backwards compatibility alias for tests that import EntityState
+EntityState = EntityState3D
+
+
 @dataclass
 class OcclusionInfo:
     """Occlusion information for an entity."""
@@ -506,6 +510,7 @@ class Perception3DResult:
     hands: List[Hand]
     depth_map: Optional[np.ndarray] = None
     camera_intrinsics: Optional[CameraIntrinsics] = None
+    camera_pose: Optional[np.ndarray] = None  # 4x4 matrix (world to camera or camera to world)
     
     # Performance
     processing_time_ms: float = 0.0
