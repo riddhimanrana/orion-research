@@ -91,10 +91,14 @@ class ModelManager:
         self._fastvlm: Optional[Any] = None
         self._dino: Optional[Any] = None
         self._groundingdino: Optional[Any] = None
+        self._sam_predictor: Optional[Any] = None
         
         # Model configuration
         self.yolo_model_name = "yolo11m"  # Default to medium (balanced)
         self.groundingdino_model_id = "IDEA-Research/grounding-dino-base"
+        self.sam_checkpoint_path: Optional[Path] = None
+        self.sam_model_type: str = "vit_h"
+        self.sam_device_override: Optional[str] = None
         
         # LLM for contextual understanding
         self._ollama_client: Optional[Any] = None
@@ -298,6 +302,56 @@ class ModelManager:
         except Exception as e:
             logger.error(f"Failed to load GroundingDINO: {e}")
             raise
+
+    # ========================================================================
+    # Segment Anything Predictor
+    # ========================================================================
+
+    @property
+    def sam_predictor(self) -> Any:
+        """Get SAM predictor (lazy loaded)."""
+        if self._sam_predictor is None:
+            self._sam_predictor = self._load_sam()
+        return self._sam_predictor
+
+    def _load_sam(self) -> Any:
+        """Load SAM model and return a predictor instance."""
+        try:
+            from segment_anything import SamPredictor, sam_model_registry
+        except ImportError as exc:
+            raise RuntimeError(
+                "segment-anything is required for SAM; install via `pip install segment-anything`"
+            ) from exc
+
+        model_type = (self.sam_model_type or "vit_h").lower()
+        if model_type not in sam_model_registry:
+            raise ValueError(f"Unsupported SAM model_type '{model_type}'")
+
+        checkpoint_path: Path
+        if self.sam_checkpoint_path is not None:
+            checkpoint_path = Path(self.sam_checkpoint_path)
+        else:
+            checkpoint_path = self.models_dir / "weights" / f"sam_{model_type}.pth"
+
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(
+                f"SAM checkpoint not found at {checkpoint_path}. Provide PerceptionConfig.segmentation.checkpoint_path"
+            )
+
+        logger.info("Loading SAM (%s) from %s", model_type, checkpoint_path)
+        sam = sam_model_registry[model_type](checkpoint=str(checkpoint_path))
+
+        device_choice = self.sam_device_override or self.device
+        if device_choice == "auto":
+            device_choice = "cuda" if torch.cuda.is_available() else "cpu"
+        if device_choice == "mps":
+            # SAM kernels are not fully supported on MPS yet; fall back to CPU for stability
+            device_choice = "cpu"
+        sam.to(device_choice)
+
+        predictor = SamPredictor(sam)
+        logger.info("✓ SAM ready on %s", device_choice)
+        return predictor
     
     # ========================================================================
     # FastVLM Describer
@@ -371,6 +425,9 @@ class ModelManager:
         if self._groundingdino is not None:
             del self._groundingdino
             self._groundingdino = None
+        if self._sam_predictor is not None:
+            del self._sam_predictor
+            self._sam_predictor = None
         
         # Clear GPU memory
         if torch.cuda.is_available():
@@ -387,7 +444,8 @@ class ModelManager:
             "clip_loaded": self._clip is not None,
             "fastvlm_loaded": self._fastvlm is not None,
             "dino_loaded": self._dino is not None,
-                "groundingdino_loaded": self._groundingdino is not None,
+            "groundingdino_loaded": self._groundingdino is not None,
+            "sam_loaded": self._sam_predictor is not None,
         }
         
         if torch.cuda.is_available():

@@ -14,12 +14,16 @@ Author: Orion Research Team
 Date: October 2025
 """
 
+import json
 import logging
 import math
 import time
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Union, TYPE_CHECKING
+
+import cv2
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from PIL import Image
 
 # Initialise logger early so try/except blocks can use it
 logger = logging.getLogger(__name__)
@@ -43,6 +47,12 @@ from orion.perception.embedder import VisualEmbedder
 from orion.perception.tracker import EntityTracker
 from orion.perception.describer import EntityDescriber
 from orion.perception.depth import DepthEstimator
+from orion.perception.sam_segmenter import SegmentAnythingMaskGenerator
+from orion.perception.class_corrector import ClassCorrector
+
+if TYPE_CHECKING:  # pragma: no cover - import guard for type checking only
+    from orion.semantic.cis_scorer_3d import CausalInfluenceScorer3D
+    from orion.semantic.types import CausalLink, StateChange
 
 # Phase 2: Tracking imports (legacy tracker removed)
 TRACKING_AVAILABLE = False
@@ -118,6 +128,11 @@ class PerceptionEngine:
         self.slam_engine: Optional[SLAMEngine] = None
         self.tapnet_tracker: Optional['TapNetTracker'] = None
         self.depth_estimator: Optional[DepthEstimator] = None
+        self.sam_segmenter: Optional[SegmentAnythingMaskGenerator] = None
+        self.cis_scorer: Optional['CausalInfluenceScorer3D'] = None
+        self.class_corrector: Optional[ClassCorrector] = None
+        self.clip_model = None
+        self._components_ready: bool = False
         
         # Memgraph & Spatial Zones
         self.memgraph: Optional[MemgraphBackend] = None
@@ -183,7 +198,8 @@ class PerceptionEngine:
             PerceptionResult with entities and observations
         """
         # Ensure output directory exists
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
 
         logger.info("\n" + "="*80)
         logger.info("PERCEPTION ENGINE - PHASE 1")
@@ -248,6 +264,20 @@ class PerceptionEngine:
         entities = self.describer.describe_entities(entities)
         metrics_timings["description_seconds"] = time.time() - t0
 
+        class_corrections = 0
+        if getattr(self.config.class_correction, "enabled", False) and self.clip_model is not None:
+            t0 = time.time()
+            class_corrections = self._run_class_correction(entities)
+            metrics_timings["class_correction_seconds"] = time.time() - t0
+        elif getattr(self.config.class_correction, "enabled", False) and self.clip_model is None:
+            logger.warning("Class correction requested but CLIP model unavailable; skipping relabeling")
+
+        cis_links: List['CausalLink'] = []
+        if getattr(self.config, "enable_cis", False):
+            t0 = time.time()
+            cis_links = self._run_cis_reasoning(entities)
+            metrics_timings["cis_seconds"] = time.time() - t0
+
         if self.config.use_memgraph and self.memgraph is not None:
             try:
                 self._sync_memgraph_entities(entities)
@@ -299,6 +329,18 @@ class PerceptionEngine:
             "avg_cluster_size": float(np.mean([d.get('cluster_size',1) for d in detections if d.get('cluster_size')])) if any(d.get('cluster_size') for d in detections) else 1.0,
         })
 
+        if class_corrections:
+            result_metrics["class_correction"] = {
+                "corrected_entities": class_corrections,
+                "min_similarity": self.config.class_correction.min_similarity,
+            }
+
+        if cis_links:
+            result_metrics["cis"] = {
+                "link_count": len(cis_links),
+                "links": [link.to_dict() for link in cis_links[: self.config.cis_max_links]],
+            }
+
         # Inject Re-ID metrics if available
         if hasattr(self, "_reid_metrics") and isinstance(self._reid_metrics, dict):
             result_metrics["reid"] = self._reid_metrics
@@ -324,12 +366,83 @@ class PerceptionEngine:
         
         # Export visualization data if requested
         if save_visualizations:
-            self._export_visualization_data(result, output_dir)
+            self._export_visualization_data(result, str(output_path))
+
+        if cis_links:
+            try:
+                self._export_cis_links(cis_links, output_path)
+            except Exception as exc:
+                logger.warning(f"Failed to export CIS links: {exc}")
         
         return result
+
+    @profile("engine_process_image")
+    def process_image(
+        self,
+        image: Union[str, Path, np.ndarray, Image.Image],
+        *,
+        frame_number: int = 0,
+        timestamp: float = 0.0,
+        source_name: Optional[str] = None,
+    ) -> PerceptionResult:
+        """Run the perception pipeline on a single RGB image.
+
+        This is primarily used for dataset-style evaluations (e.g., Action Genome)
+        where inputs are already individual frames instead of full videos.
+        """
+
+        self._initialize_components()
+
+        frame_bgr, inferred_source = self._coerce_frame(image)
+        source_path = source_name or inferred_source or "<image>"
+
+        frame_height, frame_width = frame_bgr.shape[:2]
+        start_time = time.time()
+
+        detections = self.observer.detect_objects(
+            frame=frame_bgr,
+            frame_number=frame_number,
+            timestamp=timestamp,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        detections = self.embedder.embed_detections(detections)
+
+        observations = self._detections_to_observations(detections)
+        entities = self.tracker.cluster_observations(observations)
+        metrics: Dict[str, dict] = {}
+        if entities:
+            entities = self._reid_deduplicate_entities(entities)
+            entities = self.describer.describe_entities(entities)
+            if getattr(self.config.class_correction, "enabled", False):
+                if self.clip_model is None:
+                    logger.warning(
+                        "Class correction requested but CLIP unavailable in process_image path"
+                    )
+                else:
+                    corrected = self._run_class_correction(entities)
+                    if corrected:
+                        metrics["class_correction"] = {
+                            "corrected_entities": corrected,
+                            "min_similarity": self.config.class_correction.min_similarity,
+                        }
+
+        elapsed = time.time() - start_time
+        return PerceptionResult(
+            entities=entities,
+            raw_observations=observations,
+            video_path=str(source_path),
+            total_frames=1,
+            fps=self.config.target_fps,
+            duration_seconds=0.0,
+            processing_time_seconds=elapsed,
+            metrics=metrics or None,
+        )
     
     def _initialize_components(self):
         """Initialize all pipeline components with models."""
+        if self._components_ready:
+            return
         logger.info("Loading models...")
         
         # Detector backend (YOLO or GroundingDINO)
@@ -350,13 +463,21 @@ class PerceptionEngine:
         # CLIP (only load if requested by backend or text conditioning)
         clip = None
         try:
-            if self.config.embedding.backend == "clip" or self.config.embedding.use_text_conditioning:
+            should_load_clip = (
+                self.config.embedding.backend == "clip"
+                or self.config.embedding.use_text_conditioning
+                or getattr(self.config.class_correction, "enabled", False)
+            )
+            if should_load_clip:
                 clip = self.model_manager.clip
                 logger.info("  ✓ CLIP loaded (semantic + description)")
+                self.clip_model = clip
             else:
                 logger.info("  ✓ Skipping CLIP load (backend does not require it)")
+                self.clip_model = None
         except Exception as e:
             logger.warning(f"  ✗ CLIP load failed: {e}. Proceeding without CLIP.")
+            self.clip_model = None
 
         # DINO (instance-level embeddings) if requested
         dino = None
@@ -371,6 +492,33 @@ class PerceptionEngine:
         # FastVLM
         vlm = self.model_manager.fastvlm
         logger.info("  ✓ FastVLM loaded")
+
+        segmentation_cfg = getattr(self.config, "segmentation", None)
+        if segmentation_cfg and segmentation_cfg.enabled:
+            try:
+                if segmentation_cfg.checkpoint_path:
+                    self.model_manager.sam_checkpoint_path = Path(segmentation_cfg.checkpoint_path)
+                self.model_manager.sam_model_type = segmentation_cfg.model_type
+                self.model_manager.sam_device_override = (
+                    None if segmentation_cfg.device == "auto" else segmentation_cfg.device
+                )
+                sam_predictor = self.model_manager.sam_predictor
+                self.sam_segmenter = SegmentAnythingMaskGenerator(
+                    predictor=sam_predictor,
+                    mask_threshold=segmentation_cfg.mask_threshold,
+                    stability_score_threshold=segmentation_cfg.stability_score_threshold,
+                    min_mask_area=segmentation_cfg.min_mask_area,
+                    batch_size=segmentation_cfg.batch_size,
+                    refine_bounding_box=segmentation_cfg.refine_bounding_box,
+                )
+                logger.info("  ✓ SAM segmentation enabled (%s)", segmentation_cfg.model_type)
+            except Exception as exc:
+                logger.warning(f"  ✗ Failed to initialize SAM: {exc}")
+                self.sam_segmenter = None
+                self.model_manager.sam_device_override = None
+        else:
+            self.sam_segmenter = None
+            self.model_manager.sam_device_override = None
         
         # Create components
         self.observer = FrameObserver(
@@ -383,6 +531,8 @@ class PerceptionEngine:
             enable_3d=self.config.enable_3d,
             depth_model=self.config.depth_model,
             enable_occlusion=self.config.enable_occlusion,
+            segmentation_config=self.config.segmentation,
+            segmentation_refiner=self.sam_segmenter,
         )
         
         self.embedder = VisualEmbedder(
@@ -399,6 +549,8 @@ class PerceptionEngine:
             vlm_model=vlm,
             config=self.config.description,
         )
+
+        self._components_ready = True
         
         if self.config.enable_depth:
             self._get_depth_estimator()
@@ -515,7 +667,7 @@ class PerceptionEngine:
             best_obs = entity.get_best_observation()
             entity_dict = {
                 "id": i,
-                "class": entity.object_class.value if hasattr(entity.object_class, 'value') else str(entity.object_class),
+                "class": entity.display_class(),
                 "confidence": float(best_obs.confidence),
                 "observation_count": len(entity.observations),
                 "first_frame": entity.first_seen_frame,
@@ -541,6 +693,14 @@ class PerceptionEngine:
         logger.info(f"  ✓ Saved tracking data: {entities_file}")
         
         logger.info("✓ Visualization data export complete\n")
+
+    def _export_cis_links(self, links: List['CausalLink'], output_dir: Path) -> None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        out_file = output_dir / "cis_links.json"
+        payload = [link.to_dict() for link in links]
+        with out_file.open("w") as fp:
+            json.dump(payload, fp, indent=2)
+        logger.info("  ✓ Saved %d CIS links → %s", len(links), out_file)
     
     def process_frame(
         self,
@@ -660,6 +820,115 @@ class PerceptionEngine:
     def _resolve_intrinsics(self, width: int, height: int) -> CameraIntrinsics:
         """Resolve camera intrinsics using the runtime camera config."""
         return self.config.camera.resolve_intrinsics(width=width, height=height)
+
+    def _run_class_correction(self, entities: List[PerceptionEntity]) -> int:
+        if not entities:
+            return 0
+        corrector = self._ensure_class_corrector()
+        if corrector is None:
+            return 0
+        return corrector.apply(entities)
+
+    def _ensure_class_corrector(self) -> Optional[ClassCorrector]:
+        if self.class_corrector is not None:
+            return self.class_corrector
+        if self.clip_model is None:
+            return None
+        detector_vocab = []
+        if self.observer is not None:
+            detector_vocab = getattr(self.observer, "detector_classes", [])
+        self.class_corrector = ClassCorrector(
+            clip_model=self.clip_model,
+            config=self.config.class_correction,
+            detector_vocabulary=detector_vocab,
+        )
+        return self.class_corrector
+
+    def _run_cis_reasoning(self, entities: List[PerceptionEntity]) -> List['CausalLink']:
+        if not entities:
+            return []
+        state_changes, embeddings = self._build_state_changes_from_entities(entities)
+        if not state_changes:
+            return []
+        scorer = self._ensure_cis_scorer()
+        try:
+            return scorer.compute_causal_links(state_changes, embeddings)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(f"CIS scorer failed: {exc}")
+            return []
+
+    def _ensure_cis_scorer(self):
+        if self.cis_scorer is not None:
+            return self.cis_scorer
+        from orion.semantic.cis_scorer_3d import CausalInfluenceScorer3D
+
+        semantic_config = getattr(self.config, "semantic", None)
+        self.cis_scorer = CausalInfluenceScorer3D(
+            semantic_config.causal if semantic_config else None
+        )
+        return self.cis_scorer
+
+    def _build_state_changes_from_entities(
+        self,
+        entities: List[PerceptionEntity],
+    ) -> Tuple[List['StateChange'], Dict[str, np.ndarray]]:
+        from orion.semantic.types import StateChange
+
+        state_changes: List[StateChange] = []
+        embeddings: Dict[str, np.ndarray] = {}
+
+        for entity in entities:
+            if not entity.observations:
+                continue
+            observations = sorted(entity.observations, key=lambda obs: obs.timestamp)
+            first = observations[0]
+            last = observations[-1]
+            dt = max(1e-3, float(last.timestamp - first.timestamp))
+
+            centroid_before = (float(first.centroid[0]), float(first.centroid[1]))
+            centroid_after = (float(last.centroid[0]), float(last.centroid[1]))
+            centroid_3d_before = tuple(first.centroid_3d_mm) if first.centroid_3d_mm is not None else None
+            centroid_3d_after = tuple(last.centroid_3d_mm) if last.centroid_3d_mm is not None else None
+
+            if centroid_3d_before and centroid_3d_after:
+                velocity_3d = tuple((centroid_3d_after[i] - centroid_3d_before[i]) / dt for i in range(3))
+            else:
+                velocity_3d = None
+            velocity_2d = (
+                (centroid_after[0] - centroid_before[0]) / dt,
+                (centroid_after[1] - centroid_before[1]) / dt,
+            )
+
+            state_change = StateChange(
+                entity_id=entity.entity_id,
+                class_label=entity.object_class.value if hasattr(entity.object_class, 'value') else str(entity.object_class),
+                frame_before=first.frame_number,
+                frame_after=last.frame_number,
+                timestamp_before=float(first.timestamp),
+                timestamp_after=float(last.timestamp),
+                centroid_before=centroid_before,
+                centroid_after=centroid_after,
+                centroid_3d_before=centroid_3d_before,
+                centroid_3d_after=centroid_3d_after,
+                velocity_3d=velocity_3d,
+                velocity_2d=velocity_2d,
+                bounding_box_before=first.bounding_box.to_list(),
+                bounding_box_after=last.bounding_box.to_list(),
+                change_magnitude=float(abs(last.confidence - first.confidence)),
+                metadata={"observation_count": len(entity.observations)},
+            )
+            state_changes.append(state_change)
+
+            embedding = entity.average_embedding
+            if embedding is None:
+                try:
+                    embedding = entity.compute_average_embedding()
+                except Exception:
+                    embedding = None
+            if embedding is not None:
+                embeddings[entity.entity_id] = embedding
+
+        return state_changes, embeddings
 
     def _get_depth_estimator(self) -> Optional[DepthEstimator]:
         """Lazily initialize and return the shared depth estimator."""
@@ -801,6 +1070,53 @@ class PerceptionEngine:
         width = max(obs_a.bounding_box.width, obs_b.bounding_box.width)
         height = max(obs_a.bounding_box.height, obs_b.bounding_box.height)
         return math.hypot(width, height) * 3.0
+
+    @staticmethod
+    def _coerce_frame(
+        image: Union[str, Path, np.ndarray, Image.Image]
+    ) -> Tuple[np.ndarray, Optional[str]]:
+        """Normalize supported image inputs into an OpenCV-compatible frame."""
+
+        inferred_source: Optional[str] = None
+
+        if isinstance(image, (str, Path)):
+            inferred_source = str(image)
+            frame = cv2.imread(inferred_source)
+            if frame is None:
+                raise RuntimeError(f"Failed to read image: {inferred_source}")
+            return frame, inferred_source
+
+        if isinstance(image, Image.Image):
+            inferred_source = getattr(image, "filename", None)
+            rgb = image.convert("RGB")
+            frame = cv2.cvtColor(np.array(rgb), cv2.COLOR_RGB2BGR)
+            return np.ascontiguousarray(frame), inferred_source
+
+        if isinstance(image, np.ndarray):
+            frame = image
+            if frame.ndim == 2:
+                frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+            elif frame.ndim == 3:
+                if frame.shape[2] == 4:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+                elif frame.shape[2] != 3:
+                    raise ValueError(
+                        "process_image expects HxWx(3 or 4) channel arrays"
+                    )
+            else:
+                raise ValueError(
+                    "process_image expects 2D (grayscale) or 3D image arrays"
+                )
+
+            if frame.dtype != np.uint8:
+                frame = frame.astype(np.uint8)
+
+            return np.ascontiguousarray(frame), inferred_source
+
+        raise TypeError(
+            "Unsupported image type for process_image: "
+            f"{type(image).__name__}"
+        )
 
     @staticmethod
     def _entity_str_to_int(entity_id: str) -> int:
@@ -1036,6 +1352,12 @@ class PerceptionEngine:
                 raw_yolo_class=det.get("object_class"),
                 frame_width=det.get("frame_width"),
                 frame_height=det.get("frame_height"),
+                depth_mm=det.get("depth_mm"),
+                centroid_3d_mm=det.get("centroid_3d_mm"),
+                visibility_state=det.get("visibility_state"),
+                occlusion_ratio=det.get("occlusion_ratio"),
+                segmentation_mask=det.get("segmentation_mask"),
+                features=det.get("features") or {},
             )
             
             observations.append(obs)

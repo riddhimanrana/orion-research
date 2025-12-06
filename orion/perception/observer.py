@@ -15,14 +15,14 @@ Date: October 2025
 """
 
 import logging
-from typing import Any, Dict, List, Tuple, Optional, Literal
+from typing import Any, Dict, List, Tuple, Optional, Literal, TYPE_CHECKING
 
 import cv2
 import numpy as np
 from tqdm import tqdm
 
 from orion.perception.types import ObjectClass, BoundingBox
-from orion.perception.config import DetectionConfig
+from orion.perception.config import DetectionConfig, SegmentationConfig
 from orion.utils.profiling import profile
 
 # Check if 3D perception is available
@@ -34,6 +34,9 @@ except ImportError:
     PERCEPTION_3D_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from orion.perception.sam_segmenter import SegmentAnythingMaskGenerator
 
 
 class FrameObserver:
@@ -55,6 +58,8 @@ class FrameObserver:
         enable_3d: bool = False,
         depth_model: str = "midas",
         enable_occlusion: bool = False,
+        segmentation_config: Optional[SegmentationConfig] = None,
+        segmentation_refiner: Optional["SegmentAnythingMaskGenerator"] = None,
     ):
         """
         Initialize observer.
@@ -76,6 +81,11 @@ class FrameObserver:
         self.config = config
         self.target_fps = target_fps
         self.show_progress = show_progress
+        self.segmentation_config = segmentation_config
+        if segmentation_config and segmentation_config.enabled and segmentation_refiner is not None:
+            self.segmentation_refiner = segmentation_refiner
+        else:
+            self.segmentation_refiner = None
 
         if self.detector_backend == "yolo" and self.yolo is None:
             raise ValueError("YOLO backend selected but yolo_model was not provided")
@@ -291,6 +301,12 @@ class FrameObserver:
             List of detection dictionaries
         """
         detection_candidates = self._run_detection_backend(frame)
+
+        if self.segmentation_refiner is not None and detection_candidates:
+            try:
+                detection_candidates = self.segmentation_refiner.refine_detections(frame, detection_candidates)
+            except Exception as exc:
+                logger.warning("SAM refinement failed on frame %d: %s", frame_number, exc)
         
         # Run 3D perception if enabled
         perception_3d = None
@@ -338,6 +354,14 @@ class FrameObserver:
             crop, padded_bbox = self._crop_with_padding(frame, bbox)
             spatial_zone = self._compute_spatial_zone(centroid, frame_width, frame_height)
 
+            seg_mask = detection_source.get("sam_mask")
+            if seg_mask is not None:
+                if self.segmentation_config and self.segmentation_config.apply_mask_to_crops:
+                    crop = self._apply_mask_to_crop(crop, seg_mask, bbox, padded_bbox)
+                detection_source_mask = seg_mask
+            else:
+                detection_source_mask = None
+
             detection = {
                 "frame_number": frame_number,
                 "timestamp": timestamp,
@@ -351,7 +375,16 @@ class FrameObserver:
                 "frame_width": frame_width,
                 "frame_height": frame_height,
                 "spatial_zone": spatial_zone,
+                "segmentation_mask": detection_source_mask,
+                "segmentation_score": detection_source.get("sam_score"),
             }
+
+            detection_features = detection.setdefault("features", {})
+            if detection_source_mask is not None:
+                if detection_source.get("sam_score") is not None:
+                    detection_features["sam_score"] = float(detection_source["sam_score"])
+                if detection_source.get("sam_area") is not None:
+                    detection_features["sam_area"] = int(detection_source["sam_area"])
 
             if perception_3d is not None and perception_3d.entities:
                 for entity_3d in perception_3d.entities:
@@ -363,6 +396,10 @@ class FrameObserver:
                             detection["visibility_state"] = entity_3d.visibility_state.value
                             detection["occlusion_ratio"] = entity_3d.occlusion_ratio
                             detection["occluded_by"] = entity_3d.occluded_by
+                            if hasattr(entity_3d, "metadata"):
+                                depth_quality = entity_3d.metadata.get("depth_quality")
+                                if depth_quality is not None:
+                                    detection_features["depth_quality"] = depth_quality
                             break
 
             if perception_3d is not None and perception_3d.hands:
@@ -411,6 +448,25 @@ class FrameObserver:
         )
         
         return crop, padded_bbox
+
+    def _apply_mask_to_crop(
+        self,
+        crop: np.ndarray,
+        mask_patch: np.ndarray,
+        bbox: BoundingBox,
+        padded_bbox: BoundingBox,
+    ) -> np.ndarray:
+        """Apply a binary mask patch to the padded crop."""
+        if crop.size == 0:
+            return crop
+        mask_canvas = np.zeros(crop.shape[:2], dtype=np.uint8)
+        y_offset = int(max(0, round(bbox.y1 - padded_bbox.y1)))
+        x_offset = int(max(0, round(bbox.x1 - padded_bbox.x1)))
+        patch_h, patch_w = mask_patch.shape[:2]
+        y_end = min(mask_canvas.shape[0], y_offset + patch_h)
+        x_end = min(mask_canvas.shape[1], x_offset + patch_w)
+        mask_canvas[y_offset:y_end, x_offset:x_end] = mask_patch[: y_end - y_offset, : x_end - x_offset]
+        return cv2.bitwise_and(crop, crop, mask=mask_canvas)
     
     def _compute_spatial_zone(
         self,

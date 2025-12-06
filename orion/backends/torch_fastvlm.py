@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 ImageInput = Union[str, Path, Image.Image]
 
 try:
-    from transformers import AutoModelForCausalLM, AutoProcessor
+    from transformers import AutoModelForCausalLM, AutoTokenizer
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
@@ -47,15 +47,15 @@ class FastVLMTorchWrapper:
         if not TRANSFORMERS_AVAILABLE:
             raise ImportError("transformers is required for the torch backend. Install with: pip install transformers")
 
-        # Use local model path if available, otherwise fallback to HF
+        # Use local model path if available, otherwise fallback to Hugging Face
         if model_source is None:
             local_path = Path(__file__).parent.parent.parent / "models" / "fastvlm-0.5b"
             if local_path.exists():
                 self.model_source = str(local_path)
                 logger.info(f"Using local FastVLM model at {self.model_source}")
             else:
-                self.model_source = "apple/fastvlm-0.5b"
-                logger.info("Using HuggingFace FastVLM model")
+                self.model_source = "apple/FastVLM-0.5B"
+                logger.info("Using Hugging Face FastVLM model (apple/FastVLM-0.5B)")
         else:
             self.model_source = model_source
         
@@ -64,14 +64,25 @@ class FastVLMTorchWrapper:
 
         logger.info(f"Initializing FastVLM with torch backend on device: {self.device}")
 
+        # Allow remote download when local weights are absent
+        local_files_only = Path(self.model_source).exists()
+
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.model_source,
+            trust_remote_code=True,
+            local_files_only=local_files_only,
+        )
+
         self.model = AutoModelForCausalLM.from_pretrained(
             self.model_source,
             trust_remote_code=True,
             torch_dtype=torch.float16 if self.device != "cpu" else torch.float32,
-            local_files_only=True
+            local_files_only=local_files_only,
         ).to(self.device)
-        
-        self.processor = AutoProcessor.from_pretrained(self.model_source, trust_remote_code=True, local_files_only=True)
+
+        # FastVLM exposes its own processor via the vision tower
+        self.image_processor = self.model.get_vision_tower().image_processor
+        self.image_token_index = -200  # FastVLM convention
         self.model.eval()
         logger.info(f"✓ FastVLM model loaded on {self.device}")
 
@@ -97,13 +108,43 @@ class FastVLMTorchWrapper:
         if isinstance(image, (str, Path)):
             image = Image.open(image).convert("RGB")
 
-        # Format prompt manually since FastVLM doesn't have a chat template
-        prompt_text = f"USER: <image>\n{prompt}\nASSISTANT:"
-        
-        inputs = self.processor(text=prompt_text, images=image, return_tensors="pt").to(self.device)
+        # Build chat template with explicit <image> placeholder
+        messages = [
+            {"role": "user", "content": f"<image>\n{prompt}"}
+        ]
+        rendered = self.tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=False,
+        )
+
+        try:
+            pre_text, post_text = rendered.split("<image>", 1)
+        except ValueError:
+            raise RuntimeError("FastVLM prompt rendering did not include <image> token")
+
+        pre_ids = self.tokenizer(
+            pre_text,
+            return_tensors="pt",
+            add_special_tokens=False,
+        ).input_ids
+        post_ids = self.tokenizer(
+            post_text,
+            return_tensors="pt",
+            add_special_tokens=False,
+        ).input_ids
+
+        img_tok = torch.tensor([[self.image_token_index]], dtype=pre_ids.dtype)
+        input_ids = torch.cat([pre_ids, img_tok, post_ids], dim=1).to(self.device)
+        attention_mask = torch.ones_like(input_ids, device=self.device)
+
+        pixel_values = self.image_processor(images=image, return_tensors="pt")["pixel_values"]
+        pixel_values = pixel_values.to(self.device, dtype=self.model.dtype)
 
         generation_output = self.model.generate(
-            **inputs,
+            inputs=input_ids,
+            attention_mask=attention_mask,
+            images=pixel_values,
             max_new_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
@@ -111,12 +152,7 @@ class FastVLMTorchWrapper:
             do_sample=temperature > 0,
         )
 
-        generated_text = self.processor.batch_decode(generation_output, skip_special_tokens=True)[0]
-        
-        # The output includes the prompt, so we need to remove it.
-        # This is a common pattern with vision-language models.
-        cleaned_text = generated_text.split("ASSISTANT:")[-1].strip()
-        return cleaned_text
+        return self.tokenizer.decode(generation_output[0], skip_special_tokens=True)
 
     def batch_generate(
         self,

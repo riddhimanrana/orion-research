@@ -1,0 +1,50 @@
+{
+  "total_entities": 5,
+  "entities": [
+    {
+      "id": 0,
+      "class": "tv",
+      "confidence": 0.9369353652000427,
+      "observation_count": 55,
+      "first_frame": 0,
+      "last_frame": 202,
+      "description": "The image depicts a close-up view of a digital display screen, likely part of a larger electronic device. The screen is rectangular and appears to be mounted on a white or light-colored frame. The display itself is predominantly black, with a few white markings or symbols visible on the screen. \n\nThe display is rectangular with rounded corners, and it is positioned horizontally. There are no discernible features or text on the screen that can be clearly read due to the blurriness of the image. The screen is mounted on a white or light-colored surface, possibly a table or a wall.\n\nIn the background, there is a hint of a red object, which could be a cup or a container, placed on the same white or light-colored surface. The red object is partially visible and seems to be positioned towards the upper part of the image. The background also includes a light-colored wall, which is clean and unadorned.\n\nGiven the blurriness of the image, it is difficult to provide"
+    },
+    {
+      "id": 1,
+      "class": "refrigerator",
+      "confidence": 0.5313498973846436,
+      "observation_count": 44,
+      "first_frame": 0,
+      "last_frame": 202,
+      "description": "The image depicts a close-up view of a section of a piece of furniture, likely a cabinet or a shelving unit. The visible portion of the furniture is characterized by a dark wooden finish, which gives it a sleek and modern appearance. The wood appears to be polished, reflecting light and adding a subtle sheen to the surface. The structure of the furniture is vertical, with a visible frame that suggests it could be part of a larger piece of furniture, such as a bookcase or a cabinet with multiple shelves.\n\nThe photo is taken at an angle, making it difficult to see the entire object clearly. However, the visible parts include a horizontal shelf or panel, which seems to be part of the furniture's design. The shelf or panel is rectangular and appears to be made of the same dark wood as the rest of the piece. The edges of the shelf or panel are slightly rounded, adding a bit of softness to the otherwise sleek and solid structure.\n\nThere are no discernible objects or"
+    },
+    {
+      "id": 2,
+      "class": "person",
+      "confidence": 0.933409571647644,
+      "observation_count": 48,
+      "first_frame": 36,
+      "last_frame": 142,
+      "description": "The image depicts a person wearing a red sweatshirt and black shorts. The sweatshirt is a long-sleeved, crew-neck style with a prominent white logo on the chest area. The logo appears to be a stylized design, possibly a team or sports-related emblem. The person is standing in front of a window with a white frame, which has a grid pattern on the glass. The window is partially covered by blinds, which are white and slightly translucent, allowing some light to filter through. The background outside the window is not clearly visible, but it appears to be an indoor setting, likely a room or a hallway. The person's face is not visible in the image, as the focus is on the clothing and the background. The overall scene suggests a casual, everyday moment captured in a domestic or office environment.\nThe sweatshirt is a deep red color with a white logo on the chest, which is a common design for sports or team apparel. The person is also wearing black"
+    },
+    {
+      "id": 3,
+      "class": "oven",
+      "confidence": 0.39921119809150696,
+      "observation_count": 9,
+      "first_frame": 68,
+      "last_frame": 152,
+      "description": "The image depicts a section of a wall with a wooden frame. The frame appears to be made of light-colored wood, possibly pine or oak, and features a rectangular shape with a smooth finish. The frame has a simple, clean design, with no intricate carvings or patterns. The wood is painted in a light brown or beige color, which contrasts with the darker brown or black background of the wall behind it.\n\nThe wall behind the frame is painted in a dark color, which could be black, dark blue, or another dark hue. The paint on the wall is smooth, and there are no visible textures or patterns on the surface. The wall appears to be part of a larger structure, possibly an interior wall of a building or a section of a room.\n\nWithin the frame, there are two rectangular panels. These panels are dark in color, possibly black or dark brown, and seem to be made of a different material than the wooden frame. The panels are aligned horizontally and are slightly recess"
+    },
+    {
+      "id": 4,
+      "class": "hair drier",
+      "confidence": 0.3565806746482849,
+      "observation_count": 1,
+      "first_frame": 78,
+      "last_frame": 78,
+      "description": "The image appears to be a blurred photograph of a flag. The flag is predominantly pink with a dark border, and it features a white stripe running horizontally across the center. The flag seems to be waving, suggesting movement. The colors are vivid, with the pink being the most prominent, and the white stripe providing contrast. The flag's design is simple, with no additional symbols or text visible in the image. The background is indistinct, making it difficult to determine the exact setting or context of the flag. The overall impression is one of a national flag, but the specific details are obscured due to the blurriness of the photograph.\n### Detailed Description:\n- **Flag Color:** Predominantly pink with a dark border.\n- **Central Stripe:** A white stripe running horizontally across the center.\n- **Blur:** The image is heavily blurred, making it difficult to discern finer details.\n- **Background:** The background is indistinct, contributing to the overall lack of"
+    }
+  ]
+}

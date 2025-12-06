@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from rich.console import Console
 
@@ -82,6 +83,33 @@ For more help: orion <command> --help
 
     # Display
     analyze_parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
+
+    # Segmentation / CIS controls
+    analyze_parser.add_argument(
+        "--enable-sam",
+        action="store_true",
+        help="Enable SAM mask refinement during perception",
+    )
+    analyze_parser.add_argument(
+        "--disable-sam",
+        action="store_true",
+        help="Disable SAM even if checkpoints are available",
+    )
+    analyze_parser.add_argument(
+        "--sam-checkpoint",
+        type=str,
+        help="Path to SAM checkpoint (.pth). Defaults to models/weights/sam_<model>.pth",
+    )
+    analyze_parser.add_argument(
+        "--sam-model-type",
+        choices=["vit_h", "vit_l", "vit_b"],
+        help="SAM backbone variant when --enable-sam is set",
+    )
+    analyze_parser.add_argument(
+        "--sam-device",
+        choices=["auto", "cuda", "cpu"],
+        help="Device for SAM inference (default auto)",
+    )
     
     # Spatial Memory (Experimental)
     analyze_parser.add_argument(
@@ -110,6 +138,35 @@ For more help: orion <command> --help
     qa_parser.add_argument("--neo4j-user", help="Neo4j username (defaults to config)")
     qa_parser.add_argument("--neo4j-password", help="Neo4j password (defaults to config)")
     qa_parser.add_argument("--runtime", help="Select runtime backend (auto or torch; defaults to config)")
+    qa_parser.add_argument(
+        "--results-dir",
+        type=str,
+        help="Path to results/<episode_id> directory for grounding QA responses",
+    )
+    qa_parser.add_argument(
+        "--entities-json",
+        type=str,
+        default=str(Path("data/testing/entities.json")),
+        help="Optional entities.json file with detailed descriptions (defaults to data/testing/entities.json)",
+    )
+    qa_parser.add_argument(
+        "--context-frames",
+        type=int,
+        default=200,
+        help="Number of scene_graph frames to summarize for QA context",
+    )
+    qa_parser.add_argument(
+        "--max-objects",
+        type=int,
+        default=20,
+        help="Maximum number of objects to include in QA context",
+    )
+    qa_parser.add_argument(
+        "--max-relations",
+        type=int,
+        default=10,
+        help="Maximum number of relation summaries to include in QA context",
+    )
 
     # ═══════════════════════════════════════════════════════════
     # INFO COMMANDS

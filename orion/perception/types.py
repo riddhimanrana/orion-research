@@ -210,6 +210,12 @@ class Observation:
     raw_yolo_class: Optional[str] = None  # For debugging
     frame_width: Optional[float] = None
     frame_height: Optional[float] = None
+    depth_mm: Optional[float] = None
+    centroid_3d_mm: Optional[Tuple[float, float, float]] = None
+    visibility_state: Optional[str] = None
+    occlusion_ratio: Optional[float] = None
+    segmentation_mask: Optional[np.ndarray] = None
+    features: Dict[str, Any] = field(default_factory=dict)
     
     # Placeholder for Phase 2
     entity_id: Optional[str] = None
@@ -236,6 +242,9 @@ class Observation:
 
         if self.frame_height is not None and self.frame_height <= 0:
             raise ValueError("frame_height must be positive when provided")
+
+        if self.segmentation_mask is not None and not isinstance(self.segmentation_mask, np.ndarray):
+            raise TypeError("segmentation_mask must be a numpy array when provided")
 
 
 @dataclass
@@ -319,11 +328,19 @@ class PerceptionEntity:
         """Get observations in chronological order"""
         return sorted(self.observations, key=lambda obs: obs.timestamp)
     
+    def display_class(self) -> str:
+        """Return the best available human-readable class label."""
+        if self.corrected_class:
+            return self.corrected_class
+        if hasattr(self.object_class, 'value'):
+            return self.object_class.value
+        return str(self.object_class)
+
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization"""
         return {
             "entity_id": self.entity_id,
-            "object_class": self.object_class.value,
+            "object_class": self.display_class(),
             "appearance_count": self.appearance_count,
             "first_seen_frame": self.first_seen_frame,
             "last_seen_frame": self.last_seen_frame,

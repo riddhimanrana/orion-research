@@ -8,6 +8,8 @@ torch>=2.0.0
 torchvision>=0.15.0
 
 # Detection & Segmentation
+# Meta Segment Anything (mask refinement)
+segment-anything>=1.0.1
 # Detectron2 - Instance segmentation (Mask R-CNN)
 # Install from source for Apple Silicon:
 # python -m pip install 'git+https://github.com/facebookresearch/detectron2.git'

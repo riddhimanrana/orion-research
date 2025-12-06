@@ -42,6 +42,7 @@ from .config import (
     HandTrackingConfig,
     OcclusionConfig,
     CameraConfig,
+    ClassCorrectionConfig,
     get_fast_config,
     get_balanced_config,
     get_accurate_config,
@@ -76,6 +77,7 @@ __all__ = [
     "HandTrackingConfig",
     "OcclusionConfig",
     "CameraConfig",
+    "ClassCorrectionConfig",
     # Modules
     "DepthEstimator",
     "Perception3DEngine",

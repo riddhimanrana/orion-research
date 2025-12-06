@@ -51,6 +51,41 @@ def handle_analyze(args: argparse.Namespace, settings: OrionSettings) -> None:
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Configure optional SAM segmentation (auto-enable when weights exist)
+    default_sam_checkpoint = (
+        Path("models/weights") / f"sam_{config.segmentation.model_type}.pth"
+    )
+    sam_requested = not args.disable_sam and (
+        args.enable_sam
+        or args.sam_checkpoint is not None
+        or args.sam_model_type is not None
+        or args.sam_device is not None
+        or default_sam_checkpoint.exists()
+    )
+
+    if sam_requested:
+        checkpoint_candidate = args.sam_checkpoint
+        if checkpoint_candidate is None and default_sam_checkpoint.exists():
+            checkpoint_candidate = str(default_sam_checkpoint)
+
+        if checkpoint_candidate is None:
+            console.print(
+                "[yellow]⚠ SAM requested but no checkpoint found. Provide --sam-checkpoint or place weights under models/weights/. SAM disabled for this run.[/yellow]"
+            )
+            config.segmentation.enabled = False
+        else:
+            config.segmentation.enabled = True
+            config.segmentation.checkpoint_path = checkpoint_candidate
+            if args.sam_model_type:
+                config.segmentation.model_type = args.sam_model_type
+            if args.sam_device:
+                config.segmentation.device = args.sam_device
+
+            ckpt_display = config.segmentation.checkpoint_path or "<default>"
+            console.print(
+                f"[cyan]SAM enabled:[/cyan] model={config.segmentation.model_type} checkpoint={ckpt_display} device={config.segmentation.device}"
+            )
+
     # Run perception pipeline
     try:
         start_time = time.time()
@@ -101,7 +136,7 @@ def handle_analyze(args: argparse.Namespace, settings: OrionSettings) -> None:
         console.print("[cyan]Detected Entities:[/cyan]")
         class_counts = {}
         for entity in result.entities:
-            cls = entity.object_class.value if hasattr(entity.object_class, 'value') else str(entity.object_class)
+            cls = entity.display_class()
             class_counts[cls] = class_counts.get(cls, 0) + 1
         
         for cls, count in sorted(class_counts.items()):

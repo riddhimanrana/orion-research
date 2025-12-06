@@ -17,18 +17,24 @@ import cv2
 import sys
 from pathlib import Path
 
-# Add Depth-Anything-3/src to path if available
+# Add Depth-Anything-3/src to path if available. We keep this simple and
+# robust: if the folder exists and the import works, we always prefer the
+# local clone over any torch hub fallback.
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 DA3_PATH = WORKSPACE_ROOT / "Depth-Anything-3" / "src"
-if DA3_PATH.exists() and str(DA3_PATH) not in sys.path:
-    sys.path.append(str(DA3_PATH))
 
-try:
-    from depth_anything_3.api import DepthAnything3
-    DA3_AVAILABLE = True
-except ImportError as e:
-    DA3_AVAILABLE = False
-    print(f"[DepthEstimator] DepthAnything3 module not found. V3 local loading will fail. Error: {e}")
+DA3_AVAILABLE = False
+if DA3_PATH.exists():
+    if str(DA3_PATH) not in sys.path:
+        sys.path.append(str(DA3_PATH))
+    try:
+        from depth_anything_3.api import DepthAnything3
+        DA3_AVAILABLE = True
+        print(f"[DepthEstimator] Found local Depth-Anything-3 at {DA3_PATH}")
+    except ImportError as e:
+        print(f"[DepthEstimator] DepthAnything3 module not found in local clone. V3 local loading will fail. Error: {e}")
+else:
+    print(f"[DepthEstimator] Depth-Anything-3 directory not found at {DA3_PATH}. V3 local loading will be skipped.")
 
 
 class DepthEstimator:

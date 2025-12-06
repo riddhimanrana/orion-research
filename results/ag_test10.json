@@ -1,0 +1,65 @@
+{
+  "split": "test",
+  "samples_evaluated": 0,
+  "metrics": {
+    "R@20": 0.0,
+    "mR@20": 0.0,
+    "R@50": 0.0,
+    "mR@50": 0.0,
+    "R@100": 0.0,
+    "mR@100": 0.0,
+    "gt_relations": 0.0
+  },
+  "samples": [
+    {
+      "tag": "00607.mp4/000016.png",
+      "image_path": "Action Genome Dataset\\ActionGenome\\dataset\\ag\\frames\\00607.mp4\\000016.png",
+      "error": "[Errno 2] No such file or directory: 'Action Genome Dataset\\\\ActionGenome\\\\dataset\\\\ag\\\\frames\\\\00607.mp4\\\\000016.png'"
+    },
+    {
+      "tag": "00607.mp4/000047.png",
+      "image_path": "Action Genome Dataset\\ActionGenome\\dataset\\ag\\frames\\00607.mp4\\000047.png",
+      "error": "[Errno 2] No such file or directory: 'Action Genome Dataset\\\\ActionGenome\\\\dataset\\\\ag\\\\frames\\\\00607.mp4\\\\000047.png'"
+    },
+    {
+      "tag": "00607.mp4/000077.png",
+      "image_path": "Action Genome Dataset\\ActionGenome\\dataset\\ag\\frames\\00607.mp4\\000077.png",
+      "error": "[Errno 2] No such file or directory: 'Action Genome Dataset\\\\ActionGenome\\\\dataset\\\\ag\\\\frames\\\\00607.mp4\\\\000077.png'"
+    },
+    {
+      "tag": "00607.mp4/000082.png",
+      "image_path": "Action Genome Dataset\\ActionGenome\\dataset\\ag\\frames\\00607.mp4\\000082.png",
+      "error": "[Errno 2] No such file or directory: 'Action Genome Dataset\\\\ActionGenome\\\\dataset\\\\ag\\\\frames\\\\00607.mp4\\\\000082.png'"
+    },
+    {
+      "tag": "00607.mp4/000098.png",
+      "image_path": "Action Genome Dataset\\ActionGenome\\dataset\\ag\\frames\\00607.mp4\\000098.png",
+      "error": "[Errno 2] No such file or directory: 'Action Genome Dataset\\\\ActionGenome\\\\dataset\\\\ag\\\\frames\\\\00607.mp4\\\\000098.png'"
+    },
+    {
+      "tag": "00607.mp4/000107.png",
+      "image_path": "Action Genome Dataset\\ActionGenome\\dataset\\ag\\frames\\00607.mp4\\000107.png",
+      "error": "[Errno 2] No such file or directory: 'Action Genome Dataset\\\\ActionGenome\\\\dataset\\\\ag\\\\frames\\\\00607.mp4\\\\000107.png'"
+    },
+    {
+      "tag": "00607.mp4/000114.png",
+      "image_path": "Action Genome Dataset\\ActionGenome\\dataset\\ag\\frames\\00607.mp4\\000114.png",
+      "error": "[Errno 2] No such file or directory: 'Action Genome Dataset\\\\ActionGenome\\\\dataset\\\\ag\\\\frames\\\\00607.mp4\\\\000114.png'"
+    },
+    {
+      "tag": "00607.mp4/000129.png",
+      "image_path": "Action Genome Dataset\\ActionGenome\\dataset\\ag\\frames\\00607.mp4\\000129.png",
+      "error": "[Errno 2] No such file or directory: 'Action Genome Dataset\\\\ActionGenome\\\\dataset\\\\ag\\\\frames\\\\00607.mp4\\\\000129.png'"
+    },
+    {
+      "tag": "00607.mp4/000138.png",
+      "image_path": "Action Genome Dataset\\ActionGenome\\dataset\\ag\\frames\\00607.mp4\\000138.png",
+      "error": "[Errno 2] No such file or directory: 'Action Genome Dataset\\\\ActionGenome\\\\dataset\\\\ag\\\\frames\\\\00607.mp4\\\\000138.png'"
+    },
+    {
+      "tag": "00607.mp4/000145.png",
+      "image_path": "Action Genome Dataset\\ActionGenome\\dataset\\ag\\frames\\00607.mp4\\000145.png",
+      "error": "[Errno 2] No such file or directory: 'Action Genome Dataset\\\\ActionGenome\\\\dataset\\\\ag\\\\frames\\\\00607.mp4\\\\000145.png'"
+    }
+  ]
+}

@@ -17,6 +17,7 @@ from typing import Literal, Optional
 import logging
 
 from .intrinsics_presets import DEFAULT_INTRINSICS_PRESET, INTRINSICS_PRESETS
+from orion.semantic.config import SemanticConfig
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,71 @@ class DetectionConfig:
     def grounding_categories(self) -> list[str]:
         """Return normalized category list for GroundingDINO prompts."""
         return [token.strip() for token in self.groundingdino_prompt.split('.') if token.strip()]
+
+
+@dataclass
+class SegmentationConfig:
+    """Instance segmentation refinement configuration (SAM)."""
+
+    enabled: bool = False
+    """Enable SAM-based mask refinement after detection."""
+
+    model_type: Literal["vit_h", "vit_l", "vit_b"] = "vit_h"
+    """SAM backbone variant to load."""
+
+    checkpoint_path: Optional[str] = None
+    """Override path to SAM checkpoint (.pth). Defaults to models/weights/sam_<model>.pth."""
+
+    device: Literal["auto", "cuda", "cpu"] = "auto"
+    """Device for SAM inference (auto selects CUDA when available)."""
+
+    mask_threshold: float = 0.5
+    """Probability threshold applied to SAM logits before binarizing masks."""
+
+    stability_score_threshold: float = 0.85
+    """Minimum stability score accepted from SAM outputs."""
+
+    min_mask_area: int = 400
+    """Minimum number of pixels required for a mask to be retained."""
+
+    batch_size: int = 16
+    """Maximum number of bounding boxes to refine per SAM call."""
+
+    refine_bounding_box: bool = True
+    """Replace detection bboxes with tight masks bounds when True."""
+
+    apply_mask_to_crops: bool = True
+    """Zero out background pixels in crops using the predicted mask."""
+
+    def __post_init__(self):
+        if self.mask_threshold <= 0 or self.mask_threshold >= 1:
+            raise ValueError("mask_threshold must be in (0,1)")
+        if self.stability_score_threshold <= 0 or self.stability_score_threshold > 1:
+            raise ValueError("stability_score_threshold must be in (0,1]")
+        if self.min_mask_area < 1:
+            raise ValueError("min_mask_area must be >= 1")
+        if self.batch_size < 1:
+            raise ValueError("batch_size must be >= 1")
+        if self.device not in {"auto", "cuda", "cpu"}:
+            raise ValueError("device must be 'auto', 'cuda', or 'cpu'")
+
+
+@dataclass
+class ClassCorrectionConfig:
+    """Configuration for CLIP-based class label correction."""
+
+    enabled: bool = True
+    min_similarity: float = 0.30
+    max_description_tokens: int = 6
+    include_detector_label: bool = True
+    prompt_template: str = "a photo of {label}"
+    extra_labels: List[str] = field(default_factory=list)
+
+    def __post_init__(self):
+        if not (0.0 <= self.min_similarity <= 1.0):
+            raise ValueError("min_similarity must be within [0,1]")
+        if self.max_description_tokens < 1:
+            raise ValueError("max_description_tokens must be >= 1")
 
 
 @dataclass
@@ -387,12 +453,15 @@ class PerceptionConfig:
     """Complete perception engine configuration"""
     
     detection: DetectionConfig = field(default_factory=DetectionConfig)
+    segmentation: SegmentationConfig = field(default_factory=SegmentationConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     description: DescriptionConfig = field(default_factory=DescriptionConfig)
     depth: DepthConfig = field(default_factory=DepthConfig)
     hand_tracking: HandTrackingConfig = field(default_factory=HandTrackingConfig)
     occlusion: OcclusionConfig = field(default_factory=OcclusionConfig)
     camera: CameraConfig = field(default_factory=CameraConfig)
+    class_correction: ClassCorrectionConfig = field(default_factory=ClassCorrectionConfig)
+    semantic: SemanticConfig = field(default_factory=SemanticConfig)
     
     # General settings
     target_fps: float = 4.0
@@ -471,6 +540,13 @@ class PerceptionConfig:
     memgraph_port: int = 7687
     """Memgraph port"""
 
+    # Semantic reasoning
+    enable_cis: bool = True
+    """Compute causal influence scores between tracked entities."""
+
+    cis_max_links: int = 50
+    """Limit number of CIS links retained in metrics (avoids bloating results)."""
+
     def __post_init__(self):
         """Validate perception config"""
         if self.target_fps <= 0:
@@ -525,6 +601,9 @@ class PerceptionConfig:
                 f"clustering_cluster_selection_epsilon={self.clustering_cluster_selection_epsilon} < 0; forcing 0.0"
             )
             self.clustering_cluster_selection_epsilon = 0.0
+
+        if self.cis_max_links < 1:
+            raise ValueError("cis_max_links must be >= 1 when CIS is enabled")
 
 
 # Preset configurations

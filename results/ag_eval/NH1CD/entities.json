@@ -1,0 +1,59 @@
+{
+  "total_entities": 6,
+  "entities": [
+    {
+      "id": 0,
+      "class": "person",
+      "confidence": 0.9424741268157959,
+      "observation_count": 64,
+      "first_frame": 0,
+      "last_frame": 462,
+      "description": "The image depicts the back of a person standing in what appears to be an indoor setting. The individual is wearing a light-colored short-sleeved t-shirt and dark pants. The t-shirt has a distinctive design on the back, featuring a curved line that starts at the upper left side and curves down towards the center, creating a somewhat abstract or artistic pattern. The pants are dark, possibly black or dark blue, and appear to be of a standard fit.\n\nThe person's arms are relaxed at their sides, and they are standing in a neutral position with their hands not visible. The background includes a white wall and a green door on the left side of the image. The floor is tiled, and there is a small, indistinct object, possibly a piece of furniture or a small item, next to the person on the right side of the image.\n\nThe lighting in the room appears to be artificial, as there are no strong shadows or highlights, suggesting that the light source is diffused."
+    },
+    {
+      "id": 1,
+      "class": "oven",
+      "confidence": 0.6514458060264587,
+      "observation_count": 57,
+      "first_frame": 77,
+      "last_frame": 455,
+      "description": "The image is a close-up of a partially visible label on a product. The label appears to be a rectangular shape with a gradient background that transitions from a light beige or off-white color on the left side to a darker brown or black on the right side. The text on the label is partially obscured, making it challenging to decipher the complete word or phrase. However, the visible letters seem to spell out \"K-A-L-I-N\" or something similar. The letters are in a bold, sans-serif font, and the color of the text is a dark brown or black. The background of the label is plain and does not feature any additional images or designs. The overall impression is that of a simple, possibly industrial or commercial product label.\nTo summarize:\n- The image shows a close-up of a product label.\n- The background gradient is light beige to dark brown.\n- The visible text on the label is \"K-A-L-I-N\" or something similar.\n- The text is"
+    },
+    {
+      "id": 2,
+      "class": "refrigerator",
+      "confidence": 0.9326024651527405,
+      "observation_count": 23,
+      "first_frame": 0,
+      "last_frame": 462,
+      "description": "The image depicts a section of a room, focusing on a small, wooden shelving unit. The shelving unit appears to be part of a kitchen or a similar area, as suggested by the presence of kitchen appliances and items. Here is a detailed description of the objects in the image:\n\n1. **Shelving Unit**: The shelving unit is made of wood and has a simple, functional design. It has two shelves, each with a few items placed on them.\n\n2. **Top Shelf**: The top shelf of the shelving unit holds a few items. There are two small, black containers, possibly for storing utensils or small kitchen tools. Additionally, there is a metallic object that could be a container or a utensil holder.\n\n3. **Bottom Shelf**: The bottom shelf is partially visible and contains a few items. There appears to be a black electronic device, likely an appliance such as a microwave or an oven, given its size and shape. The device has a control"
+    },
+    {
+      "id": 3,
+      "class": "microwave",
+      "confidence": 0.8669431805610657,
+      "observation_count": 8,
+      "first_frame": 0,
+      "last_frame": 49,
+      "description": "The image depicts a small, compact oven, which is likely designed for use in a compact kitchen space. The oven is built into a dark-colored cabinet or stand, which appears to be made of wood or a wood-like material. The oven itself is made of stainless steel, with a black glass door that is currently closed. The door has a handle on the right side, which is visible in the image. The oven has a control panel on the top right side, which includes a small dial or knob, presumably for temperature control.\n\nOn top of the oven, there is a red object, which appears to be a lid or cover, possibly for a food item or a cooking utensil. The cabinet or stand has a few items on top of it, but they are not clearly visible due to the image quality. The background includes a white wall and a small portion of a white floor, indicating that the oven is situated in a kitchen environment. \n\nThe overall design of the oven suggests a modern"
+    },
+    {
+      "id": 4,
+      "class": "handbag",
+      "confidence": 0.32453447580337524,
+      "observation_count": 2,
+      "first_frame": 413,
+      "last_frame": 420,
+      "description": "The image depicts a close-up view of a partially visible, brownish object with a distinct, somewhat abstract design. The object appears to be a piece of paper or a card, possibly a business card or a label, given its rectangular shape and the way it is laid out. The surface of the object is textured, suggesting it might be made of paper or cardboard. There are some indistinct, dark-colored markings or text on the object, but they are not clearly legible due to the image's low resolution and blurriness. The background is predominantly gray, which contrasts with the brownish color of the object, making the details less discernible. The overall impression is that of a simple, possibly functional item, such as a business card or a label, with a focus on the texture and color contrast rather than the text or design elements.\n### Detailed Description:\n- **Object Type**: Partially visible, likely a piece of paper or a card.\n- **"
+    },
+    {
+      "id": 5,
+      "class": "dining table",
+      "confidence": 0.34342247247695923,
+      "observation_count": 1,
+      "first_frame": 0,
+      "last_frame": 0,
+      "description": "The image depicts a close-up view of a metallic object, possibly a part of a larger structure. The object appears to be made of metal, likely steel or aluminum, given its reflective and smooth surface. The metal is painted in a dark color, possibly black or deep brown, with a lighter, beige or cream-colored strip running vertically down the center. This strip could be a decorative element or a functional part of the object, such as a handle or a connector.\n\nThe background of the image is dark, making it difficult to discern any additional details. The lighting is focused on the metal object, highlighting its reflective properties and the contrasting colors. The object seems to have a smooth, polished surface, indicative of a well-maintained or new item.\n\nGiven the close-up nature of the image, it is challenging to identify the exact nature of the object without additional context. However, it could be part of a larger mechanical system, such as a door handle, a handlebar, a bracket,"
+    }
+  ]
+}

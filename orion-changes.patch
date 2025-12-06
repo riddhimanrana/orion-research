@@ -1,0 +1,1598 @@
+﻿diff --git a/Depth-Anything-3 b/Depth-Anything-3
+index f64bffe..d4f43ab 160000
+--- a/Depth-Anything-3
++++ b/Depth-Anything-3
+@@ -1 +1 @@
+-Subproject commit f64bffe9e3c2aa41d468eb866e59c9a69223a75d
++Subproject commit d4f43abd00ef511391a70797e9d171eedb3a4d1b
+diff --git a/orion/backends/torch_fastvlm.py b/orion/backends/torch_fastvlm.py
+index 905e7ac..4ef0c5c 100644
+--- a/orion/backends/torch_fastvlm.py
++++ b/orion/backends/torch_fastvlm.py
+@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
+ ImageInput = Union[str, Path, Image.Image]
+ 
+ try:
+-    from transformers import AutoModelForCausalLM, AutoProcessor
++    from transformers import AutoModelForCausalLM, AutoTokenizer
+     TRANSFORMERS_AVAILABLE = True
+ except ImportError:
+     TRANSFORMERS_AVAILABLE = False
+@@ -47,15 +47,15 @@ class FastVLMTorchWrapper:
+         if not TRANSFORMERS_AVAILABLE:
+             raise ImportError("transformers is required for the torch backend. Install with: pip install transformers")
+ 
+-        # Use local model path if available, otherwise fallback to HF
++        # Use local model path if available, otherwise fallback to Hugging Face
+         if model_source is None:
+             local_path = Path(__file__).parent.parent.parent / "models" / "fastvlm-0.5b"
+             if local_path.exists():
+                 self.model_source = str(local_path)
+                 logger.info(f"Using local FastVLM model at {self.model_source}")
+             else:
+-                self.model_source = "apple/fastvlm-0.5b"
+-                logger.info("Using HuggingFace FastVLM model")
++                self.model_source = "apple/FastVLM-0.5B"
++                logger.info("Using Hugging Face FastVLM model (apple/FastVLM-0.5B)")
+         else:
+             self.model_source = model_source
+         
+@@ -64,14 +64,25 @@ class FastVLMTorchWrapper:
+ 
+         logger.info(f"Initializing FastVLM with torch backend on device: {self.device}")
+ 
++        # Allow remote download when local weights are absent
++        local_files_only = Path(self.model_source).exists()
++
++        self.tokenizer = AutoTokenizer.from_pretrained(
++            self.model_source,
++            trust_remote_code=True,
++            local_files_only=local_files_only,
++        )
++
+         self.model = AutoModelForCausalLM.from_pretrained(
+             self.model_source,
+             trust_remote_code=True,
+             torch_dtype=torch.float16 if self.device != "cpu" else torch.float32,
+-            local_files_only=True
++            local_files_only=local_files_only,
+         ).to(self.device)
+-        
+-        self.processor = AutoProcessor.from_pretrained(self.model_source, trust_remote_code=True, local_files_only=True)
++
++        # FastVLM exposes its own processor via the vision tower
++        self.image_processor = self.model.get_vision_tower().image_processor
++        self.image_token_index = -200  # FastVLM convention
+         self.model.eval()
+         logger.info(f"Γ£ô FastVLM model loaded on {self.device}")
+ 
+@@ -97,13 +108,43 @@ class FastVLMTorchWrapper:
+         if isinstance(image, (str, Path)):
+             image = Image.open(image).convert("RGB")
+ 
+-        # Format prompt manually since FastVLM doesn't have a chat template
+-        prompt_text = f"USER: <image>\n{prompt}\nASSISTANT:"
+-        
+-        inputs = self.processor(text=prompt_text, images=image, return_tensors="pt").to(self.device)
++        # Build chat template with explicit <image> placeholder
++        messages = [
++            {"role": "user", "content": f"<image>\n{prompt}"}
++        ]
++        rendered = self.tokenizer.apply_chat_template(
++            messages,
++            add_generation_prompt=True,
++            tokenize=False,
++        )
++
++        try:
++            pre_text, post_text = rendered.split("<image>", 1)
++        except ValueError:
++            raise RuntimeError("FastVLM prompt rendering did not include <image> token")
++
++        pre_ids = self.tokenizer(
++            pre_text,
++            return_tensors="pt",
++            add_special_tokens=False,
++        ).input_ids
++        post_ids = self.tokenizer(
++            post_text,
++            return_tensors="pt",
++            add_special_tokens=False,
++        ).input_ids
++
++        img_tok = torch.tensor([[self.image_token_index]], dtype=pre_ids.dtype)
++        input_ids = torch.cat([pre_ids, img_tok, post_ids], dim=1).to(self.device)
++        attention_mask = torch.ones_like(input_ids, device=self.device)
++
++        pixel_values = self.image_processor(images=image, return_tensors="pt")["pixel_values"]
++        pixel_values = pixel_values.to(self.device, dtype=self.model.dtype)
+ 
+         generation_output = self.model.generate(
+-            **inputs,
++            inputs=input_ids,
++            attention_mask=attention_mask,
++            images=pixel_values,
+             max_new_tokens=max_tokens,
+             temperature=temperature,
+             top_p=top_p,
+@@ -111,12 +152,7 @@ class FastVLMTorchWrapper:
+             do_sample=temperature > 0,
+         )
+ 
+-        generated_text = self.processor.batch_decode(generation_output, skip_special_tokens=True)[0]
+-        
+-        # The output includes the prompt, so we need to remove it.
+-        # This is a common pattern with vision-language models.
+-        cleaned_text = generated_text.split("ASSISTANT:")[-1].strip()
+-        return cleaned_text
++        return self.tokenizer.decode(generation_output[0], skip_special_tokens=True)
+ 
+     def batch_generate(
+         self,
+diff --git a/orion/cli/commands/analyze.py b/orion/cli/commands/analyze.py
+index b901689..3394fd1 100644
+--- a/orion/cli/commands/analyze.py
++++ b/orion/cli/commands/analyze.py
+@@ -51,6 +51,41 @@ def handle_analyze(args: argparse.Namespace, settings: OrionSettings) -> None:
+     output_dir = Path(args.output)
+     output_dir.mkdir(parents=True, exist_ok=True)
+ 
++    # Configure optional SAM segmentation (auto-enable when weights exist)
++    default_sam_checkpoint = (
++        Path("models/weights") / f"sam_{config.segmentation.model_type}.pth"
++    )
++    sam_requested = not args.disable_sam and (
++        args.enable_sam
++        or args.sam_checkpoint is not None
++        or args.sam_model_type is not None
++        or args.sam_device is not None
++        or default_sam_checkpoint.exists()
++    )
++
++    if sam_requested:
++        checkpoint_candidate = args.sam_checkpoint
++        if checkpoint_candidate is None and default_sam_checkpoint.exists():
++            checkpoint_candidate = str(default_sam_checkpoint)
++
++        if checkpoint_candidate is None:
++            console.print(
++                "[yellow]ΓÜá SAM requested but no checkpoint found. Provide --sam-checkpoint or place weights under models/weights/. SAM disabled for this run.[/yellow]"
++            )
++            config.segmentation.enabled = False
++        else:
++            config.segmentation.enabled = True
++            config.segmentation.checkpoint_path = checkpoint_candidate
++            if args.sam_model_type:
++                config.segmentation.model_type = args.sam_model_type
++            if args.sam_device:
++                config.segmentation.device = args.sam_device
++
++            ckpt_display = config.segmentation.checkpoint_path or "<default>"
++            console.print(
++                f"[cyan]SAM enabled:[/cyan] model={config.segmentation.model_type} checkpoint={ckpt_display} device={config.segmentation.device}"
++            )
++
+     # Run perception pipeline
+     try:
+         start_time = time.time()
+@@ -101,7 +136,7 @@ def handle_analyze(args: argparse.Namespace, settings: OrionSettings) -> None:
+         console.print("[cyan]Detected Entities:[/cyan]")
+         class_counts = {}
+         for entity in result.entities:
+-            cls = entity.object_class.value if hasattr(entity.object_class, 'value') else str(entity.object_class)
++            cls = entity.display_class()
+             class_counts[cls] = class_counts.get(cls, 0) + 1
+         
+         for cls, count in sorted(class_counts.items()):
+diff --git a/orion/cli/commands/qa.py b/orion/cli/commands/qa.py
+index ae47fff..e5f8e65 100644
+--- a/orion/cli/commands/qa.py
++++ b/orion/cli/commands/qa.py
+@@ -37,5 +37,10 @@ def handle_qa(args: argparse.Namespace, settings: OrionSettings) -> None:
+         neo4j_user=args.neo4j_user or settings.neo4j_user,
+         neo4j_password=args.neo4j_password or settings.get_neo4j_password(),
+         llm_model=getattr(args, "model", None) or settings.qa_model,
++        results_dir=getattr(args, "results_dir", None),
++        context_frames=getattr(args, "context_frames", 200),
++        max_objects=getattr(args, "max_objects", 20),
++        max_relations=getattr(args, "max_relations", 10),
++        extra_entities_path=getattr(args, "entities_json", None),
+     )
+     qa.start_interactive_session()
+diff --git a/orion/cli/main.py b/orion/cli/main.py
+index ab3fd56..7f9b03f 100644
+--- a/orion/cli/main.py
++++ b/orion/cli/main.py
+@@ -4,6 +4,7 @@ from __future__ import annotations
+ 
+ import argparse
+ import sys
++from pathlib import Path
+ 
+ from rich.console import Console
+ 
+@@ -82,6 +83,33 @@ For more help: orion <command> --help
+ 
+     # Display
+     analyze_parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
++
++    # Segmentation / CIS controls
++    analyze_parser.add_argument(
++        "--enable-sam",
++        action="store_true",
++        help="Enable SAM mask refinement during perception",
++    )
++    analyze_parser.add_argument(
++        "--disable-sam",
++        action="store_true",
++        help="Disable SAM even if checkpoints are available",
++    )
++    analyze_parser.add_argument(
++        "--sam-checkpoint",
++        type=str,
++        help="Path to SAM checkpoint (.pth). Defaults to models/weights/sam_<model>.pth",
++    )
++    analyze_parser.add_argument(
++        "--sam-model-type",
++        choices=["vit_h", "vit_l", "vit_b"],
++        help="SAM backbone variant when --enable-sam is set",
++    )
++    analyze_parser.add_argument(
++        "--sam-device",
++        choices=["auto", "cuda", "cpu"],
++        help="Device for SAM inference (default auto)",
++    )
+     
+     # Spatial Memory (Experimental)
+     analyze_parser.add_argument(
+@@ -110,6 +138,35 @@ For more help: orion <command> --help
+     qa_parser.add_argument("--neo4j-user", help="Neo4j username (defaults to config)")
+     qa_parser.add_argument("--neo4j-password", help="Neo4j password (defaults to config)")
+     qa_parser.add_argument("--runtime", help="Select runtime backend (auto or torch; defaults to config)")
++    qa_parser.add_argument(
++        "--results-dir",
++        type=str,
++        help="Path to results/<episode_id> directory for grounding QA responses",
++    )
++    qa_parser.add_argument(
++        "--entities-json",
++        type=str,
++        default=str(Path("data/testing/entities.json")),
++        help="Optional entities.json file with detailed descriptions (defaults to data/testing/entities.json)",
++    )
++    qa_parser.add_argument(
++        "--context-frames",
++        type=int,
++        default=200,
++        help="Number of scene_graph frames to summarize for QA context",
++    )
++    qa_parser.add_argument(
++        "--max-objects",
++        type=int,
++        default=20,
++        help="Maximum number of objects to include in QA context",
++    )
++    qa_parser.add_argument(
++        "--max-relations",
++        type=int,
++        default=10,
++        help="Maximum number of relation summaries to include in QA context",
++    )
+ 
+     # ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+     # INFO COMMANDS
+diff --git a/orion/data/__init__.py b/orion/data/__init__.py
+index b95ad43..5e3c25d 100644
+--- a/orion/data/__init__.py
++++ b/orion/data/__init__.py
+@@ -1 +1,10 @@
+ from .dataset import Dataset, JsonDataset, ActionGenomeDataset
++from .action_genome import ActionGenomeFrameDataset, ActionGenomeSample
++
++__all__ = [
++	"Dataset",
++	"JsonDataset",
++	"ActionGenomeDataset",
++	"ActionGenomeFrameDataset",
++	"ActionGenomeSample",
++]
+diff --git a/orion/managers/model_manager.py b/orion/managers/model_manager.py
+index fe21d7d..4254fdc 100644
+--- a/orion/managers/model_manager.py
++++ b/orion/managers/model_manager.py
+@@ -91,10 +91,14 @@ class ModelManager:
+         self._fastvlm: Optional[Any] = None
+         self._dino: Optional[Any] = None
+         self._groundingdino: Optional[Any] = None
++        self._sam_predictor: Optional[Any] = None
+         
+         # Model configuration
+         self.yolo_model_name = "yolo11m"  # Default to medium (balanced)
+         self.groundingdino_model_id = "IDEA-Research/grounding-dino-base"
++        self.sam_checkpoint_path: Optional[Path] = None
++        self.sam_model_type: str = "vit_h"
++        self.sam_device_override: Optional[str] = None
+         
+         # LLM for contextual understanding
+         self._ollama_client: Optional[Any] = None
+@@ -298,6 +302,56 @@ class ModelManager:
+         except Exception as e:
+             logger.error(f"Failed to load GroundingDINO: {e}")
+             raise
++
++    # ========================================================================
++    # Segment Anything Predictor
++    # ========================================================================
++
++    @property
++    def sam_predictor(self) -> Any:
++        """Get SAM predictor (lazy loaded)."""
++        if self._sam_predictor is None:
++            self._sam_predictor = self._load_sam()
++        return self._sam_predictor
++
++    def _load_sam(self) -> Any:
++        """Load SAM model and return a predictor instance."""
++        try:
++            from segment_anything import SamPredictor, sam_model_registry
++        except ImportError as exc:
++            raise RuntimeError(
++                "segment-anything is required for SAM; install via `pip install segment-anything`"
++            ) from exc
++
++        model_type = (self.sam_model_type or "vit_h").lower()
++        if model_type not in sam_model_registry:
++            raise ValueError(f"Unsupported SAM model_type '{model_type}'")
++
++        checkpoint_path: Path
++        if self.sam_checkpoint_path is not None:
++            checkpoint_path = Path(self.sam_checkpoint_path)
++        else:
++            checkpoint_path = self.models_dir / "weights" / f"sam_{model_type}.pth"
++
++        if not checkpoint_path.exists():
++            raise FileNotFoundError(
++                f"SAM checkpoint not found at {checkpoint_path}. Provide PerceptionConfig.segmentation.checkpoint_path"
++            )
++
++        logger.info("Loading SAM (%s) from %s", model_type, checkpoint_path)
++        sam = sam_model_registry[model_type](checkpoint=str(checkpoint_path))
++
++        device_choice = self.sam_device_override or self.device
++        if device_choice == "auto":
++            device_choice = "cuda" if torch.cuda.is_available() else "cpu"
++        if device_choice == "mps":
++            # SAM kernels are not fully supported on MPS yet; fall back to CPU for stability
++            device_choice = "cpu"
++        sam.to(device_choice)
++
++        predictor = SamPredictor(sam)
++        logger.info("Γ£ô SAM ready on %s", device_choice)
++        return predictor
+     
+     # ========================================================================
+     # FastVLM Describer
+@@ -371,6 +425,9 @@ class ModelManager:
+         if self._groundingdino is not None:
+             del self._groundingdino
+             self._groundingdino = None
++        if self._sam_predictor is not None:
++            del self._sam_predictor
++            self._sam_predictor = None
+         
+         # Clear GPU memory
+         if torch.cuda.is_available():
+@@ -387,7 +444,8 @@ class ModelManager:
+             "clip_loaded": self._clip is not None,
+             "fastvlm_loaded": self._fastvlm is not None,
+             "dino_loaded": self._dino is not None,
+-                "groundingdino_loaded": self._groundingdino is not None,
++            "groundingdino_loaded": self._groundingdino is not None,
++            "sam_loaded": self._sam_predictor is not None,
+         }
+         
+         if torch.cuda.is_available():
+diff --git a/orion/perception/__init__.py b/orion/perception/__init__.py
+index b9c9303..5340f86 100644
+--- a/orion/perception/__init__.py
++++ b/orion/perception/__init__.py
+@@ -42,6 +42,7 @@ from .config import (
+     HandTrackingConfig,
+     OcclusionConfig,
+     CameraConfig,
++    ClassCorrectionConfig,
+     get_fast_config,
+     get_balanced_config,
+     get_accurate_config,
+@@ -76,6 +77,7 @@ __all__ = [
+     "HandTrackingConfig",
+     "OcclusionConfig",
+     "CameraConfig",
++    "ClassCorrectionConfig",
+     # Modules
+     "DepthEstimator",
+     "Perception3DEngine",
+diff --git a/orion/perception/config.py b/orion/perception/config.py
+index 19e0339..959b7a4 100644
+--- a/orion/perception/config.py
++++ b/orion/perception/config.py
+@@ -17,6 +17,7 @@ from typing import Literal, Optional
+ import logging
+ 
+ from .intrinsics_presets import DEFAULT_INTRINSICS_PRESET, INTRINSICS_PRESETS
++from orion.semantic.config import SemanticConfig
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -118,6 +119,71 @@ class DetectionConfig:
+         return [token.strip() for token in self.groundingdino_prompt.split('.') if token.strip()]
+ 
+ 
++@dataclass
++class SegmentationConfig:
++    """Instance segmentation refinement configuration (SAM)."""
++
++    enabled: bool = False
++    """Enable SAM-based mask refinement after detection."""
++
++    model_type: Literal["vit_h", "vit_l", "vit_b"] = "vit_h"
++    """SAM backbone variant to load."""
++
++    checkpoint_path: Optional[str] = None
++    """Override path to SAM checkpoint (.pth). Defaults to models/weights/sam_<model>.pth."""
++
++    device: Literal["auto", "cuda", "cpu"] = "auto"
++    """Device for SAM inference (auto selects CUDA when available)."""
++
++    mask_threshold: float = 0.5
++    """Probability threshold applied to SAM logits before binarizing masks."""
++
++    stability_score_threshold: float = 0.85
++    """Minimum stability score accepted from SAM outputs."""
++
++    min_mask_area: int = 400
++    """Minimum number of pixels required for a mask to be retained."""
++
++    batch_size: int = 16
++    """Maximum number of bounding boxes to refine per SAM call."""
++
++    refine_bounding_box: bool = True
++    """Replace detection bboxes with tight masks bounds when True."""
++
++    apply_mask_to_crops: bool = True
++    """Zero out background pixels in crops using the predicted mask."""
++
++    def __post_init__(self):
++        if self.mask_threshold <= 0 or self.mask_threshold >= 1:
++            raise ValueError("mask_threshold must be in (0,1)")
++        if self.stability_score_threshold <= 0 or self.stability_score_threshold > 1:
++            raise ValueError("stability_score_threshold must be in (0,1]")
++        if self.min_mask_area < 1:
++            raise ValueError("min_mask_area must be >= 1")
++        if self.batch_size < 1:
++            raise ValueError("batch_size must be >= 1")
++        if self.device not in {"auto", "cuda", "cpu"}:
++            raise ValueError("device must be 'auto', 'cuda', or 'cpu'")
++
++
++@dataclass
++class ClassCorrectionConfig:
++    """Configuration for CLIP-based class label correction."""
++
++    enabled: bool = True
++    min_similarity: float = 0.30
++    max_description_tokens: int = 6
++    include_detector_label: bool = True
++    prompt_template: str = "a photo of {label}"
++    extra_labels: List[str] = field(default_factory=list)
++
++    def __post_init__(self):
++        if not (0.0 <= self.min_similarity <= 1.0):
++            raise ValueError("min_similarity must be within [0,1]")
++        if self.max_description_tokens < 1:
++            raise ValueError("max_description_tokens must be >= 1")
++
++
+ @dataclass
+ class EmbeddingConfig:
+     """CLIP embedding configuration"""
+@@ -387,12 +453,15 @@ class PerceptionConfig:
+     """Complete perception engine configuration"""
+     
+     detection: DetectionConfig = field(default_factory=DetectionConfig)
++    segmentation: SegmentationConfig = field(default_factory=SegmentationConfig)
+     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
+     description: DescriptionConfig = field(default_factory=DescriptionConfig)
+     depth: DepthConfig = field(default_factory=DepthConfig)
+     hand_tracking: HandTrackingConfig = field(default_factory=HandTrackingConfig)
+     occlusion: OcclusionConfig = field(default_factory=OcclusionConfig)
+     camera: CameraConfig = field(default_factory=CameraConfig)
++    class_correction: ClassCorrectionConfig = field(default_factory=ClassCorrectionConfig)
++    semantic: SemanticConfig = field(default_factory=SemanticConfig)
+     
+     # General settings
+     target_fps: float = 4.0
+@@ -471,6 +540,13 @@ class PerceptionConfig:
+     memgraph_port: int = 7687
+     """Memgraph port"""
+ 
++    # Semantic reasoning
++    enable_cis: bool = True
++    """Compute causal influence scores between tracked entities."""
++
++    cis_max_links: int = 50
++    """Limit number of CIS links retained in metrics (avoids bloating results)."""
++
+     def __post_init__(self):
+         """Validate perception config"""
+         if self.target_fps <= 0:
+@@ -526,6 +602,9 @@ class PerceptionConfig:
+             )
+             self.clustering_cluster_selection_epsilon = 0.0
+ 
++        if self.cis_max_links < 1:
++            raise ValueError("cis_max_links must be >= 1 when CIS is enabled")
++
+ 
+ # Preset configurations
+ def get_fast_config() -> PerceptionConfig:
+diff --git a/orion/perception/depth.py b/orion/perception/depth.py
+index e2f20e4..bf8f482 100644
+--- a/orion/perception/depth.py
++++ b/orion/perception/depth.py
+@@ -17,18 +17,24 @@ import cv2
+ import sys
+ from pathlib import Path
+ 
+-# Add Depth-Anything-3/src to path if available
++# Add Depth-Anything-3/src to path if available. We keep this simple and
++# robust: if the folder exists and the import works, we always prefer the
++# local clone over any torch hub fallback.
+ WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+ DA3_PATH = WORKSPACE_ROOT / "Depth-Anything-3" / "src"
+-if DA3_PATH.exists() and str(DA3_PATH) not in sys.path:
+-    sys.path.append(str(DA3_PATH))
+ 
+-try:
+-    from depth_anything_3.api import DepthAnything3
+-    DA3_AVAILABLE = True
+-except ImportError as e:
+-    DA3_AVAILABLE = False
+-    print(f"[DepthEstimator] DepthAnything3 module not found. V3 local loading will fail. Error: {e}")
++DA3_AVAILABLE = False
++if DA3_PATH.exists():
++    if str(DA3_PATH) not in sys.path:
++        sys.path.append(str(DA3_PATH))
++    try:
++        from depth_anything_3.api import DepthAnything3
++        DA3_AVAILABLE = True
++        print(f"[DepthEstimator] Found local Depth-Anything-3 at {DA3_PATH}")
++    except ImportError as e:
++        print(f"[DepthEstimator] DepthAnything3 module not found in local clone. V3 local loading will fail. Error: {e}")
++else:
++    print(f"[DepthEstimator] Depth-Anything-3 directory not found at {DA3_PATH}. V3 local loading will be skipped.")
+ 
+ 
+ class DepthEstimator:
+diff --git a/orion/perception/engine.py b/orion/perception/engine.py
+index 29c8257..1b95ca2 100644
+--- a/orion/perception/engine.py
++++ b/orion/perception/engine.py
+@@ -14,12 +14,16 @@ Author: Orion Research Team
+ Date: October 2025
+ """
+ 
++import json
+ import logging
+ import math
+ import time
+ from pathlib import Path
++from typing import Dict, List, Optional, Tuple, Union, TYPE_CHECKING
++
++import cv2
+ import numpy as np
+-from typing import Dict, List, Optional, Tuple
++from PIL import Image
+ 
+ # Initialise logger early so try/except blocks can use it
+ logger = logging.getLogger(__name__)
+@@ -43,6 +47,12 @@ from orion.perception.embedder import VisualEmbedder
+ from orion.perception.tracker import EntityTracker
+ from orion.perception.describer import EntityDescriber
+ from orion.perception.depth import DepthEstimator
++from orion.perception.sam_segmenter import SegmentAnythingMaskGenerator
++from orion.perception.class_corrector import ClassCorrector
++
++if TYPE_CHECKING:  # pragma: no cover - import guard for type checking only
++    from orion.semantic.cis_scorer_3d import CausalInfluenceScorer3D
++    from orion.semantic.types import CausalLink, StateChange
+ 
+ # Phase 2: Tracking imports (legacy tracker removed)
+ TRACKING_AVAILABLE = False
+@@ -118,6 +128,11 @@ class PerceptionEngine:
+         self.slam_engine: Optional[SLAMEngine] = None
+         self.tapnet_tracker: Optional['TapNetTracker'] = None
+         self.depth_estimator: Optional[DepthEstimator] = None
++        self.sam_segmenter: Optional[SegmentAnythingMaskGenerator] = None
++        self.cis_scorer: Optional['CausalInfluenceScorer3D'] = None
++        self.class_corrector: Optional[ClassCorrector] = None
++        self.clip_model = None
++        self._components_ready: bool = False
+         
+         # Memgraph & Spatial Zones
+         self.memgraph: Optional[MemgraphBackend] = None
+@@ -183,7 +198,8 @@ class PerceptionEngine:
+             PerceptionResult with entities and observations
+         """
+         # Ensure output directory exists
+-        Path(output_dir).mkdir(parents=True, exist_ok=True)
++        output_path = Path(output_dir)
++        output_path.mkdir(parents=True, exist_ok=True)
+ 
+         logger.info("\n" + "="*80)
+         logger.info("PERCEPTION ENGINE - PHASE 1")
+@@ -248,6 +264,20 @@ class PerceptionEngine:
+         entities = self.describer.describe_entities(entities)
+         metrics_timings["description_seconds"] = time.time() - t0
+ 
++        class_corrections = 0
++        if getattr(self.config.class_correction, "enabled", False) and self.clip_model is not None:
++            t0 = time.time()
++            class_corrections = self._run_class_correction(entities)
++            metrics_timings["class_correction_seconds"] = time.time() - t0
++        elif getattr(self.config.class_correction, "enabled", False) and self.clip_model is None:
++            logger.warning("Class correction requested but CLIP model unavailable; skipping relabeling")
++
++        cis_links: List['CausalLink'] = []
++        if getattr(self.config, "enable_cis", False):
++            t0 = time.time()
++            cis_links = self._run_cis_reasoning(entities)
++            metrics_timings["cis_seconds"] = time.time() - t0
++
+         if self.config.use_memgraph and self.memgraph is not None:
+             try:
+                 self._sync_memgraph_entities(entities)
+@@ -299,6 +329,18 @@ class PerceptionEngine:
+             "avg_cluster_size": float(np.mean([d.get('cluster_size',1) for d in detections if d.get('cluster_size')])) if any(d.get('cluster_size') for d in detections) else 1.0,
+         })
+ 
++        if class_corrections:
++            result_metrics["class_correction"] = {
++                "corrected_entities": class_corrections,
++                "min_similarity": self.config.class_correction.min_similarity,
++            }
++
++        if cis_links:
++            result_metrics["cis"] = {
++                "link_count": len(cis_links),
++                "links": [link.to_dict() for link in cis_links[: self.config.cis_max_links]],
++            }
++
+         # Inject Re-ID metrics if available
+         if hasattr(self, "_reid_metrics") and isinstance(self._reid_metrics, dict):
+             result_metrics["reid"] = self._reid_metrics
+@@ -324,12 +366,83 @@ class PerceptionEngine:
+         
+         # Export visualization data if requested
+         if save_visualizations:
+-            self._export_visualization_data(result, output_dir)
++            self._export_visualization_data(result, str(output_path))
++
++        if cis_links:
++            try:
++                self._export_cis_links(cis_links, output_path)
++            except Exception as exc:
++                logger.warning(f"Failed to export CIS links: {exc}")
+         
+         return result
++
++    @profile("engine_process_image")
++    def process_image(
++        self,
++        image: Union[str, Path, np.ndarray, Image.Image],
++        *,
++        frame_number: int = 0,
++        timestamp: float = 0.0,
++        source_name: Optional[str] = None,
++    ) -> PerceptionResult:
++        """Run the perception pipeline on a single RGB image.
++
++        This is primarily used for dataset-style evaluations (e.g., Action Genome)
++        where inputs are already individual frames instead of full videos.
++        """
++
++        self._initialize_components()
++
++        frame_bgr, inferred_source = self._coerce_frame(image)
++        source_path = source_name or inferred_source or "<image>"
++
++        frame_height, frame_width = frame_bgr.shape[:2]
++        start_time = time.time()
++
++        detections = self.observer.detect_objects(
++            frame=frame_bgr,
++            frame_number=frame_number,
++            timestamp=timestamp,
++            frame_width=frame_width,
++            frame_height=frame_height,
++        )
++        detections = self.embedder.embed_detections(detections)
++
++        observations = self._detections_to_observations(detections)
++        entities = self.tracker.cluster_observations(observations)
++        metrics: Dict[str, dict] = {}
++        if entities:
++            entities = self._reid_deduplicate_entities(entities)
++            entities = self.describer.describe_entities(entities)
++            if getattr(self.config.class_correction, "enabled", False):
++                if self.clip_model is None:
++                    logger.warning(
++                        "Class correction requested but CLIP unavailable in process_image path"
++                    )
++                else:
++                    corrected = self._run_class_correction(entities)
++                    if corrected:
++                        metrics["class_correction"] = {
++                            "corrected_entities": corrected,
++                            "min_similarity": self.config.class_correction.min_similarity,
++                        }
++
++        elapsed = time.time() - start_time
++        return PerceptionResult(
++            entities=entities,
++            raw_observations=observations,
++            video_path=str(source_path),
++            total_frames=1,
++            fps=self.config.target_fps,
++            duration_seconds=0.0,
++            processing_time_seconds=elapsed,
++            metrics=metrics or None,
++        )
+     
+     def _initialize_components(self):
+         """Initialize all pipeline components with models."""
++        if self._components_ready:
++            return
+         logger.info("Loading models...")
+         
+         # Detector backend (YOLO or GroundingDINO)
+@@ -350,13 +463,21 @@ class PerceptionEngine:
+         # CLIP (only load if requested by backend or text conditioning)
+         clip = None
+         try:
+-            if self.config.embedding.backend == "clip" or self.config.embedding.use_text_conditioning:
++            should_load_clip = (
++                self.config.embedding.backend == "clip"
++                or self.config.embedding.use_text_conditioning
++                or getattr(self.config.class_correction, "enabled", False)
++            )
++            if should_load_clip:
+                 clip = self.model_manager.clip
+                 logger.info("  Γ£ô CLIP loaded (semantic + description)")
++                self.clip_model = clip
+             else:
+                 logger.info("  Γ£ô Skipping CLIP load (backend does not require it)")
++                self.clip_model = None
+         except Exception as e:
+             logger.warning(f"  Γ£ù CLIP load failed: {e}. Proceeding without CLIP.")
++            self.clip_model = None
+ 
+         # DINO (instance-level embeddings) if requested
+         dino = None
+@@ -371,6 +492,33 @@ class PerceptionEngine:
+         # FastVLM
+         vlm = self.model_manager.fastvlm
+         logger.info("  Γ£ô FastVLM loaded")
++
++        segmentation_cfg = getattr(self.config, "segmentation", None)
++        if segmentation_cfg and segmentation_cfg.enabled:
++            try:
++                if segmentation_cfg.checkpoint_path:
++                    self.model_manager.sam_checkpoint_path = Path(segmentation_cfg.checkpoint_path)
++                self.model_manager.sam_model_type = segmentation_cfg.model_type
++                self.model_manager.sam_device_override = (
++                    None if segmentation_cfg.device == "auto" else segmentation_cfg.device
++                )
++                sam_predictor = self.model_manager.sam_predictor
++                self.sam_segmenter = SegmentAnythingMaskGenerator(
++                    predictor=sam_predictor,
++                    mask_threshold=segmentation_cfg.mask_threshold,
++                    stability_score_threshold=segmentation_cfg.stability_score_threshold,
++                    min_mask_area=segmentation_cfg.min_mask_area,
++                    batch_size=segmentation_cfg.batch_size,
++                    refine_bounding_box=segmentation_cfg.refine_bounding_box,
++                )
++                logger.info("  Γ£ô SAM segmentation enabled (%s)", segmentation_cfg.model_type)
++            except Exception as exc:
++                logger.warning(f"  Γ£ù Failed to initialize SAM: {exc}")
++                self.sam_segmenter = None
++                self.model_manager.sam_device_override = None
++        else:
++            self.sam_segmenter = None
++            self.model_manager.sam_device_override = None
+         
+         # Create components
+         self.observer = FrameObserver(
+@@ -383,6 +531,8 @@ class PerceptionEngine:
+             enable_3d=self.config.enable_3d,
+             depth_model=self.config.depth_model,
+             enable_occlusion=self.config.enable_occlusion,
++            segmentation_config=self.config.segmentation,
++            segmentation_refiner=self.sam_segmenter,
+         )
+         
+         self.embedder = VisualEmbedder(
+@@ -399,6 +549,8 @@ class PerceptionEngine:
+             vlm_model=vlm,
+             config=self.config.description,
+         )
++
++        self._components_ready = True
+         
+         if self.config.enable_depth:
+             self._get_depth_estimator()
+@@ -515,7 +667,7 @@ class PerceptionEngine:
+             best_obs = entity.get_best_observation()
+             entity_dict = {
+                 "id": i,
+-                "class": entity.object_class.value if hasattr(entity.object_class, 'value') else str(entity.object_class),
++                "class": entity.display_class(),
+                 "confidence": float(best_obs.confidence),
+                 "observation_count": len(entity.observations),
+                 "first_frame": entity.first_seen_frame,
+@@ -541,6 +693,14 @@ class PerceptionEngine:
+         logger.info(f"  Γ£ô Saved tracking data: {entities_file}")
+         
+         logger.info("Γ£ô Visualization data export complete\n")
++
++    def _export_cis_links(self, links: List['CausalLink'], output_dir: Path) -> None:
++        output_dir.mkdir(parents=True, exist_ok=True)
++        out_file = output_dir / "cis_links.json"
++        payload = [link.to_dict() for link in links]
++        with out_file.open("w") as fp:
++            json.dump(payload, fp, indent=2)
++        logger.info("  Γ£ô Saved %d CIS links ΓåÆ %s", len(links), out_file)
+     
+     def process_frame(
+         self,
+@@ -661,6 +821,115 @@ class PerceptionEngine:
+         """Resolve camera intrinsics using the runtime camera config."""
+         return self.config.camera.resolve_intrinsics(width=width, height=height)
+ 
++    def _run_class_correction(self, entities: List[PerceptionEntity]) -> int:
++        if not entities:
++            return 0
++        corrector = self._ensure_class_corrector()
++        if corrector is None:
++            return 0
++        return corrector.apply(entities)
++
++    def _ensure_class_corrector(self) -> Optional[ClassCorrector]:
++        if self.class_corrector is not None:
++            return self.class_corrector
++        if self.clip_model is None:
++            return None
++        detector_vocab = []
++        if self.observer is not None:
++            detector_vocab = getattr(self.observer, "detector_classes", [])
++        self.class_corrector = ClassCorrector(
++            clip_model=self.clip_model,
++            config=self.config.class_correction,
++            detector_vocabulary=detector_vocab,
++        )
++        return self.class_corrector
++
++    def _run_cis_reasoning(self, entities: List[PerceptionEntity]) -> List['CausalLink']:
++        if not entities:
++            return []
++        state_changes, embeddings = self._build_state_changes_from_entities(entities)
++        if not state_changes:
++            return []
++        scorer = self._ensure_cis_scorer()
++        try:
++            return scorer.compute_causal_links(state_changes, embeddings)
++        except Exception as exc:  # pragma: no cover - defensive
++            logger.warning(f"CIS scorer failed: {exc}")
++            return []
++
++    def _ensure_cis_scorer(self):
++        if self.cis_scorer is not None:
++            return self.cis_scorer
++        from orion.semantic.cis_scorer_3d import CausalInfluenceScorer3D
++
++        semantic_config = getattr(self.config, "semantic", None)
++        self.cis_scorer = CausalInfluenceScorer3D(
++            semantic_config.causal if semantic_config else None
++        )
++        return self.cis_scorer
++
++    def _build_state_changes_from_entities(
++        self,
++        entities: List[PerceptionEntity],
++    ) -> Tuple[List['StateChange'], Dict[str, np.ndarray]]:
++        from orion.semantic.types import StateChange
++
++        state_changes: List[StateChange] = []
++        embeddings: Dict[str, np.ndarray] = {}
++
++        for entity in entities:
++            if not entity.observations:
++                continue
++            observations = sorted(entity.observations, key=lambda obs: obs.timestamp)
++            first = observations[0]
++            last = observations[-1]
++            dt = max(1e-3, float(last.timestamp - first.timestamp))
++
++            centroid_before = (float(first.centroid[0]), float(first.centroid[1]))
++            centroid_after = (float(last.centroid[0]), float(last.centroid[1]))
++            centroid_3d_before = tuple(first.centroid_3d_mm) if first.centroid_3d_mm is not None else None
++            centroid_3d_after = tuple(last.centroid_3d_mm) if last.centroid_3d_mm is not None else None
++
++            if centroid_3d_before and centroid_3d_after:
++                velocity_3d = tuple((centroid_3d_after[i] - centroid_3d_before[i]) / dt for i in range(3))
++            else:
++                velocity_3d = None
++            velocity_2d = (
++                (centroid_after[0] - centroid_before[0]) / dt,
++                (centroid_after[1] - centroid_before[1]) / dt,
++            )
++
++            state_change = StateChange(
++                entity_id=entity.entity_id,
++                class_label=entity.object_class.value if hasattr(entity.object_class, 'value') else str(entity.object_class),
++                frame_before=first.frame_number,
++                frame_after=last.frame_number,
++                timestamp_before=float(first.timestamp),
++                timestamp_after=float(last.timestamp),
++                centroid_before=centroid_before,
++                centroid_after=centroid_after,
++                centroid_3d_before=centroid_3d_before,
++                centroid_3d_after=centroid_3d_after,
++                velocity_3d=velocity_3d,
++                velocity_2d=velocity_2d,
++                bounding_box_before=first.bounding_box.to_list(),
++                bounding_box_after=last.bounding_box.to_list(),
++                change_magnitude=float(abs(last.confidence - first.confidence)),
++                metadata={"observation_count": len(entity.observations)},
++            )
++            state_changes.append(state_change)
++
++            embedding = entity.average_embedding
++            if embedding is None:
++                try:
++                    embedding = entity.compute_average_embedding()
++                except Exception:
++                    embedding = None
++            if embedding is not None:
++                embeddings[entity.entity_id] = embedding
++
++        return state_changes, embeddings
++
+     def _get_depth_estimator(self) -> Optional[DepthEstimator]:
+         """Lazily initialize and return the shared depth estimator."""
+         if not self.config.enable_depth:
+@@ -802,6 +1071,53 @@ class PerceptionEngine:
+         height = max(obs_a.bounding_box.height, obs_b.bounding_box.height)
+         return math.hypot(width, height) * 3.0
+ 
++    @staticmethod
++    def _coerce_frame(
++        image: Union[str, Path, np.ndarray, Image.Image]
++    ) -> Tuple[np.ndarray, Optional[str]]:
++        """Normalize supported image inputs into an OpenCV-compatible frame."""
++
++        inferred_source: Optional[str] = None
++
++        if isinstance(image, (str, Path)):
++            inferred_source = str(image)
++            frame = cv2.imread(inferred_source)
++            if frame is None:
++                raise RuntimeError(f"Failed to read image: {inferred_source}")
++            return frame, inferred_source
++
++        if isinstance(image, Image.Image):
++            inferred_source = getattr(image, "filename", None)
++            rgb = image.convert("RGB")
++            frame = cv2.cvtColor(np.array(rgb), cv2.COLOR_RGB2BGR)
++            return np.ascontiguousarray(frame), inferred_source
++
++        if isinstance(image, np.ndarray):
++            frame = image
++            if frame.ndim == 2:
++                frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
++            elif frame.ndim == 3:
++                if frame.shape[2] == 4:
++                    frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
++                elif frame.shape[2] != 3:
++                    raise ValueError(
++                        "process_image expects HxWx(3 or 4) channel arrays"
++                    )
++            else:
++                raise ValueError(
++                    "process_image expects 2D (grayscale) or 3D image arrays"
++                )
++
++            if frame.dtype != np.uint8:
++                frame = frame.astype(np.uint8)
++
++            return np.ascontiguousarray(frame), inferred_source
++
++        raise TypeError(
++            "Unsupported image type for process_image: "
++            f"{type(image).__name__}"
++        )
++
+     @staticmethod
+     def _entity_str_to_int(entity_id: str) -> int:
+         """Convert entity_id strings like 'entity_12' into stable ints."""
+@@ -1036,6 +1352,12 @@ class PerceptionEngine:
+                 raw_yolo_class=det.get("object_class"),
+                 frame_width=det.get("frame_width"),
+                 frame_height=det.get("frame_height"),
++                depth_mm=det.get("depth_mm"),
++                centroid_3d_mm=det.get("centroid_3d_mm"),
++                visibility_state=det.get("visibility_state"),
++                occlusion_ratio=det.get("occlusion_ratio"),
++                segmentation_mask=det.get("segmentation_mask"),
++                features=det.get("features") or {},
+             )
+             
+             observations.append(obs)
+diff --git a/orion/perception/observer.py b/orion/perception/observer.py
+index b86bfa7..665f383 100644
+--- a/orion/perception/observer.py
++++ b/orion/perception/observer.py
+@@ -15,14 +15,14 @@ Date: October 2025
+ """
+ 
+ import logging
+-from typing import Any, Dict, List, Tuple, Optional, Literal
++from typing import Any, Dict, List, Tuple, Optional, Literal, TYPE_CHECKING
+ 
+ import cv2
+ import numpy as np
+ from tqdm import tqdm
+ 
+ from orion.perception.types import ObjectClass, BoundingBox
+-from orion.perception.config import DetectionConfig
++from orion.perception.config import DetectionConfig, SegmentationConfig
+ from orion.utils.profiling import profile
+ 
+ # Check if 3D perception is available
+@@ -35,6 +35,9 @@ except ImportError:
+ 
+ logger = logging.getLogger(__name__)
+ 
++if TYPE_CHECKING:
++    from orion.perception.sam_segmenter import SegmentAnythingMaskGenerator
++
+ 
+ class FrameObserver:
+     """
+@@ -55,6 +58,8 @@ class FrameObserver:
+         enable_3d: bool = False,
+         depth_model: str = "midas",
+         enable_occlusion: bool = False,
++        segmentation_config: Optional[SegmentationConfig] = None,
++        segmentation_refiner: Optional["SegmentAnythingMaskGenerator"] = None,
+     ):
+         """
+         Initialize observer.
+@@ -76,6 +81,11 @@ class FrameObserver:
+         self.config = config
+         self.target_fps = target_fps
+         self.show_progress = show_progress
++        self.segmentation_config = segmentation_config
++        if segmentation_config and segmentation_config.enabled and segmentation_refiner is not None:
++            self.segmentation_refiner = segmentation_refiner
++        else:
++            self.segmentation_refiner = None
+ 
+         if self.detector_backend == "yolo" and self.yolo is None:
+             raise ValueError("YOLO backend selected but yolo_model was not provided")
+@@ -291,6 +301,12 @@ class FrameObserver:
+             List of detection dictionaries
+         """
+         detection_candidates = self._run_detection_backend(frame)
++
++        if self.segmentation_refiner is not None and detection_candidates:
++            try:
++                detection_candidates = self.segmentation_refiner.refine_detections(frame, detection_candidates)
++            except Exception as exc:
++                logger.warning("SAM refinement failed on frame %d: %s", frame_number, exc)
+         
+         # Run 3D perception if enabled
+         perception_3d = None
+@@ -338,6 +354,14 @@ class FrameObserver:
+             crop, padded_bbox = self._crop_with_padding(frame, bbox)
+             spatial_zone = self._compute_spatial_zone(centroid, frame_width, frame_height)
+ 
++            seg_mask = detection_source.get("sam_mask")
++            if seg_mask is not None:
++                if self.segmentation_config and self.segmentation_config.apply_mask_to_crops:
++                    crop = self._apply_mask_to_crop(crop, seg_mask, bbox, padded_bbox)
++                detection_source_mask = seg_mask
++            else:
++                detection_source_mask = None
++
+             detection = {
+                 "frame_number": frame_number,
+                 "timestamp": timestamp,
+@@ -351,8 +375,17 @@ class FrameObserver:
+                 "frame_width": frame_width,
+                 "frame_height": frame_height,
+                 "spatial_zone": spatial_zone,
++                "segmentation_mask": detection_source_mask,
++                "segmentation_score": detection_source.get("sam_score"),
+             }
+ 
++            detection_features = detection.setdefault("features", {})
++            if detection_source_mask is not None:
++                if detection_source.get("sam_score") is not None:
++                    detection_features["sam_score"] = float(detection_source["sam_score"])
++                if detection_source.get("sam_area") is not None:
++                    detection_features["sam_area"] = int(detection_source["sam_area"])
++
+             if perception_3d is not None and perception_3d.entities:
+                 for entity_3d in perception_3d.entities:
+                     if entity_3d.class_label == class_name:
+@@ -363,6 +396,10 @@ class FrameObserver:
+                             detection["visibility_state"] = entity_3d.visibility_state.value
+                             detection["occlusion_ratio"] = entity_3d.occlusion_ratio
+                             detection["occluded_by"] = entity_3d.occluded_by
++                            if hasattr(entity_3d, "metadata"):
++                                depth_quality = entity_3d.metadata.get("depth_quality")
++                                if depth_quality is not None:
++                                    detection_features["depth_quality"] = depth_quality
+                             break
+ 
+             if perception_3d is not None and perception_3d.hands:
+@@ -411,6 +448,25 @@ class FrameObserver:
+         )
+         
+         return crop, padded_bbox
++
++    def _apply_mask_to_crop(
++        self,
++        crop: np.ndarray,
++        mask_patch: np.ndarray,
++        bbox: BoundingBox,
++        padded_bbox: BoundingBox,
++    ) -> np.ndarray:
++        """Apply a binary mask patch to the padded crop."""
++        if crop.size == 0:
++            return crop
++        mask_canvas = np.zeros(crop.shape[:2], dtype=np.uint8)
++        y_offset = int(max(0, round(bbox.y1 - padded_bbox.y1)))
++        x_offset = int(max(0, round(bbox.x1 - padded_bbox.x1)))
++        patch_h, patch_w = mask_patch.shape[:2]
++        y_end = min(mask_canvas.shape[0], y_offset + patch_h)
++        x_end = min(mask_canvas.shape[1], x_offset + patch_w)
++        mask_canvas[y_offset:y_end, x_offset:x_end] = mask_patch[: y_end - y_offset, : x_end - x_offset]
++        return cv2.bitwise_and(crop, crop, mask=mask_canvas)
+     
+     def _compute_spatial_zone(
+         self,
+diff --git a/orion/perception/types.py b/orion/perception/types.py
+index c744da7..fd16c57 100644
+--- a/orion/perception/types.py
++++ b/orion/perception/types.py
+@@ -210,6 +210,12 @@ class Observation:
+     raw_yolo_class: Optional[str] = None  # For debugging
+     frame_width: Optional[float] = None
+     frame_height: Optional[float] = None
++    depth_mm: Optional[float] = None
++    centroid_3d_mm: Optional[Tuple[float, float, float]] = None
++    visibility_state: Optional[str] = None
++    occlusion_ratio: Optional[float] = None
++    segmentation_mask: Optional[np.ndarray] = None
++    features: Dict[str, Any] = field(default_factory=dict)
+     
+     # Placeholder for Phase 2
+     entity_id: Optional[str] = None
+@@ -237,6 +243,9 @@ class Observation:
+         if self.frame_height is not None and self.frame_height <= 0:
+             raise ValueError("frame_height must be positive when provided")
+ 
++        if self.segmentation_mask is not None and not isinstance(self.segmentation_mask, np.ndarray):
++            raise TypeError("segmentation_mask must be a numpy array when provided")
++
+ 
+ @dataclass
+ class PerceptionEntity:
+@@ -319,11 +328,19 @@ class PerceptionEntity:
+         """Get observations in chronological order"""
+         return sorted(self.observations, key=lambda obs: obs.timestamp)
+     
++    def display_class(self) -> str:
++        """Return the best available human-readable class label."""
++        if self.corrected_class:
++            return self.corrected_class
++        if hasattr(self.object_class, 'value'):
++            return self.object_class.value
++        return str(self.object_class)
++
+     def to_dict(self) -> dict:
+         """Convert to dictionary for serialization"""
+         return {
+             "entity_id": self.entity_id,
+-            "object_class": self.object_class.value,
++            "object_class": self.display_class(),
+             "appearance_count": self.appearance_count,
+             "first_seen_frame": self.first_seen_frame,
+             "last_seen_frame": self.last_seen_frame,
+diff --git a/pyproject.toml b/pyproject.toml
+index 911e62f..f994e68 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -23,7 +23,9 @@ dependencies = [
+     "transformers>=4.47.1", "tokenizers==0.21.0", "sentencepiece==0.1.99",
+     "numpy==1.26.4", "scikit-learn==1.2.2", "opencv-python>=4.8.0",
+     "timm==1.0.15", "einops==0.6.1", "ultralytics==8.3.217",
+-    "hdbscan", "mediapipe>=0.10.14", "pillow>=10.0.0", "mlx-vlm @ file:./mlx-vlm"
++    "hdbscan", "mediapipe>=0.10.14", "pillow>=10.0.0",
++    "segment-anything>=1.0.1",
++    "mlx-vlm @ file:./mlx-vlm"
+ ]
+ 
+ [project.optional-dependencies]
+diff --git a/requirements-accurate.txt b/requirements-accurate.txt
+index 0bec04d..0ff5410 100644
+--- a/requirements-accurate.txt
++++ b/requirements-accurate.txt
+@@ -8,6 +8,8 @@ torch>=2.0.0
+ torchvision>=0.15.0
+ 
+ # Detection & Segmentation
++# Meta Segment Anything (mask refinement)
++segment-anything>=1.0.1
+ # Detectron2 - Instance segmentation (Mask R-CNN)
+ # Install from source for Apple Silicon:
+ # python -m pip install 'git+https://github.com/facebookresearch/detectron2.git'
+diff --git a/results/full_pipeline/camera_intrinsics.json b/results/full_pipeline/camera_intrinsics.json
+index 0be8e0e..c8649d9 100644
+--- a/results/full_pipeline/camera_intrinsics.json
++++ b/results/full_pipeline/camera_intrinsics.json
+@@ -1,9 +1,10 @@
+ {
+-  "fx": 525.0,
+-  "fy": 525.0,
+-  "cx": 319.5,
+-  "cy": 239.5,
+-  "width": 640,
+-  "height": 480,
+-  "note": "Default intrinsics - adjust based on actual camera calibration"
++  "fx": 1215.0,
++  "fy": 1110.0,
++  "cx": 960.0,
++  "cy": 540.0,
++  "width": 1920,
++  "height": 1080,
++  "preset": "demo_room_iphone15pro_main",
++  "note": "Values derived from selected intrinsics preset or overrides"
+ }
+\ No newline at end of file
+diff --git a/results/full_pipeline/entities.json b/results/full_pipeline/entities.json
+index 6ebd4d5..aa80642 100644
+--- a/results/full_pipeline/entities.json
++++ b/results/full_pipeline/entities.json
+@@ -1,100 +1,82 @@
+ {
+-  "total_entities": 10,
++  "total_entities": 8,
+   "entities": [
+     {
+       "id": 0,
+-      "class": "book",
+-      "confidence": 0.43271729350090027,
+-      "observation_count": 18,
+-      "first_frame": 236,
+-      "last_frame": 885,
+-      "description": "An object detected by YOLO as book"
++      "class": "tv",
++      "confidence": 0.8524708151817322,
++      "observation_count": 3,
++      "first_frame": 476,
++      "last_frame": 1071,
++      "description": "The image depicts a computer monitor displaying a command-line interface. The monitor is positioned on a desk or table, and the background is a plain, light-colored wall. The screen shows a command-line interface with a dark blue background and white text. The text is organized into several lines, each containing a series of words separated by spaces. The lines are aligned in a vertical column, and each line appears to contain a single word or phrase, with some words appearing more prominently than others.\n\nThe text on the screen is quite dense, with a significant amount of whitespace between words. The font used is a standard, readable font, likely Arial or a similar typeface. The text is formatted in a way that suggests it is part of a command-line program or a terminal application, possibly used for system administration or programming tasks.\n\nThe monitor itself is a standard flat-screen model, with a black frame and a stand that supports the screen. The stand is visible at the bottom of the monitor, and the base of the monitor is also visible, indicating that it is a desktop computer setup. The desk or table on which the monitor is placed appears to be a light-colored surface, possibly made of wood or a wood-like material.\n\nIn the foreground, there are some cables and wires visible, which are likely connected to the computer or other peripherals. These cables are black and appear to be neatly organized, suggesting a tidy and well-maintained workspace.\n\nOverall, the image captures a typical computer workstation setup, with"
+     },
+     {
+       "id": 1,
+-      "class": "keyboard",
+-      "confidence": 0.7842161655426025,
+-      "observation_count": 11,
+-      "first_frame": 413,
+-      "last_frame": 1062,
+-      "description": "An object detected by YOLO as keyboard"
++      "class": "laptop",
++      "confidence": 0.2624620199203491,
++      "observation_count": 3,
++      "first_frame": 476,
++      "last_frame": 1071,
++      "description": "The image depicts a close-up view of a rectangular object, which appears to be a piece of paper or a card. The object is primarily gray in color and has a slightly glossy surface, indicating it might be made of paper or a similar material. The edges of the object are slightly curved, suggesting it might be folded or curved at some point. \n\nThe object is positioned on a flat surface, which is white in color. The background is blurred and indistinct, making it difficult to discern any specific details about the surroundings. There is a hint of a dark-colored object in the upper right corner of the image, but it is not clearly identifiable due to the blurriness.\n\nThe lighting in the image is even, with no harsh shadows or highlights, which suggests that the light source is diffused or the camera settings were adjusted to minimize shadows. The overall composition of the image is simple and focuses on the object itself, with no additional elements or distractions present.\n\nGiven the close-up nature of the image, it is not possible to determine the exact nature or purpose of the object. However, it could be a piece of paper, a card, a label, or any other type of flat, rectangular item. The lack of additional context or objects makes it challenging to provide a more detailed description or answer any specific questions about the image.\n---\n\n**Analysis:**\n\n1. **Object Identification:**\n   - The object is a rectangular piece of paper or card.\n   - It"
+     },
+     {
+       "id": 2,
+-      "class": "tv",
+-      "confidence": 0.910397469997406,
+-      "observation_count": 8,
+-      "first_frame": 413,
+-      "last_frame": 1121,
+-      "description": "An object detected by YOLO as tv"
++      "class": "bed",
++      "confidence": 0.8913332223892212,
++      "observation_count": 2,
++      "first_frame": 357,
++      "last_frame": 833,
++      "description": "The image depicts a close-up view of a red fabric, possibly a blanket or a piece of clothing, lying on a light-colored carpet. The fabric appears to be slightly wrinkled and has a textured surface with some visible creases and folds. The red color of the fabric is vibrant and stands out against the neutral background of the carpet. The lighting in the image is somewhat dim, which makes it difficult to discern finer details, but the texture and color of the fabric are clearly visible.\n\nThe carpet is a light beige or cream color, providing a soft contrast to the red fabric. The edges of the image show a slight blur, indicating that the camera might have been in motion or the focus was not set correctly. The overall composition of the image is simple, with the red fabric occupying a significant portion of the frame, and the carpet providing a subtle background.\n\nThere are no other objects or elements visible in the image, making the focus solely on the red fabric and the carpet. The image does not provide any additional context or objects to describe beyond what has been described.\n---\n\nIn summary, the image shows a close-up view of a red fabric, likely a blanket or piece of clothing, lying on a light-colored carpet. The fabric is slightly wrinkled and has a textured surface with visible creases and folds. The lighting is dim, making it difficult to discern finer details, but the red color is vibrant and contrasts with the neutral background of the carpet. The image is simple,"
+     },
+     {
+       "id": 3,
+       "class": "mouse",
+-      "confidence": 0.9357978701591492,
+-      "observation_count": 8,
+-      "first_frame": 413,
+-      "last_frame": 1121,
+-      "description": "An object detected by YOLO as mouse"
++      "confidence": 0.9259873032569885,
++      "observation_count": 2,
++      "first_frame": 476,
++      "last_frame": 1071,
++      "description": "The image appears to be a microscopic view of a biological specimen, likely a cell or a microorganism. The central object in the image is oval-shaped and has a dark, almost black coloration. The object has a somewhat smooth surface with a few lighter, irregular patches. \n\nThe most prominent feature of the object is a bright, light blue area located in the center, which might represent a nucleus or a significant organelle within the cell. This bright blue area is surrounded by a darker, almost black region, which could be the cell membrane or another boundary layer.\n\nThe background of the image is a uniform gray, which is typical for electron microscopy images where the specimen is viewed under a microscope. The background is relatively plain, ensuring that the focus remains on the central object.\n\nGiven the context, this image is likely taken using an electron microscope, which is capable of magnifying very small objects at a nanometer scale. The bright blue area could be a nucleus, stained with a dye like hematoxylin, which is commonly used to highlight certain structures within cells.\n\nIn summary, the image shows a dark, oval-shaped object with a bright blue central area, likely representing a nucleus or another significant organelle within a cell, viewed under an electron microscope. The background is a uniform gray, emphasizing the specimen's details.\n---\n\nThis detailed description should provide a comprehensive understanding of the image for any text-based model to answer related questions.\n---\n\n**Question: What"
+     },
+     {
+       "id": 4,
+       "class": "bottle",
+-      "confidence": 0.7119916677474976,
+-      "observation_count": 6,
+-      "first_frame": 472,
+-      "last_frame": 649,
+-      "description": "An object detected by YOLO as bottle"
++      "confidence": 0.8205341696739197,
++      "observation_count": 2,
++      "first_frame": 476,
++      "last_frame": 476,
++      "description": "The image provided is quite blurry, making it difficult to discern specific details. However, it appears to be a close-up view of a fabric or textile. The fabric seems to have a light blue color with some darker blue or blackish tones. The texture of the fabric looks somewhat smooth, and there are some visible lines or patterns that might indicate stitching or weave. The edges of the fabric are not very clear, but there seems to be a slight variation in the color intensity, with some areas appearing darker.\n\nGiven the blurriness, it is challenging to identify the exact nature of the fabric, such as whether it is a piece of clothing, a textile product, or another type of material. The background is also indistinct, making it hard to determine the setting or context of the image.\n\nTo summarize, the image is a close-up of a fabric with a light blue color and darker blue or blackish tones, showing some texture and possibly stitching or weaving. The blurriness makes it difficult to identify the exact nature of the fabric.\n---\n\nThe image is a close-up of a fabric with a light blue color and darker blue or blackish tones. The texture appears smooth, and there are visible lines or patterns that might indicate stitching or weaving. The edges of the fabric are not very clear, but there seems to be a slight variation in the color intensity, with some areas appearing darker. The background is indistinct, making it hard to determine the setting or context"
+     },
+     {
+       "id": 5,
+-      "class": "chair",
+-      "confidence": 0.9443166255950928,
+-      "observation_count": 10,
+-      "first_frame": 354,
+-      "last_frame": 1062,
+-      "description": "An object detected by YOLO as chair"
++      "class": "teddy bear",
++      "confidence": 0.8988266587257385,
++      "observation_count": 1,
++      "first_frame": 357,
++      "last_frame": 357,
++      "description": "The image depicts a panda bear sitting on its hind legs. The panda is positioned in a relaxed posture, with its front paws resting on its knees. The panda's head is turned slightly to the side, and its eyes are closed, giving the impression that it is either sleeping or resting. The panda's fur is predominantly black, with white patches on its face, ears, and limbs. The background consists of a plain, light-colored wall, which contrasts with the dark fur of the panda, making it stand out prominently in the image. The ground beneath the panda appears to be a mix of green and beige, possibly indicating grass or a natural environment. The overall scene is simple and focuses on the panda, which is the central subject of the image.\n### Analysis and Description\n\n1. **Panda Bear**: The primary subject of the image is a panda bear. The panda is sitting on its hind legs, which is a common resting position for these animals. The bear's fur is primarily black, with distinct white patches on its face, ears, and limbs. The white coloration is particularly noticeable around its eyes, ears, and the tips of its paws, which are characteristic of the panda species.\n\n2. **Background**: The background is a plain, light-colored wall. This simplicity helps to draw attention to the panda bear, as there are no distractions from the background. The wall's color contrasts with the panda's fur, making the animal stand out even"
+     },
+     {
+       "id": 6,
+-      "class": "bed",
+-      "confidence": 0.9293882250785828,
+-      "observation_count": 3,
+-      "first_frame": 295,
+-      "last_frame": 1003,
+-      "description": "An object detected by YOLO as bed"
++      "class": "clock",
++      "confidence": 0.39961865544319153,
++      "observation_count": 1,
++      "first_frame": 357,
++      "last_frame": 357,
++      "description": "The image provided is extremely blurry, making it difficult to discern specific details. However, it appears to depict a green object, possibly a piece of fruit or vegetable, with a light green hue. The object is somewhat oval or round in shape and seems to have a smooth surface. The background is predominantly dark, which contrasts with the bright green object, making it stand out. The overall impression is that of a natural, organic item, but the exact nature of the object remains indeterminate due to the lack of clarity.\nGiven the blurriness of the image, it is challenging to provide a detailed description of the object's characteristics. However, the green object's shape and color suggest it could be a type of fruit or vegetable, such as a green apple, a green apple, or a green vegetable like a cucumber or a green pepper. The lack of clarity makes it difficult to identify the exact nature of the object.\nIf the image were clearer, one might attempt to identify specific features such as the texture, color variations, and any distinctive markings or shapes that could help in determining the object's identity. For example, the smoothness of the object might indicate a fruit, while the shape could suggest it is a vegetable. The dark background might also hint at the object being placed in a natural setting, such as a garden or a farm.\nIn summary, the image is very blurry, making it difficult to identify specific details. However, the green object, which"
+     },
+     {
+       "id": 7,
+-      "class": "teddy bear",
+-      "confidence": 0.6024196147918701,
+-      "observation_count": 2,
+-      "first_frame": 354,
+-      "last_frame": 767,
+-      "description": "An object detected by YOLO as teddy bear"
+-    },
+-    {
+-      "id": 8,
+       "class": "backpack",
+-      "confidence": 0.390638530254364,
+-      "observation_count": 2,
+-      "first_frame": 472,
+-      "last_frame": 649,
+-      "description": "An object detected by YOLO as backpack"
+-    },
+-    {
+-      "id": 9,
+-      "class": "cat",
+-      "confidence": 0.49319154024124146,
+-      "observation_count": 2,
+-      "first_frame": 531,
+-      "last_frame": 531,
+-      "description": "An object detected by YOLO as cat"
++      "confidence": 0.2818812131881714,
++      "observation_count": 1,
++      "first_frame": 476,
++      "last_frame": 476,
++      "description": "The image depicts a black, long-sleeved garment, likely a sweatshirt or a jacket, lying on a tiled floor. The garment appears to be made of a thick, possibly woolen material, given its texture and thickness. The sleeves are slightly bent, and the garment is laid out flat, with the front side facing upwards. The front of the garment features a white, striped pattern, which is characteristic of Adidas apparel. The stripes are horizontal and are evenly spaced, running from the neckline to the hem of the garment. The hem of the garment is slightly curved, suggesting it is designed to fit snugly around the body. \n\nThe background consists of a tiled floor with a pattern of alternating light and dark tiles. The tiles are rectangular and appear to be made of a material like ceramic or porcelain. There is a white object, possibly a container or a piece of furniture, partially visible in the top left corner of the image. The object has a smooth, glossy surface and is rectangular in shape.\n\nThe overall image is somewhat grainy and out of focus, making it difficult to discern finer details. The lighting in the image is even, with no harsh shadows, indicating that the photo was taken indoors under artificial lighting.\n\nGiven the context and the visible details, this image likely depicts a piece of clothing, specifically an Adidas sweatshirt or jacket, laid out on a tiled floor. The white stripes on the garment are a distinctive feature, and the overall appearance suggests a casual, everyday wear"
+     }
+   ],
+   "tracking_stats": {
+-    "total_tracks": 11,
+-    "confirmed_tracks": 11,
++    "total_tracks": 10,
++    "confirmed_tracks": 9,
+     "id_switches": 0
+   }
+ }
+\ No newline at end of file
+diff --git a/scripts/test_full_pipeline.py b/scripts/test_full_pipeline.py
+index 5e71b57..9ea30c0 100644
+--- a/scripts/test_full_pipeline.py
++++ b/scripts/test_full_pipeline.py
+@@ -5,12 +5,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
+ 
+ from orion.perception.config import get_accurate_config
+ from orion.perception.engine import PerceptionEngine
+-from orion.semantic.engine import SemanticEngine
+-from orion.semantic.config import SemanticConfig
+-from orion.managers.model_manager import ModelManager
+ import json
+ from collections import Counter
+-import numpy as np
+ 
+ print("="*80)
+ print("FULL PIPELINE TEST: Perception + Semantic + CLIP Class Correction")
+@@ -48,116 +44,38 @@ print(f"  Entities: {perception_result.unique_entities}")
+ # STEP 2: CLIP Class Correction
+ # ====================================================================
+ print("\n" + "="*80)
+-print("STEP 2: CLIP-based Class Correction")
++print("STEP 2: Class Correction Summary")
+ print("-" * 80)
+ 
+-# Get CLIP model
+-from orion.managers.model_manager import ModelManager
+-model_manager = ModelManager.get_instance()
+-clip_model = model_manager.clip
+-
+-# Define common misclassifications to check
+-class_corrections = {
+-    "tv": ["monitor", "television", "TV screen", "computer display"],
+-    "cat": ["dog", "teddy bear", "stuffed animal", "toy animal"],  
+-    "couch": ["sofa", "chair", "seat"],
+-    "dining table": ["desk", "table", "workstation"],
+-}
+-
+-corrected_count = 0
+-for entity in perception_result.entities:
+-    original_class = entity.object_class.value if hasattr(entity.object_class, 'value') else str(entity.object_class)
+-    
+-    # Check if this class needs verification
+-    if original_class in class_corrections:
+-        try:
+-            # Get candidate labels
+-            candidate_labels = [original_class] + class_corrections[original_class]
+-            
+-            # Get CLIP text embeddings
+-            text_embeddings = []
+-            for label in candidate_labels:
+-                text_emb = clip_model.encode_text(label, normalize=True)
+-                text_embeddings.append(text_emb)
+-            
+-            text_embeddings = np.array(text_embeddings)
+-            
+-            # Compare visual embedding with text embeddings
+-            visual_emb = entity.average_embedding
+-            if visual_emb is not None:
+-                # Ensure normalized
+-                visual_emb = visual_emb / (np.linalg.norm(visual_emb) + 1e-8)
+-                
+-                # Compute cosine similarities
+-                similarities = text_embeddings @ visual_emb
+-                best_idx = similarities.argmax()
+-                best_label = candidate_labels[best_idx]
+-                confidence = float(similarities[best_idx])
+-                
+-                if best_label != original_class and confidence > 0.28:
+-                    print(f"  Γ£ô Correction: '{original_class}' ΓåÆ '{best_label}' (confidence: {confidence:.3f})")
+-                    entity.corrected_class = best_label
+-                    entity.correction_confidence = confidence
+-                    corrected_count += 1
+-                else:
+-                    print(f"  Γ£ô Verified: '{original_class}' (confidence: {similarities[0]:.3f})")
+-            else:
+-                print(f"  ΓÜá No embedding for {original_class}")
+-                
+-        except Exception as e:
+-            print(f"  ΓÜá Error checking '{original_class}': {e}")
+-
+-print(f"\nΓ£ô Class correction complete: {corrected_count} corrections made")
++class_metrics = (perception_result.metrics or {}).get("class_correction") if perception_result.metrics else None
++if class_metrics:
++    print(
++        f"Γ£ô Class correction updated {class_metrics['corrected_entities']} entities "
++        f"(min similarity {class_metrics['min_similarity']:.2f})"
++    )
++else:
++    print("ΓÜá Class correction disabled or no updates recorded")
+ 
+ # ====================================================================
+-# STEP 3: Semantic Analysis
++# STEP 3: CIS Summary (Perception-integrated)
+ # ====================================================================
+ print("\n" + "="*80)
+-print("STEP 3: Semantic Analysis (Zones, State Changes, Events)")
++print("STEP 3: Causal Influence Summary")
+ print("-" * 80)
+ 
+-try:
+-    semantic_config = SemanticConfig(
+-        verbose=True,
+-        enable_graph_ingestion=False,  # Skip graph for now
+-    )
+-    semantic_engine = SemanticEngine(semantic_config)
+-    
+-    # Run semantic analysis
+-    semantic_result = semantic_engine.process(perception_result)
+-    
+-    print(f"\nΓ£ô Semantic analysis complete:")
+-    print(f"  Entities tracked: {len(semantic_result.entities)}")
+-    print(f"  State changes detected: {len(semantic_result.state_changes)}")
+-    print(f"  Events composed: {len(semantic_result.events)}")
+-    
+-    # Display state changes
+-    if semantic_result.state_changes:
+-        print("\nState Changes (first 15):")
+-        for sc in semantic_result.state_changes[:15]:
+-            entity_class = sc.entity_id.split('_')[0] if '_' in sc.entity_id else 'unknown'
+-            print(f"  - Frame {sc.frame_number}: [{entity_class}] {sc.change_type}")
+-    else:
+-        print("\nΓÜá No state changes detected")
+-    
+-    # Display events
+-    if semantic_result.events:
+-        print("\nEvents Detected (first 10):")
+-        for i, event in enumerate(semantic_result.events[:10]):
+-            participants = ', '.join(event.entity_ids[:3])  # First 3 entities
+-            if len(event.entity_ids) > 3:
+-                participants += f" (+{len(event.entity_ids)-3} more)"
+-            print(f"  {i+1}. {event.event_type}: {participants}")
+-            if hasattr(event, 'description') and event.description:
+-                print(f"      \"{event.description[:80]}...\"")
+-    else:
+-        print("\nΓÜá No events detected")
+-            
+-except Exception as e:
+-    print(f"ΓÜá Semantic analysis error: {e}")
+-    import traceback
+-    traceback.print_exc()
+-    semantic_result = None
++cis_metrics = (perception_result.metrics or {}).get("cis") if perception_result.metrics else None
++if cis_metrics and cis_metrics.get("links"):
++    print(f"Γ£ô CIS enabled: {cis_metrics['link_count']} links scored")
++    preview = cis_metrics["links"][:5]
++    for idx, link in enumerate(preview, start=1):
++        print(
++            f"  {idx}. {link['agent_id']} ΓåÆ {link['patient_id']} (score={link['influence_score']:.2f})"
++        )
++        print(f"     justification: {link['justification']}")
++    if cis_metrics["link_count"] > len(preview):
++        print(f"  ΓÇª {cis_metrics['link_count'] - len(preview)} more links in metrics")
++else:
++    print("ΓÜá No CIS links were generated (check enable_cis flag or entity count)")
+ 
+ # ====================================================================
+ # STEP 4: Summary & Export
+@@ -176,10 +94,7 @@ print("="*80)
+ print("\nEntity Class Distribution (after CLIP correction):")
+ class_counts = Counter()
+ for entity in perception_result.entities:
+-    final_class = getattr(entity, 'corrected_class', None) or (
+-        entity.object_class.value if hasattr(entity.object_class, 'value') else str(entity.object_class)
+-    )
+-    class_counts[final_class] += 1
++    class_counts[entity.display_class()] += 1
+ 
+ for cls in sorted(class_counts.keys()):
+     print(f"  {cls}: {class_counts[cls]}")

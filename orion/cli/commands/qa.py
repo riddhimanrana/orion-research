@@ -37,5 +37,10 @@ def handle_qa(args: argparse.Namespace, settings: OrionSettings) -> None:
         neo4j_user=args.neo4j_user or settings.neo4j_user,
         neo4j_password=args.neo4j_password or settings.get_neo4j_password(),
         llm_model=getattr(args, "model", None) or settings.qa_model,
+        results_dir=getattr(args, "results_dir", None),
+        context_frames=getattr(args, "context_frames", 200),
+        max_objects=getattr(args, "max_objects", 20),
+        max_relations=getattr(args, "max_relations", 10),
+        extra_entities_path=getattr(args, "entities_json", None),
     )
     qa.start_interactive_session()
