@@ -1,0 +1,612 @@
+{
+  "video_path": "C:\\Users\\aryav\\orion-research\\data\\examples\\video.mp4",
+  "results_dir": "C:\\Users\\aryav\\orion-research\\results\\test_video_overlay_sam_fast",
+  "total_frames": 1972,
+  "fps": 1.0,
+  "duration": 65.79906666666666,
+  "entities": [
+    {
+      "entity_id": "merged_entity_7",
+      "object_class": "book",
+      "appearance_count": 27,
+      "first_seen_frame": 580,
+      "last_seen_frame": 1798,
+      "description": "The image depicts a spiral-bound notebook, oriented with the binding on the left side. The notebook is open, revealing both the front and back covers. The front cover is light blue, while the back cover is white. The text on the front cover is printed in white and reads \"SCHOOL TO SCHOOL COOKBOOK\" in a large, bold font. Below this title, there are several lines of smaller text, which are not legible in the image. The notebook appears to be a standard-sized notebook, likely used for school-related activities such as homework, notes, or school projects. The binding is visible and shows the spiral mechanism, which is typical for notebooks of this type. The image is a straightforward, clear representation of the notebook, with no additional objects or background elements.\n**Question: What is the purpose of the notebook in the image?**\n\n**Answer:**\nThe purpose of the notebook in the image is likely for school-related activities. Given the title \"SCHOOL",
+      "description_frame": 1102,
+      "observations": [
+        {
+          "frame": 667,
+          "timestamp": 22.255566666666667,
+          "bbox": [
+            417.0,
+            796.0,
+            762.0,
+            1192.0
+          ],
+          "confidence": 0.9201762080192566
+        },
+        {
+          "frame": 696,
+          "timestamp": 23.223200000000002,
+          "bbox": [
+            318.0,
+            980.0,
+            908.0,
+            1749.0
+          ],
+          "confidence": 0.9575802683830261
+        },
+        {
+          "frame": 725,
+          "timestamp": 24.190833333333334,
+          "bbox": [
+            562.0,
+            986.0,
+            1079.0,
+            1837.0
+          ],
+          "confidence": 0.9386303424835205
+        },
+        {
+          "frame": 754,
+          "timestamp": 25.158466666666666,
+          "bbox": [
+            225.0,
+            649.0,
+            999.0,
+            1583.0
+          ],
+          "confidence": 0.6500248312950134
+        },
+        {
+          "frame": 783,
+          "timestamp": 26.1261,
+          "bbox": [
+            60.0,
+            735.0,
+            860.0,
+            1787.0
+          ],
+          "confidence": 0.7837185859680176
+        },
+        {
+          "frame": 812,
+          "timestamp": 27.093733333333333,
+          "bbox": [
+            136.0,
+            553.0,
+            1015.0,
+            1661.0
+          ],
+          "confidence": 0.6932064890861511
+        },
+        {
+          "frame": 841,
+          "timestamp": 28.061366666666668,
+          "bbox": [
+            70.0,
+            653.0,
+            953.0,
+            1790.0
+          ],
+          "confidence": 0.8215488195419312
+        },
+        {
+          "frame": 870,
+          "timestamp": 29.029,
+          "bbox": [
+            12.0,
+            647.0,
+            953.0,
+            1862.0
+          ],
+          "confidence": 0.9566898941993713
+        },
+        {
+          "frame": 899,
+          "timestamp": 29.996633333333335,
+          "bbox": [
+            8.0,
+            577.0,
+            953.0,
+            1867.0
+          ],
+          "confidence": 0.9075617790222168
+        },
+        {
+          "frame": 928,
+          "timestamp": 30.964266666666667,
+          "bbox": [
+            108.0,
+            457.0,
+            1049.0,
+            1654.0
+          ],
+          "confidence": 0.9287168383598328
+        },
+        {
+          "frame": 957,
+          "timestamp": 31.9319,
+          "bbox": [
+            107.0,
+            525.0,
+            970.0,
+            1618.0
+          ],
+          "confidence": 0.9047770500183105
+        },
+        {
+          "frame": 986,
+          "timestamp": 32.89953333333333,
+          "bbox": [
+            162.0,
+            473.0,
+            1013.0,
+            1559.0
+          ],
+          "confidence": 0.7363635301589966
+        },
+        {
+          "frame": 1015,
+          "timestamp": 33.86716666666667,
+          "bbox": [
+            148.0,
+            654.0,
+            994.0,
+            1749.0
+          ],
+          "confidence": 0.7706336975097656
+        },
+        {
+          "frame": 1044,
+          "timestamp": 34.8348,
+          "bbox": [
+            25.0,
+            500.0,
+            872.0,
+            1594.0
+          ],
+          "confidence": 0.9424030780792236
+        },
+        {
+          "frame": 1073,
+          "timestamp": 35.80243333333333,
+          "bbox": [
+            138.0,
+            689.0,
+            995.0,
+            1790.0
+          ],
+          "confidence": 0.941249430179596
+        },
+        {
+          "frame": 1102,
+          "timestamp": 36.770066666666665,
+          "bbox": [
+            89.0,
+            612.0,
+            906.0,
+            1552.0
+          ],
+          "confidence": 0.9669902920722961
+        },
+        {
+          "frame": 1131,
+          "timestamp": 37.737700000000004,
+          "bbox": [
+            574.0,
+            780.0,
+            1079.0,
+            1392.0
+          ],
+          "confidence": 0.8334499597549438
+        },
+        {
+          "frame": 1160,
+          "timestamp": 38.705333333333336,
+          "bbox": [
+            435.0,
+            1013.0,
+            987.0,
+            1616.0
+          ],
+          "confidence": 0.9567859172821045
+        },
+        {
+          "frame": 580,
+          "timestamp": 19.352666666666668,
+          "bbox": [
+            580.0,
+            484.0,
+            714.0,
+            520.0
+          ],
+          "confidence": 0.3069005012512207
+        },
+        {
+          "frame": 609,
+          "timestamp": 20.3203,
+          "bbox": [
+            461.0,
+            771.0,
+            643.0,
+            882.0
+          ],
+          "confidence": 0.40623900294303894
+        },
+        {
+          "frame": 638,
+          "timestamp": 21.287933333333335,
+          "bbox": [
+            468.0,
+            732.0,
+            710.0,
+            921.0
+          ],
+          "confidence": 0.5354183316230774
+        },
+        {
+          "frame": 1798,
+          "timestamp": 59.99326666666667,
+          "bbox": [
+            250.0,
+            208.0,
+            348.0,
+            350.0
+          ],
+          "confidence": 0.5021324157714844
+        },
+        {
+          "frame": 1798,
+          "timestamp": 59.99326666666667,
+          "bbox": [
+            491.0,
+            264.0,
+            611.0,
+            420.0
+          ],
+          "confidence": 0.46799436211586
+        },
+        {
+          "frame": 1798,
+          "timestamp": 59.99326666666667,
+          "bbox": [
+            176.0,
+            0.0,
+            356.0,
+            107.0
+          ],
+          "confidence": 0.34315764904022217
+        },
+        {
+          "frame": 1798,
+          "timestamp": 59.99326666666667,
+          "bbox": [
+            201.0,
+            199.0,
+            256.0,
+            360.0
+          ],
+          "confidence": 0.28346753120422363
+        },
+        {
+          "frame": 1798,
+          "timestamp": 59.99326666666667,
+          "bbox": [
+            171.0,
+            181.0,
+            221.0,
+            349.0
+          ],
+          "confidence": 0.2815232574939728
+        },
+        {
+          "frame": 1798,
+          "timestamp": 59.99326666666667,
+          "bbox": [
+            120.0,
+            212.0,
+            196.0,
+            383.0
+          ],
+          "confidence": 0.271570086479187
+        }
+      ]
+    },
+    {
+      "entity_id": "entity_4",
+      "object_class": "bottle",
+      "appearance_count": 3,
+      "first_seen_frame": 348,
+      "last_seen_frame": 1798,
+      "description": "The image depicts a metallic object that appears to be a screw or a similar fastening device. The object has a cylindrical shape with a slightly rounded top and a pointed tip at the bottom. The surface of the object is smooth and shiny, indicating that it is likely made of metal, possibly steel or aluminum. The object is positioned against a plain white background, which makes it stand out clearly.\n\nThe top of the object has a smooth, rounded surface with a slight indentation or groove, which suggests it might be designed to fit into a corresponding slot or hole. The pointed tip at the bottom is sharp and appears to be designed for a specific purpose, such as gripping or holding something in place. The object's design suggests it could be used in various applications, such as in machinery, construction, or automotive work, where secure fastening is required.\n\nGiven its appearance, the object could be a type of fastener, such as a nut, a bolt, or a specialized screw. The specific function",
+      "description_frame": 1769,
+      "observations": [
+        {
+          "frame": 348,
+          "timestamp": 11.611600000000001,
+          "bbox": [
+            646.0,
+            1002.0,
+            814.0,
+            1220.0
+          ],
+          "confidence": 0.6036635041236877
+        },
+        {
+          "frame": 1769,
+          "timestamp": 59.02563333333333,
+          "bbox": [
+            475.0,
+            1386.0,
+            692.0,
+            1648.0
+          ],
+          "confidence": 0.8450151085853577
+        },
+        {
+          "frame": 1798,
+          "timestamp": 59.99326666666667,
+          "bbox": [
+            121.0,
+            1321.0,
+            322.0,
+            1577.0
+          ],
+          "confidence": 0.40504658222198486
+        }
+      ]
+    },
+    {
+      "entity_id": "entity_0",
+      "object_class": "suitcase",
+      "appearance_count": 2,
+      "first_seen_frame": 58,
+      "last_seen_frame": 1160,
+      "description": "The image depicts a small, rectangular object that appears to be a case or a container. The object is primarily dark gray or black in color. It has a slightly rounded top with a flat bottom, suggesting it might be designed to stand upright or rest on a surface. The edges of the object are smooth, and there is a slight indentation or lip on the top, which could be for grip or to prevent the lid from being removed easily.\n\nOn the front of the object, there is a small, white, rectangular component that stands out against the dark background. This component looks like a button or a latch, possibly used to secure the lid or to open the container. The top surface of the object is smooth and appears to be made of a material that is either plastic or metal, given its reflective quality.\n\nThe object is isolated against a plain white background, which makes it difficult to determine its exact size or the context in which it is used. There are no visible markings, text, or",
+      "description_frame": 1160,
+      "observations": [
+        {
+          "frame": 58,
+          "timestamp": 1.9352666666666667,
+          "bbox": [
+            920.0,
+            743.0,
+            1080.0,
+            919.0
+          ],
+          "confidence": 0.2515711188316345
+        },
+        {
+          "frame": 1160,
+          "timestamp": 38.705333333333336,
+          "bbox": [
+            478.0,
+            768.0,
+            670.0,
+            894.0
+          ],
+          "confidence": 0.7854931950569153
+        }
+      ]
+    },
+    {
+      "entity_id": "entity_1",
+      "object_class": "dining table",
+      "appearance_count": 2,
+      "first_seen_frame": 116,
+      "last_seen_frame": 1450,
+      "description": "The image depicts a grayscale object that appears to be a piece of fabric or textile. The object is irregular in shape, with a somewhat rectangular or elongated form. The fabric seems to have a textured surface, with variations in shading that suggest folds or creases. The coloration is predominantly dark, with shades of black and gray, and there are lighter, almost white, areas that could indicate lighter spots or highlights. The object has a somewhat rough and uneven texture, with some parts appearing more crumpled or folded.\n\nThe object is positioned at an angle, with the top part facing towards the upper left corner and the bottom part extending towards the lower right corner. The edges of the object are not sharply defined, giving it a somewhat abstract appearance. There are no distinct features or patterns visible on the fabric, and the material seems to be somewhat heavy or thick.\n\nGiven the grayscale color scheme and the texture, the object could be a piece of clothing, such as a shirt or a jacket,",
+      "description_frame": 116,
+      "observations": [
+        {
+          "frame": 116,
+          "timestamp": 3.8705333333333334,
+          "bbox": [
+            556.0,
+            1277.0,
+            1017.0,
+            1906.0
+          ],
+          "confidence": 0.8466544151306152
+        },
+        {
+          "frame": 1450,
+          "timestamp": 48.38166666666667,
+          "bbox": [
+            261.0,
+            802.0,
+            414.0,
+            958.0
+          ],
+          "confidence": 0.3731144070625305
+        }
+      ]
+    },
+    {
+      "entity_id": "entity_2",
+      "object_class": "parking meter",
+      "appearance_count": 2,
+      "first_seen_frame": 116,
+      "last_seen_frame": 928,
+      "description": "The image depicts a vertical, cylindrical object that appears to be a cylindrical container or tube. The object is predominantly gray with a gradient that transitions from a darker shade at the top to a lighter shade at the bottom. The top part of the object has a slightly reflective surface, which is indicative of a smooth texture. The bottom part of the object is more matte, with a slight sheen, suggesting it might be made of a different material or coated with a reflective substance.\n\nOn the right side of the object, there is a distinct, vertical line running from the top to the bottom. This line is slightly curved and appears to be a seam or a seam-like feature, possibly indicating a seam or a joint in the container. The object's surface is smooth, and there are no visible textures or markings on it.\n\nThe background of the image is plain and white, which makes the object stand out prominently. The overall shape of the object is cylindrical, and it appears to be standing upright, though",
+      "description_frame": 116,
+      "observations": [
+        {
+          "frame": 116,
+          "timestamp": 3.8705333333333334,
+          "bbox": [
+            406.0,
+            547.0,
+            527.0,
+            908.0
+          ],
+          "confidence": 0.4661514461040497
+        },
+        {
+          "frame": 928,
+          "timestamp": 30.964266666666667,
+          "bbox": [
+            781.0,
+            121.0,
+            986.0,
+            508.0
+          ],
+          "confidence": 0.350526362657547
+        }
+      ]
+    },
+    {
+      "entity_id": "entity_3",
+      "object_class": "fork",
+      "appearance_count": 1,
+      "first_seen_frame": 145,
+      "last_seen_frame": 145,
+      "description": "The image depicts a black, irregularly shaped object set against a white background. The object appears to be a three-dimensional form, possibly a piece of art or a sculptural piece. The shape is somewhat ambiguous, with no clear representation of recognizable objects or figures. It has a rough, uneven surface with various indentations and protrusions, giving it a somewhat organic, albeit abstract, appearance. The edges of the object are not smooth, and it seems to have a somewhat jagged or irregular form, suggesting it might be made from a material like stone, metal, or a similar substance. The overall impression is that of a non-uniform, textured object that could be interpreted as a fragment or an incomplete piece of a larger structure.\nTo summarize, the image shows a black, irregularly shaped object with a rough, uneven surface, set against a white background. The object appears to be a three-dimensional form with no clear representation of recognizable objects or figures, and its rough, uneven",
+      "description_frame": 145,
+      "observations": [
+        {
+          "frame": 145,
+          "timestamp": 4.838166666666667,
+          "bbox": [
+            0.0,
+            1707.0,
+            183.0,
+            1920.0
+          ],
+          "confidence": 0.26959842443466187
+        }
+      ]
+    },
+    {
+      "entity_id": "entity_5",
+      "object_class": "potted plant",
+      "appearance_count": 1,
+      "first_seen_frame": 580,
+      "last_seen_frame": 580,
+      "description": "The image is quite blurry, making it difficult to discern specific details. However, it appears to depict a scene with a central object that has a starburst or radiating pattern. The object seems to be a plant, possibly a palm tree, given the shape and structure of the leaves. The leaves are long, thin, and radiate outward from a central point, resembling a starburst or sunburst pattern. The background is indistinct, with muted colors and what might be a building or structure in the distance. The overall impression is of a natural, outdoor setting, possibly a garden or park area.\n\n### Analysis:\n1. **Central Object**: The central object has a starburst or radiating pattern, suggesting it could be a plant, likely a palm tree.\n2. **Leaf Shape and Structure**: The leaves are long, thin, and radiate outward from a central point, resembling a starburst or sunburst pattern.\n3. **Background Elements**: The background is",
+      "description_frame": 580,
+      "observations": [
+        {
+          "frame": 580,
+          "timestamp": 19.352666666666668,
+          "bbox": [
+            627.0,
+            303.0,
+            807.0,
+            498.0
+          ],
+          "confidence": 0.4276113212108612
+        }
+      ]
+    },
+    {
+      "entity_id": "entity_8",
+      "object_class": "wine glass",
+      "appearance_count": 1,
+      "first_seen_frame": 1537,
+      "last_seen_frame": 1537,
+      "description": "The image is quite blurry, making it difficult to discern specific details. However, it appears to be a close-up shot of a rectangular object. The object has a predominantly white or light-colored interior, which might suggest it is a piece of paper or a similar material. The edges of the object are dark, possibly black or dark gray, and there is a noticeable shadow or light reflection at the top, indicating a light source above or behind the object. The object is rectangular and has a smooth, possibly glossy surface, which could imply it is made of plastic or a similar material. The overall shape is somewhat rectangular with rounded edges, and there is a slight curvature at the top, suggesting it might be a part of a larger structure or a component of a larger object.\nTo summarize:\n- The image is blurry, making it hard to identify specific details.\n- The object appears to be rectangular with a white or light-colored interior.\n- The edges are dark, possibly black or dark gray",
+      "description_frame": 1537,
+      "observations": [
+        {
+          "frame": 1537,
+          "timestamp": 51.28456666666667,
+          "bbox": [
+            852.0,
+            799.0,
+            996.0,
+            891.0
+          ],
+          "confidence": 0.516610324382782
+        }
+      ]
+    },
+    {
+      "entity_id": "entity_9",
+      "object_class": "fork",
+      "appearance_count": 1,
+      "first_seen_frame": 1885,
+      "last_seen_frame": 1885,
+      "description": "The image appears to be a low-resolution, blurry photograph or digital rendering of a scene. The overall color palette is predominantly dark, with shades of black and gray dominating the visual field. The image seems to depict a landscape or a surface with some form of texture or pattern. \n\nIn the center of the image, there are several elongated, white, and somewhat irregular shapes that resemble streaks or lines. These lines appear to be moving or flowing, creating a sense of motion or a dynamic element within the otherwise static scene. The lines are somewhat translucent, allowing some of the darker areas to be visible through them.\n\nThe texture of the image is somewhat rough, with a combination of smooth and rough areas. The smoother parts might suggest a surface, possibly water or a liquid, while the rougher areas could indicate rocks or other uneven surfaces. The overall impression is that the image might be a close-up of a natural scene, such as a riverbed, a mountainous region, or a rocky",
+      "description_frame": 1885,
+      "observations": [
+        {
+          "frame": 1885,
+          "timestamp": 62.896166666666666,
+          "bbox": [
+            293.0,
+            1654.0,
+            963.0,
+            1920.0
+          ],
+          "confidence": 0.28441083431243896
+        }
+      ]
+    }
+  ],
+  "metrics": {
+    "timings": {
+      "detection_seconds": 1600.7128269672394,
+      "embedding_seconds": 10.059147596359253,
+      "clustering_seconds": 0.05035734176635742,
+      "reid_seconds": 0.0034461021423339844,
+      "description_seconds": 265.75485587120056,
+      "class_correction_seconds": 0.14562392234802246,
+      "cis_seconds": 0.0,
+      "total_seconds": 1886.375412940979
+    },
+    "sampled_frames": 43,
+    "detections_per_sampled_frame": 2.4651162790697674,
+    "embedding_backend": "clip",
+    "embedding_dim": 512,
+    "detector_backend": "yolo",
+    "detector_model": "yolo11x",
+    "tracker_backend": "simple",
+    "tapnet_tracks": 0,
+    "cluster_embeddings": 0,
+    "avg_cluster_size": 1.0,
+    "class_correction": {
+      "corrected_entities": 1,
+      "min_similarity": 0.3
+    },
+    "reid": {
+      "backend": "clip",
+      "base_threshold": 0.65,
+      "class_thresholds": {
+        "book": 0.8536575555801391,
+        "hair drier": 0.65,
+        "cell phone": 0.65,
+        "backpack": 0.65,
+        "bottle": 0.65,
+        "cat": 0.65,
+        "potted plant": 0.65,
+        "toilet": 0.65,
+        "suitcase": 0.65
+      },
+      "similarity_stats": {
+        "book": {
+          "mean": 0.9036575555801392,
+          "std": 0.0,
+          "median": 0.9036575555801392,
+          "p95": 0.9036575555801392,
+          "threshold": 0.8536575555801391,
+          "pair_count": 1.0
+        }
+      },
+      "merges_total": 1,
+      "per_class_merges": {
+        "book": 1,
+        "hair drier": 0,
+        "cell phone": 0,
+        "backpack": 0,
+        "bottle": 0,
+        "cat": 0,
+        "potted plant": 0,
+        "toilet": 0,
+        "suitcase": 0
+      },
+      "reduction": 1
+    }
+  }
+}

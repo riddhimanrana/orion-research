@@ -12,7 +12,7 @@ Date: October 2025
 """
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional
+from typing import Literal, Optional, List
 
 import logging
 
@@ -470,6 +470,9 @@ class PerceptionConfig:
     use_scene_detection: bool = False
     """Enable intelligent scene change detection for frame sampling"""
     
+    enable_descriptions: bool = True
+    """Enable FastVLM-based entity descriptions."""
+
     # 3D Perception settings
     enable_3d: bool = True
     """Enable 3D perception (depth, 3D coordinates, occlusion)"""

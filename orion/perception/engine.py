@@ -259,10 +259,14 @@ class PerceptionEngine:
         entities = self._reid_deduplicate_entities(entities)
         metrics_timings["reid_seconds"] = time.time() - t0
         
-        # Step 5: Describe entities
-        t0 = time.time()
-        entities = self.describer.describe_entities(entities)
-        metrics_timings["description_seconds"] = time.time() - t0
+        # Step 5: Describe entities (optional)
+        if self.describer is not None:
+            t0 = time.time()
+            entities = self.describer.describe_entities(entities)
+            metrics_timings["description_seconds"] = time.time() - t0
+        else:
+            logger.info("Skipping entity description stage (FastVLM disabled or unavailable).")
+            metrics_timings["description_seconds"] = 0.0
 
         class_corrections = 0
         if getattr(self.config.class_correction, "enabled", False) and self.clip_model is not None:
@@ -489,9 +493,19 @@ class PerceptionEngine:
                 logger.warning(f"  ✗ Failed to load DINO backend: {e}. Falling back to CLIP embeddings.")
                 self.config.embedding.backend = "clip"
         
-        # FastVLM
-        vlm = self.model_manager.fastvlm
-        logger.info("  ✓ FastVLM loaded")
+        # FastVLM (optional)
+        vlm = None
+        descriptions_enabled = getattr(self.config, "enable_descriptions", True)
+        if descriptions_enabled:
+            try:
+                vlm = self.model_manager.fastvlm
+                logger.info("  ✓ FastVLM loaded")
+            except Exception as exc:
+                logger.warning(
+                    f"  ✗ FastVLM load failed: {exc}. Descriptions disabled for this run."
+                )
+        else:
+            logger.info("  ✓ Skipping FastVLM load (descriptions disabled)")
 
         segmentation_cfg = getattr(self.config, "segmentation", None)
         if segmentation_cfg and segmentation_cfg.enabled:
@@ -545,10 +559,18 @@ class PerceptionEngine:
             config=self.config,
         )
         
-        self.describer = EntityDescriber(
-            vlm_model=vlm,
-            config=self.config.description,
-        )
+        self.describer = None
+        if descriptions_enabled and vlm is not None:
+            self.describer = EntityDescriber(
+                vlm_model=vlm,
+                config=self.config.description,
+            )
+        elif descriptions_enabled and vlm is None:
+            logger.warning(
+                "Entity descriptions requested but FastVLM unavailable; skipping description stage."
+            )
+        else:
+            logger.info("Entity descriptions disabled via config; skipping describer initialization.")
 
         self._components_ready = True
         
@@ -933,6 +955,7 @@ class PerceptionEngine:
     def _get_depth_estimator(self) -> Optional[DepthEstimator]:
         """Lazily initialize and return the shared depth estimator."""
         if not self.config.enable_depth:
+            logger.info("Depth estimation disabled via config; skipping depth estimator initialization.")
             return None
         if self.depth_estimator is not None:
             return self.depth_estimator
@@ -954,6 +977,9 @@ class PerceptionEngine:
         except Exception as exc:
             logger.warning(f"  ✗ Failed to initialize DepthEstimator: {exc}")
             self.depth_estimator = None
+            # Disable depth for remainder of run to avoid repeated failures
+            self.config.enable_depth = False
+            logger.warning("Depth estimation will remain disabled until configuration changes.")
         return self.depth_estimator
     
     def _sync_memgraph_entities(self, entities: List[PerceptionEntity]):

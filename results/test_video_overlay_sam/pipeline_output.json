@@ -1,0 +1,4032 @@
+{
+  "video_path": "C:\\Users\\aryav\\orion-research\\data\\examples\\video.mp4",
+  "results_dir": "C:\\Users\\aryav\\orion-research\\results\\test_video_overlay_sam",
+  "total_frames": 1974,
+  "fps": 4.0,
+  "duration": 65.86580000000001,
+  "entities": [
+    {
+      "entity_id": "merged_entity_18",
+      "object_class": "book",
+      "appearance_count": 99,
+      "first_seen_frame": 581,
+      "last_seen_frame": 1925,
+      "description": "The image depicts a person holding a spiral-bound notebook. The notebook is light blue in color and has a spiral binding that is visible on the left side. The text on the notebook is printed in white and appears to be in a non-English language, possibly Japanese or Chinese. The text is arranged in a column format, with lines of text running vertically down the page. The person's hand is visible on the right side of the image, holding the notebook. The background appears to be a light-colored surface, possibly a table or desk. The notebook seems to be a standard-sized notebook, commonly used for writing, note-taking, or journaling. The overall impression is that the notebook is being held and possibly being read or examined.\nThis notebook appears to be a standard-sized spiral-bound notebook, often used for writing, note-taking, or journaling. The visible text on the page is in a non-English language, which suggests that the notebook might be intended for use in a",
+      "description_frame": 1064,
+      "observations": [
+        {
+          "frame": 693,
+          "timestamp": 23.1231,
+          "bbox": [
+            329.0,
+            972.0,
+            910.0,
+            1738.0
+          ],
+          "confidence": 0.9572950601577759
+        },
+        {
+          "frame": 700,
+          "timestamp": 23.356666666666666,
+          "bbox": [
+            314.0,
+            975.0,
+            928.0,
+            1775.0
+          ],
+          "confidence": 0.9614145159721375
+        },
+        {
+          "frame": 707,
+          "timestamp": 23.590233333333334,
+          "bbox": [
+            352.0,
+            969.0,
+            984.0,
+            1779.0
+          ],
+          "confidence": 0.9657126665115356
+        },
+        {
+          "frame": 714,
+          "timestamp": 23.823800000000002,
+          "bbox": [
+            407.0,
+            999.0,
+            1076.0,
+            1819.0
+          ],
+          "confidence": 0.9573224782943726
+        },
+        {
+          "frame": 721,
+          "timestamp": 24.057366666666667,
+          "bbox": [
+            492.0,
+            1020.0,
+            1079.0,
+            1827.0
+          ],
+          "confidence": 0.9618299007415771
+        },
+        {
+          "frame": 728,
+          "timestamp": 24.290933333333335,
+          "bbox": [
+            591.0,
+            947.0,
+            1079.0,
+            1827.0
+          ],
+          "confidence": 0.9149059653282166
+        },
+        {
+          "frame": 735,
+          "timestamp": 24.5245,
+          "bbox": [
+            524.0,
+            800.0,
+            1080.0,
+            1730.0
+          ],
+          "confidence": 0.9196150302886963
+        },
+        {
+          "frame": 742,
+          "timestamp": 24.758066666666668,
+          "bbox": [
+            353.0,
+            685.0,
+            1078.0,
+            1630.0
+          ],
+          "confidence": 0.9721260666847229
+        },
+        {
+          "frame": 749,
+          "timestamp": 24.991633333333333,
+          "bbox": [
+            218.0,
+            614.0,
+            1042.0,
+            1571.0
+          ],
+          "confidence": 0.9663102626800537
+        },
+        {
+          "frame": 756,
+          "timestamp": 25.2252,
+          "bbox": [
+            199.0,
+            659.0,
+            987.0,
+            1613.0
+          ],
+          "confidence": 0.8698819279670715
+        },
+        {
+          "frame": 763,
+          "timestamp": 25.458766666666666,
+          "bbox": [
+            110.0,
+            713.0,
+            864.0,
+            1658.0
+          ],
+          "confidence": 0.8820273280143738
+        },
+        {
+          "frame": 770,
+          "timestamp": 25.692333333333334,
+          "bbox": [
+            44.0,
+            774.0,
+            807.0,
+            1742.0
+          ],
+          "confidence": 0.841105043888092
+        },
+        {
+          "frame": 777,
+          "timestamp": 25.925900000000002,
+          "bbox": [
+            6.0,
+            819.0,
+            799.0,
+            1822.0
+          ],
+          "confidence": 0.8606289625167847
+        },
+        {
+          "frame": 784,
+          "timestamp": 26.159466666666667,
+          "bbox": [
+            48.0,
+            716.0,
+            893.0,
+            1793.0
+          ],
+          "confidence": 0.8833695650100708
+        },
+        {
+          "frame": 791,
+          "timestamp": 26.393033333333335,
+          "bbox": [
+            97.0,
+            625.0,
+            957.0,
+            1721.0
+          ],
+          "confidence": 0.8891953229904175
+        },
+        {
+          "frame": 798,
+          "timestamp": 26.6266,
+          "bbox": [
+            78.0,
+            550.0,
+            951.0,
+            1643.0
+          ],
+          "confidence": 0.922471821308136
+        },
+        {
+          "frame": 805,
+          "timestamp": 26.860166666666668,
+          "bbox": [
+            67.0,
+            552.0,
+            982.0,
+            1672.0
+          ],
+          "confidence": 0.9125901460647583
+        },
+        {
+          "frame": 812,
+          "timestamp": 27.093733333333333,
+          "bbox": [
+            24.0,
+            547.0,
+            1024.0,
+            1712.0
+          ],
+          "confidence": 0.6932064890861511
+        },
+        {
+          "frame": 819,
+          "timestamp": 27.3273,
+          "bbox": [
+            189.0,
+            572.0,
+            1078.0,
+            1692.0
+          ],
+          "confidence": 0.6289869546890259
+        },
+        {
+          "frame": 826,
+          "timestamp": 27.560866666666666,
+          "bbox": [
+            249.0,
+            661.0,
+            1080.0,
+            1778.0
+          ],
+          "confidence": 0.5149281024932861
+        },
+        {
+          "frame": 833,
+          "timestamp": 27.794433333333334,
+          "bbox": [
+            253.0,
+            704.0,
+            1067.0,
+            1835.0
+          ],
+          "confidence": 0.40907612442970276
+        },
+        {
+          "frame": 840,
+          "timestamp": 28.028000000000002,
+          "bbox": [
+            26.0,
+            662.0,
+            960.0,
+            1797.0
+          ],
+          "confidence": 0.7804017066955566
+        },
+        {
+          "frame": 847,
+          "timestamp": 28.261566666666667,
+          "bbox": [
+            23.0,
+            574.0,
+            990.0,
+            1786.0
+          ],
+          "confidence": 0.9077972769737244
+        },
+        {
+          "frame": 854,
+          "timestamp": 28.495133333333335,
+          "bbox": [
+            76.0,
+            628.0,
+            1038.0,
+            1843.0
+          ],
+          "confidence": 0.8769840002059937
+        },
+        {
+          "frame": 861,
+          "timestamp": 28.7287,
+          "bbox": [
+            68.0,
+            685.0,
+            990.0,
+            1870.0
+          ],
+          "confidence": 0.9495146870613098
+        },
+        {
+          "frame": 868,
+          "timestamp": 28.962266666666668,
+          "bbox": [
+            21.0,
+            645.0,
+            959.0,
+            1855.0
+          ],
+          "confidence": 0.9390829205513
+        },
+        {
+          "frame": 875,
+          "timestamp": 29.195833333333333,
+          "bbox": [
+            74.0,
+            671.0,
+            989.0,
+            1903.0
+          ],
+          "confidence": 0.9381386637687683
+        },
+        {
+          "frame": 882,
+          "timestamp": 29.4294,
+          "bbox": [
+            10.0,
+            661.0,
+            996.0,
+            1920.0
+          ],
+          "confidence": 0.9575201272964478
+        },
+        {
+          "frame": 889,
+          "timestamp": 29.662966666666666,
+          "bbox": [
+            28.0,
+            492.0,
+            1046.0,
+            1792.0
+          ],
+          "confidence": 0.9045486450195312
+        },
+        {
+          "frame": 896,
+          "timestamp": 29.896533333333334,
+          "bbox": [
+            4.0,
+            515.0,
+            973.0,
+            1795.0
+          ],
+          "confidence": 0.9473541378974915
+        },
+        {
+          "frame": 910,
+          "timestamp": 30.363666666666667,
+          "bbox": [
+            2.0,
+            578.0,
+            1044.0,
+            1918.0
+          ],
+          "confidence": 0.9268730282783508
+        },
+        {
+          "frame": 917,
+          "timestamp": 30.597233333333335,
+          "bbox": [
+            5.0,
+            517.0,
+            1068.0,
+            1878.0
+          ],
+          "confidence": 0.9191949367523193
+        },
+        {
+          "frame": 924,
+          "timestamp": 30.8308,
+          "bbox": [
+            92.0,
+            447.0,
+            1077.0,
+            1688.0
+          ],
+          "confidence": 0.965336263179779
+        },
+        {
+          "frame": 931,
+          "timestamp": 31.06436666666667,
+          "bbox": [
+            68.0,
+            467.0,
+            1013.0,
+            1663.0
+          ],
+          "confidence": 0.9348047971725464
+        },
+        {
+          "frame": 938,
+          "timestamp": 31.297933333333333,
+          "bbox": [
+            40.0,
+            498.0,
+            919.0,
+            1626.0
+          ],
+          "confidence": 0.8962894678115845
+        },
+        {
+          "frame": 945,
+          "timestamp": 31.5315,
+          "bbox": [
+            8.0,
+            454.0,
+            887.0,
+            1565.0
+          ],
+          "confidence": 0.9317795038223267
+        },
+        {
+          "frame": 952,
+          "timestamp": 31.765066666666666,
+          "bbox": [
+            29.0,
+            495.0,
+            934.0,
+            1631.0
+          ],
+          "confidence": 0.937361478805542
+        },
+        {
+          "frame": 959,
+          "timestamp": 31.998633333333334,
+          "bbox": [
+            128.0,
+            513.0,
+            980.0,
+            1605.0
+          ],
+          "confidence": 0.8377695083618164
+        },
+        {
+          "frame": 966,
+          "timestamp": 32.2322,
+          "bbox": [
+            106.0,
+            473.0,
+            978.0,
+            1578.0
+          ],
+          "confidence": 0.8204317092895508
+        },
+        {
+          "frame": 973,
+          "timestamp": 32.46576666666667,
+          "bbox": [
+            144.0,
+            477.0,
+            973.0,
+            1551.0
+          ],
+          "confidence": 0.9098105430603027
+        },
+        {
+          "frame": 980,
+          "timestamp": 32.699333333333335,
+          "bbox": [
+            128.0,
+            421.0,
+            1009.0,
+            1531.0
+          ],
+          "confidence": 0.8172250986099243
+        },
+        {
+          "frame": 987,
+          "timestamp": 32.932900000000004,
+          "bbox": [
+            158.0,
+            468.0,
+            1019.0,
+            1560.0
+          ],
+          "confidence": 0.822709858417511
+        },
+        {
+          "frame": 994,
+          "timestamp": 33.166466666666665,
+          "bbox": [
+            107.0,
+            470.0,
+            967.0,
+            1546.0
+          ],
+          "confidence": 0.8445869088172913
+        },
+        {
+          "frame": 1001,
+          "timestamp": 33.40003333333333,
+          "bbox": [
+            82.0,
+            522.0,
+            946.0,
+            1617.0
+          ],
+          "confidence": 0.8582334518432617
+        },
+        {
+          "frame": 1008,
+          "timestamp": 33.6336,
+          "bbox": [
+            118.0,
+            585.0,
+            948.0,
+            1662.0
+          ],
+          "confidence": 0.9309284090995789
+        },
+        {
+          "frame": 1015,
+          "timestamp": 33.86716666666667,
+          "bbox": [
+            134.0,
+            646.0,
+            996.0,
+            1758.0
+          ],
+          "confidence": 0.7706336975097656
+        },
+        {
+          "frame": 1022,
+          "timestamp": 34.10073333333333,
+          "bbox": [
+            109.0,
+            657.0,
+            1031.0,
+            1764.0
+          ],
+          "confidence": 0.8134093284606934
+        },
+        {
+          "frame": 1029,
+          "timestamp": 34.3343,
+          "bbox": [
+            120.0,
+            608.0,
+            969.0,
+            1701.0
+          ],
+          "confidence": 0.8714889883995056
+        },
+        {
+          "frame": 1036,
+          "timestamp": 34.56786666666667,
+          "bbox": [
+            36.0,
+            541.0,
+            876.0,
+            1625.0
+          ],
+          "confidence": 0.89707350730896
+        },
+        {
+          "frame": 1043,
+          "timestamp": 34.801433333333335,
+          "bbox": [
+            9.0,
+            489.0,
+            873.0,
+            1588.0
+          ],
+          "confidence": 0.8316451907157898
+        },
+        {
+          "frame": 1050,
+          "timestamp": 35.035000000000004,
+          "bbox": [
+            3.0,
+            514.0,
+            890.0,
+            1651.0
+          ],
+          "confidence": 0.9362536668777466
+        },
+        {
+          "frame": 1057,
+          "timestamp": 35.268566666666665,
+          "bbox": [
+            42.0,
+            486.0,
+            971.0,
+            1620.0
+          ],
+          "confidence": 0.9206835031509399
+        },
+        {
+          "frame": 1064,
+          "timestamp": 35.50213333333333,
+          "bbox": [
+            143.0,
+            592.0,
+            1030.0,
+            1700.0
+          ],
+          "confidence": 0.972802460193634
+        },
+        {
+          "frame": 1071,
+          "timestamp": 35.7357,
+          "bbox": [
+            142.0,
+            677.0,
+            1016.0,
+            1791.0
+          ],
+          "confidence": 0.9340295195579529
+        },
+        {
+          "frame": 1078,
+          "timestamp": 35.96926666666667,
+          "bbox": [
+            106.0,
+            683.0,
+            970.0,
+            1788.0
+          ],
+          "confidence": 0.9466389417648315
+        },
+        {
+          "frame": 1085,
+          "timestamp": 36.20283333333333,
+          "bbox": [
+            114.0,
+            668.0,
+            983.0,
+            1756.0
+          ],
+          "confidence": 0.969462513923645
+        },
+        {
+          "frame": 1092,
+          "timestamp": 36.4364,
+          "bbox": [
+            127.0,
+            564.0,
+            999.0,
+            1598.0
+          ],
+          "confidence": 0.9555006623268127
+        },
+        {
+          "frame": 1099,
+          "timestamp": 36.66996666666667,
+          "bbox": [
+            101.0,
+            591.0,
+            929.0,
+            1572.0
+          ],
+          "confidence": 0.9678833484649658
+        },
+        {
+          "frame": 1106,
+          "timestamp": 36.903533333333336,
+          "bbox": [
+            124.0,
+            612.0,
+            884.0,
+            1535.0
+          ],
+          "confidence": 0.9724224209785461
+        },
+        {
+          "frame": 1113,
+          "timestamp": 37.137100000000004,
+          "bbox": [
+            156.0,
+            561.0,
+            941.0,
+            1454.0
+          ],
+          "confidence": 0.9685881733894348
+        },
+        {
+          "frame": 581,
+          "timestamp": 19.386033333333334,
+          "bbox": [
+            94.0,
+            787.0,
+            259.0,
+            872.0
+          ],
+          "confidence": 0.252714067697525
+        },
+        {
+          "frame": 609,
+          "timestamp": 20.3203,
+          "bbox": [
+            454.0,
+            759.0,
+            644.0,
+            883.0
+          ],
+          "confidence": 0.40623900294303894
+        },
+        {
+          "frame": 616,
+          "timestamp": 20.553866666666668,
+          "bbox": [
+            466.0,
+            716.0,
+            671.0,
+            853.0
+          ],
+          "confidence": 0.4307793378829956
+        },
+        {
+          "frame": 623,
+          "timestamp": 20.787433333333333,
+          "bbox": [
+            474.0,
+            721.0,
+            688.0,
+            861.0
+          ],
+          "confidence": 0.35342302918434143
+        },
+        {
+          "frame": 630,
+          "timestamp": 21.021,
+          "bbox": [
+            479.0,
+            728.0,
+            706.0,
+            890.0
+          ],
+          "confidence": 0.5731954574584961
+        },
+        {
+          "frame": 637,
+          "timestamp": 21.254566666666665,
+          "bbox": [
+            463.0,
+            727.0,
+            714.0,
+            914.0
+          ],
+          "confidence": 0.3572177588939667
+        },
+        {
+          "frame": 644,
+          "timestamp": 21.488133333333334,
+          "bbox": [
+            412.0,
+            749.0,
+            673.0,
+            975.0
+          ],
+          "confidence": 0.8059455156326294
+        },
+        {
+          "frame": 651,
+          "timestamp": 21.721700000000002,
+          "bbox": [
+            389.0,
+            760.0,
+            666.0,
+            1022.0
+          ],
+          "confidence": 0.908788800239563
+        },
+        {
+          "frame": 658,
+          "timestamp": 21.955266666666667,
+          "bbox": [
+            398.0,
+            771.0,
+            702.0,
+            1080.0
+          ],
+          "confidence": 0.9263707995414734
+        },
+        {
+          "frame": 665,
+          "timestamp": 22.188833333333335,
+          "bbox": [
+            411.0,
+            792.0,
+            747.0,
+            1166.0
+          ],
+          "confidence": 0.9340962171554565
+        },
+        {
+          "frame": 672,
+          "timestamp": 22.4224,
+          "bbox": [
+            439.0,
+            786.0,
+            817.0,
+            1244.0
+          ],
+          "confidence": 0.9004708528518677
+        },
+        {
+          "frame": 756,
+          "timestamp": 25.2252,
+          "bbox": [
+            0.0,
+            971.0,
+            244.0,
+            1129.0
+          ],
+          "confidence": 0.5046921372413635
+        },
+        {
+          "frame": 756,
+          "timestamp": 25.2252,
+          "bbox": [
+            1.0,
+            481.0,
+            189.0,
+            746.0
+          ],
+          "confidence": 0.474487841129303
+        },
+        {
+          "frame": 763,
+          "timestamp": 25.458766666666666,
+          "bbox": [
+            416.0,
+            465.0,
+            586.0,
+            748.0
+          ],
+          "confidence": 0.5770866870880127
+        },
+        {
+          "frame": 763,
+          "timestamp": 25.458766666666666,
+          "bbox": [
+            12.0,
+            1266.0,
+            143.0,
+            1477.0
+          ],
+          "confidence": 0.3943338990211487
+        },
+        {
+          "frame": 763,
+          "timestamp": 25.458766666666666,
+          "bbox": [
+            350.0,
+            475.0,
+            488.0,
+            736.0
+          ],
+          "confidence": 0.3803275525569916
+        },
+        {
+          "frame": 763,
+          "timestamp": 25.458766666666666,
+          "bbox": [
+            234.0,
+            290.0,
+            725.0,
+            396.0
+          ],
+          "confidence": 0.3568730056285858
+        },
+        {
+          "frame": 763,
+          "timestamp": 25.458766666666666,
+          "bbox": [
+            1.0,
+            524.0,
+            143.0,
+            877.0
+          ],
+          "confidence": 0.3351900577545166
+        },
+        {
+          "frame": 763,
+          "timestamp": 25.458766666666666,
+          "bbox": [
+            1.0,
+            959.0,
+            175.0,
+            1224.0
+          ],
+          "confidence": 0.32720693945884705
+        },
+        {
+          "frame": 763,
+          "timestamp": 25.458766666666666,
+          "bbox": [
+            213.0,
+            157.0,
+            650.0,
+            268.0
+          ],
+          "confidence": 0.32445359230041504
+        },
+        {
+          "frame": 763,
+          "timestamp": 25.458766666666666,
+          "bbox": [
+            288.0,
+            98.0,
+            676.0,
+            173.0
+          ],
+          "confidence": 0.2989145517349243
+        },
+        {
+          "frame": 770,
+          "timestamp": 25.692333333333334,
+          "bbox": [
+            566.0,
+            605.0,
+            697.0,
+            819.0
+          ],
+          "confidence": 0.31115514039993286
+        },
+        {
+          "frame": 777,
+          "timestamp": 25.925900000000002,
+          "bbox": [
+            961.0,
+            804.0,
+            1078.0,
+            1136.0
+          ],
+          "confidence": 0.7538683414459229
+        },
+        {
+          "frame": 777,
+          "timestamp": 25.925900000000002,
+          "bbox": [
+            911.0,
+            797.0,
+            1024.0,
+            1121.0
+          ],
+          "confidence": 0.6061461567878723
+        },
+        {
+          "frame": 777,
+          "timestamp": 25.925900000000002,
+          "bbox": [
+            863.0,
+            793.0,
+            968.0,
+            1115.0
+          ],
+          "confidence": 0.3598506450653076
+        },
+        {
+          "frame": 1799,
+          "timestamp": 60.026633333333336,
+          "bbox": [
+            518.0,
+            267.0,
+            647.0,
+            431.0
+          ],
+          "confidence": 0.29745006561279297
+        },
+        {
+          "frame": 1799,
+          "timestamp": 60.026633333333336,
+          "bbox": [
+            206.0,
+            0.0,
+            391.0,
+            116.0
+          ],
+          "confidence": 0.281441867351532
+        },
+        {
+          "frame": 1813,
+          "timestamp": 60.493766666666666,
+          "bbox": [
+            867.0,
+            590.0,
+            989.0,
+            721.0
+          ],
+          "confidence": 0.2893015444278717
+        },
+        {
+          "frame": 1911,
+          "timestamp": 63.7637,
+          "bbox": [
+            0.0,
+            831.0,
+            396.0,
+            1015.0
+          ],
+          "confidence": 0.44565004110336304
+        },
+        {
+          "frame": 1918,
+          "timestamp": 63.99726666666667,
+          "bbox": [
+            0.0,
+            818.0,
+            452.0,
+            1020.0
+          ],
+          "confidence": 0.6774163246154785
+        },
+        {
+          "frame": 1925,
+          "timestamp": 64.23083333333334,
+          "bbox": [
+            0.0,
+            801.0,
+            417.0,
+            1047.0
+          ],
+          "confidence": 0.5207122564315796
+        },
+        {
+          "frame": 1120,
+          "timestamp": 37.370666666666665,
+          "bbox": [
+            312.0,
+            556.0,
+            1077.0,
+            1369.0
+          ],
+          "confidence": 0.9641499519348145
+        },
+        {
+          "frame": 1127,
+          "timestamp": 37.60423333333333,
+          "bbox": [
+            505.0,
+            673.0,
+            1079.0,
+            1334.0
+          ],
+          "confidence": 0.9491114020347595
+        },
+        {
+          "frame": 1134,
+          "timestamp": 37.8378,
+          "bbox": [
+            617.0,
+            835.0,
+            1080.0,
+            1467.0
+          ],
+          "confidence": 0.8609560132026672
+        },
+        {
+          "frame": 1148,
+          "timestamp": 38.30493333333333,
+          "bbox": [
+            558.0,
+            1025.0,
+            1079.0,
+            1746.0
+          ],
+          "confidence": 0.9503270387649536
+        },
+        {
+          "frame": 1155,
+          "timestamp": 38.5385,
+          "bbox": [
+            474.0,
+            1021.0,
+            1079.0,
+            1700.0
+          ],
+          "confidence": 0.9567888379096985
+        },
+        {
+          "frame": 1162,
+          "timestamp": 38.77206666666667,
+          "bbox": [
+            420.0,
+            997.0,
+            971.0,
+            1590.0
+          ],
+          "confidence": 0.9374405741691589
+        },
+        {
+          "frame": 1169,
+          "timestamp": 39.005633333333336,
+          "bbox": [
+            412.0,
+            969.0,
+            883.0,
+            1454.0
+          ],
+          "confidence": 0.9460947513580322
+        },
+        {
+          "frame": 1176,
+          "timestamp": 39.239200000000004,
+          "bbox": [
+            415.0,
+            928.0,
+            826.0,
+            1315.0
+          ],
+          "confidence": 0.9477057456970215
+        }
+      ]
+    },
+    {
+      "entity_id": "merged_entity_12",
+      "object_class": "person",
+      "appearance_count": 97,
+      "first_seen_frame": 224,
+      "last_seen_frame": 1855,
+      "description": "The image depicts a close-up view of a person's forearm and hand gripping a cylindrical metal object. The object appears to be a pipe or a similar cylindrical piece of equipment, possibly related to plumbing or industrial machinery. The metal surface of the object is smooth and reflective, indicating it is likely made of steel or another metal commonly used in industrial settings.\n\nThe person's hand is holding the object firmly, with the thumb and fingers wrapped around it, suggesting that the object is heavy and requires a firm grip. The person is wearing a yellow sleeve, which is likely a part of their clothing, and a small, indistinct object is wrapped around the wrist, possibly a wristband or a piece of fabric.\n\nThe background of the image is a textured surface, possibly a wall or a ceiling, with a pattern that appears to be a mix of light and dark gray or black lines, giving it a somewhat speckled appearance. The lighting in the image is even, without harsh shadows, suggesting that",
+      "description_frame": 1785,
+      "observations": [
+        {
+          "frame": 686,
+          "timestamp": 22.889533333333333,
+          "bbox": [
+            816.0,
+            1279.0,
+            1079.0,
+            1766.0
+          ],
+          "confidence": 0.7639864683151245
+        },
+        {
+          "frame": 700,
+          "timestamp": 23.356666666666666,
+          "bbox": [
+            744.0,
+            1296.0,
+            1079.0,
+            1917.0
+          ],
+          "confidence": 0.8900666236877441
+        },
+        {
+          "frame": 707,
+          "timestamp": 23.590233333333334,
+          "bbox": [
+            725.0,
+            1326.0,
+            1079.0,
+            1918.0
+          ],
+          "confidence": 0.8929298520088196
+        },
+        {
+          "frame": 714,
+          "timestamp": 23.823800000000002,
+          "bbox": [
+            820.0,
+            1337.0,
+            1079.0,
+            1847.0
+          ],
+          "confidence": 0.8416832089424133
+        },
+        {
+          "frame": 749,
+          "timestamp": 24.991633333333333,
+          "bbox": [
+            760.0,
+            1008.0,
+            1079.0,
+            1659.0
+          ],
+          "confidence": 0.83564293384552
+        },
+        {
+          "frame": 756,
+          "timestamp": 25.2252,
+          "bbox": [
+            707.0,
+            1047.0,
+            1079.0,
+            1746.0
+          ],
+          "confidence": 0.8954290747642517
+        },
+        {
+          "frame": 763,
+          "timestamp": 25.458766666666666,
+          "bbox": [
+            615.0,
+            1073.0,
+            1078.0,
+            1898.0
+          ],
+          "confidence": 0.89647376537323
+        },
+        {
+          "frame": 770,
+          "timestamp": 25.692333333333334,
+          "bbox": [
+            565.0,
+            1132.0,
+            1080.0,
+            1919.0
+          ],
+          "confidence": 0.8938739895820618
+        },
+        {
+          "frame": 777,
+          "timestamp": 25.925900000000002,
+          "bbox": [
+            552.0,
+            1190.0,
+            1079.0,
+            1919.0
+          ],
+          "confidence": 0.9147900342941284
+        },
+        {
+          "frame": 784,
+          "timestamp": 26.159466666666667,
+          "bbox": [
+            622.0,
+            1122.0,
+            1078.0,
+            1911.0
+          ],
+          "confidence": 0.8668952584266663
+        },
+        {
+          "frame": 791,
+          "timestamp": 26.393033333333335,
+          "bbox": [
+            671.0,
+            1036.0,
+            1079.0,
+            1899.0
+          ],
+          "confidence": 0.8698086142539978
+        },
+        {
+          "frame": 798,
+          "timestamp": 26.6266,
+          "bbox": [
+            645.0,
+            968.0,
+            1080.0,
+            1917.0
+          ],
+          "confidence": 0.8840803503990173
+        },
+        {
+          "frame": 805,
+          "timestamp": 26.860166666666668,
+          "bbox": [
+            659.0,
+            993.0,
+            1080.0,
+            1887.0
+          ],
+          "confidence": 0.9029347896575928
+        },
+        {
+          "frame": 812,
+          "timestamp": 27.093733333333333,
+          "bbox": [
+            694.0,
+            987.0,
+            1079.0,
+            1828.0
+          ],
+          "confidence": 0.8775393962860107
+        },
+        {
+          "frame": 819,
+          "timestamp": 27.3273,
+          "bbox": [
+            772.0,
+            1030.0,
+            1079.0,
+            1819.0
+          ],
+          "confidence": 0.8331698179244995
+        },
+        {
+          "frame": 826,
+          "timestamp": 27.560866666666666,
+          "bbox": [
+            824.0,
+            1173.0,
+            1079.0,
+            1807.0
+          ],
+          "confidence": 0.5852529406547546
+        },
+        {
+          "frame": 833,
+          "timestamp": 27.794433333333334,
+          "bbox": [
+            752.0,
+            1135.0,
+            1079.0,
+            1917.0
+          ],
+          "confidence": 0.8203997611999512
+        },
+        {
+          "frame": 840,
+          "timestamp": 28.028000000000002,
+          "bbox": [
+            661.0,
+            1094.0,
+            1079.0,
+            1919.0
+          ],
+          "confidence": 0.8966569900512695
+        },
+        {
+          "frame": 847,
+          "timestamp": 28.261566666666667,
+          "bbox": [
+            653.0,
+            1053.0,
+            1078.0,
+            1919.0
+          ],
+          "confidence": 0.9004932641983032
+        },
+        {
+          "frame": 854,
+          "timestamp": 28.495133333333335,
+          "bbox": [
+            705.0,
+            1095.0,
+            1079.0,
+            1918.0
+          ],
+          "confidence": 0.893784761428833
+        },
+        {
+          "frame": 861,
+          "timestamp": 28.7287,
+          "bbox": [
+            682.0,
+            1120.0,
+            1079.0,
+            1919.0
+          ],
+          "confidence": 0.9220925569534302
+        },
+        {
+          "frame": 868,
+          "timestamp": 28.962266666666668,
+          "bbox": [
+            642.0,
+            1095.0,
+            1080.0,
+            1917.0
+          ],
+          "confidence": 0.9114243984222412
+        },
+        {
+          "frame": 875,
+          "timestamp": 29.195833333333333,
+          "bbox": [
+            681.0,
+            1118.0,
+            1080.0,
+            1917.0
+          ],
+          "confidence": 0.9067192077636719
+        },
+        {
+          "frame": 882,
+          "timestamp": 29.4294,
+          "bbox": [
+            675.0,
+            1127.0,
+            1080.0,
+            1917.0
+          ],
+          "confidence": 0.8898822069168091
+        },
+        {
+          "frame": 889,
+          "timestamp": 29.662966666666666,
+          "bbox": [
+            695.0,
+            994.0,
+            1079.0,
+            1907.0
+          ],
+          "confidence": 0.847299337387085
+        },
+        {
+          "frame": 896,
+          "timestamp": 29.896533333333334,
+          "bbox": [
+            642.0,
+            991.0,
+            1080.0,
+            1916.0
+          ],
+          "confidence": 0.8618793487548828
+        },
+        {
+          "frame": 903,
+          "timestamp": 30.1301,
+          "bbox": [
+            655.0,
+            1084.0,
+            1080.0,
+            1915.0
+          ],
+          "confidence": 0.8709253072738647
+        },
+        {
+          "frame": 910,
+          "timestamp": 30.363666666666667,
+          "bbox": [
+            685.0,
+            1106.0,
+            1079.0,
+            1916.0
+          ],
+          "confidence": 0.8206087946891785
+        },
+        {
+          "frame": 917,
+          "timestamp": 30.597233333333335,
+          "bbox": [
+            704.0,
+            1040.0,
+            1079.0,
+            1916.0
+          ],
+          "confidence": 0.845666229724884
+        },
+        {
+          "frame": 924,
+          "timestamp": 30.8308,
+          "bbox": [
+            744.0,
+            933.0,
+            1079.0,
+            1748.0
+          ],
+          "confidence": 0.8866826891899109
+        },
+        {
+          "frame": 931,
+          "timestamp": 31.06436666666667,
+          "bbox": [
+            695.0,
+            929.0,
+            1079.0,
+            1771.0
+          ],
+          "confidence": 0.8761298060417175
+        },
+        {
+          "frame": 938,
+          "timestamp": 31.297933333333333,
+          "bbox": [
+            630.0,
+            923.0,
+            1079.0,
+            1774.0
+          ],
+          "confidence": 0.8729648590087891
+        },
+        {
+          "frame": 945,
+          "timestamp": 31.5315,
+          "bbox": [
+            588.0,
+            886.0,
+            1079.0,
+            1775.0
+          ],
+          "confidence": 0.8688112497329712
+        },
+        {
+          "frame": 952,
+          "timestamp": 31.765066666666666,
+          "bbox": [
+            625.0,
+            933.0,
+            1078.0,
+            1833.0
+          ],
+          "confidence": 0.8590368032455444
+        },
+        {
+          "frame": 959,
+          "timestamp": 31.998633333333334,
+          "bbox": [
+            687.0,
+            935.0,
+            1080.0,
+            1756.0
+          ],
+          "confidence": 0.8855022192001343
+        },
+        {
+          "frame": 966,
+          "timestamp": 32.2322,
+          "bbox": [
+            681.0,
+            899.0,
+            1080.0,
+            1720.0
+          ],
+          "confidence": 0.9050635695457458
+        },
+        {
+          "frame": 973,
+          "timestamp": 32.46576666666667,
+          "bbox": [
+            691.0,
+            878.0,
+            1079.0,
+            1665.0
+          ],
+          "confidence": 0.9094440340995789
+        },
+        {
+          "frame": 980,
+          "timestamp": 32.699333333333335,
+          "bbox": [
+            705.0,
+            861.0,
+            1079.0,
+            1664.0
+          ],
+          "confidence": 0.9101557731628418
+        },
+        {
+          "frame": 987,
+          "timestamp": 32.932900000000004,
+          "bbox": [
+            722.0,
+            896.0,
+            1079.0,
+            1684.0
+          ],
+          "confidence": 0.9125096201896667
+        },
+        {
+          "frame": 994,
+          "timestamp": 33.166466666666665,
+          "bbox": [
+            677.0,
+            886.0,
+            1079.0,
+            1734.0
+          ],
+          "confidence": 0.8931401371955872
+        },
+        {
+          "frame": 1001,
+          "timestamp": 33.40003333333333,
+          "bbox": [
+            662.0,
+            934.0,
+            1079.0,
+            1768.0
+          ],
+          "confidence": 0.9004407525062561
+        },
+        {
+          "frame": 1008,
+          "timestamp": 33.6336,
+          "bbox": [
+            680.0,
+            977.0,
+            1080.0,
+            1788.0
+          ],
+          "confidence": 0.9078353047370911
+        },
+        {
+          "frame": 1015,
+          "timestamp": 33.86716666666667,
+          "bbox": [
+            713.0,
+            1062.0,
+            1079.0,
+            1884.0
+          ],
+          "confidence": 0.8973916172981262
+        },
+        {
+          "frame": 1022,
+          "timestamp": 34.10073333333333,
+          "bbox": [
+            746.0,
+            1066.0,
+            1079.0,
+            1833.0
+          ],
+          "confidence": 0.8837676644325256
+        },
+        {
+          "frame": 1029,
+          "timestamp": 34.3343,
+          "bbox": [
+            695.0,
+            1009.0,
+            1079.0,
+            1823.0
+          ],
+          "confidence": 0.9092251658439636
+        },
+        {
+          "frame": 1036,
+          "timestamp": 34.56786666666667,
+          "bbox": [
+            605.0,
+            941.0,
+            1078.0,
+            1847.0
+          ],
+          "confidence": 0.8930186033248901
+        },
+        {
+          "frame": 1043,
+          "timestamp": 34.801433333333335,
+          "bbox": [
+            588.0,
+            900.0,
+            1080.0,
+            1810.0
+          ],
+          "confidence": 0.9209353923797607
+        },
+        {
+          "frame": 1050,
+          "timestamp": 35.035000000000004,
+          "bbox": [
+            595.0,
+            947.0,
+            1080.0,
+            1900.0
+          ],
+          "confidence": 0.8918856382369995
+        },
+        {
+          "frame": 1057,
+          "timestamp": 35.268566666666665,
+          "bbox": [
+            675.0,
+            945.0,
+            1079.0,
+            1783.0
+          ],
+          "confidence": 0.875693142414093
+        },
+        {
+          "frame": 1064,
+          "timestamp": 35.50213333333333,
+          "bbox": [
+            744.0,
+            1025.0,
+            1079.0,
+            1807.0
+          ],
+          "confidence": 0.8762057423591614
+        },
+        {
+          "frame": 1071,
+          "timestamp": 35.7357,
+          "bbox": [
+            744.0,
+            1098.0,
+            1079.0,
+            1887.0
+          ],
+          "confidence": 0.8787570595741272
+        },
+        {
+          "frame": 1078,
+          "timestamp": 35.96926666666667,
+          "bbox": [
+            708.0,
+            1099.0,
+            1079.0,
+            1912.0
+          ],
+          "confidence": 0.9010772109031677
+        },
+        {
+          "frame": 1085,
+          "timestamp": 36.20283333333333,
+          "bbox": [
+            726.0,
+            1082.0,
+            1080.0,
+            1865.0
+          ],
+          "confidence": 0.8806746006011963
+        },
+        {
+          "frame": 1092,
+          "timestamp": 36.4364,
+          "bbox": [
+            747.0,
+            969.0,
+            1079.0,
+            1697.0
+          ],
+          "confidence": 0.8567622303962708
+        },
+        {
+          "frame": 1099,
+          "timestamp": 36.66996666666667,
+          "bbox": [
+            699.0,
+            927.0,
+            1080.0,
+            1889.0
+          ],
+          "confidence": 0.5434504747390747
+        },
+        {
+          "frame": 1106,
+          "timestamp": 36.903533333333336,
+          "bbox": [
+            663.0,
+            925.0,
+            1079.0,
+            1658.0
+          ],
+          "confidence": 0.6966083645820618
+        },
+        {
+          "frame": 1113,
+          "timestamp": 37.137100000000004,
+          "bbox": [
+            703.0,
+            886.0,
+            1079.0,
+            1608.0
+          ],
+          "confidence": 0.8622697591781616
+        },
+        {
+          "frame": 224,
+          "timestamp": 7.4741333333333335,
+          "bbox": [
+            871.0,
+            1595.0,
+            1079.0,
+            1919.0
+          ],
+          "confidence": 0.8534348011016846
+        },
+        {
+          "frame": 266,
+          "timestamp": 8.875533333333333,
+          "bbox": [
+            753.0,
+            1156.0,
+            1079.0,
+            1626.0
+          ],
+          "confidence": 0.8063835501670837
+        },
+        {
+          "frame": 273,
+          "timestamp": 9.1091,
+          "bbox": [
+            886.0,
+            1177.0,
+            1080.0,
+            1555.0
+          ],
+          "confidence": 0.8768829703330994
+        },
+        {
+          "frame": 280,
+          "timestamp": 9.342666666666666,
+          "bbox": [
+            889.0,
+            1147.0,
+            1079.0,
+            1491.0
+          ],
+          "confidence": 0.8346514701843262
+        },
+        {
+          "frame": 287,
+          "timestamp": 9.576233333333333,
+          "bbox": [
+            796.0,
+            1183.0,
+            1079.0,
+            1558.0
+          ],
+          "confidence": 0.8414694666862488
+        },
+        {
+          "frame": 294,
+          "timestamp": 9.809800000000001,
+          "bbox": [
+            833.0,
+            1153.0,
+            1078.0,
+            1459.0
+          ],
+          "confidence": 0.6875084042549133
+        },
+        {
+          "frame": 301,
+          "timestamp": 10.043366666666667,
+          "bbox": [
+            763.0,
+            1037.0,
+            1079.0,
+            1400.0
+          ],
+          "confidence": 0.7767987847328186
+        },
+        {
+          "frame": 308,
+          "timestamp": 10.276933333333334,
+          "bbox": [
+            642.0,
+            950.0,
+            1079.0,
+            1611.0
+          ],
+          "confidence": 0.8158297538757324
+        },
+        {
+          "frame": 315,
+          "timestamp": 10.5105,
+          "bbox": [
+            598.0,
+            860.0,
+            1080.0,
+            1743.0
+          ],
+          "confidence": 0.9169027209281921
+        },
+        {
+          "frame": 322,
+          "timestamp": 10.744066666666667,
+          "bbox": [
+            652.0,
+            829.0,
+            1079.0,
+            1509.0
+          ],
+          "confidence": 0.8595909476280212
+        },
+        {
+          "frame": 329,
+          "timestamp": 10.977633333333333,
+          "bbox": [
+            682.0,
+            934.0,
+            1079.0,
+            1556.0
+          ],
+          "confidence": 0.8479417562484741
+        },
+        {
+          "frame": 343,
+          "timestamp": 11.444766666666666,
+          "bbox": [
+            673.0,
+            1085.0,
+            1080.0,
+            1914.0
+          ],
+          "confidence": 0.8764480352401733
+        },
+        {
+          "frame": 350,
+          "timestamp": 11.678333333333333,
+          "bbox": [
+            710.0,
+            1062.0,
+            1080.0,
+            1806.0
+          ],
+          "confidence": 0.7444350123405457
+        },
+        {
+          "frame": 364,
+          "timestamp": 12.145466666666668,
+          "bbox": [
+            965.0,
+            1040.0,
+            1079.0,
+            1294.0
+          ],
+          "confidence": 0.7326865196228027
+        },
+        {
+          "frame": 371,
+          "timestamp": 12.379033333333334,
+          "bbox": [
+            975.0,
+            1068.0,
+            1080.0,
+            1336.0
+          ],
+          "confidence": 0.42187559604644775
+        },
+        {
+          "frame": 1120,
+          "timestamp": 37.370666666666665,
+          "bbox": [
+            818.0,
+            876.0,
+            1079.0,
+            1504.0
+          ],
+          "confidence": 0.842094361782074
+        },
+        {
+          "frame": 1617,
+          "timestamp": 53.953900000000004,
+          "bbox": [
+            728.0,
+            363.0,
+            1080.0,
+            831.0
+          ],
+          "confidence": 0.29664188623428345
+        },
+        {
+          "frame": 1855,
+          "timestamp": 61.89516666666667,
+          "bbox": [
+            357.0,
+            1738.0,
+            835.0,
+            1919.0
+          ],
+          "confidence": 0.7945696711540222
+        },
+        {
+          "frame": 1127,
+          "timestamp": 37.60423333333333,
+          "bbox": [
+            957.0,
+            920.0,
+            1079.0,
+            1350.0
+          ],
+          "confidence": 0.5210663676261902
+        },
+        {
+          "frame": 1148,
+          "timestamp": 38.30493333333333,
+          "bbox": [
+            972.0,
+            1304.0,
+            1079.0,
+            1556.0
+          ],
+          "confidence": 0.39573150873184204
+        },
+        {
+          "frame": 1155,
+          "timestamp": 38.5385,
+          "bbox": [
+            953.0,
+            1366.0,
+            1079.0,
+            1718.0
+          ],
+          "confidence": 0.6541368365287781
+        },
+        {
+          "frame": 1575,
+          "timestamp": 52.5525,
+          "bbox": [
+            896.0,
+            805.0,
+            1080.0,
+            1140.0
+          ],
+          "confidence": 0.5242865085601807
+        },
+        {
+          "frame": 1582,
+          "timestamp": 52.78606666666667,
+          "bbox": [
+            882.0,
+            712.0,
+            1079.0,
+            1037.0
+          ],
+          "confidence": 0.4142822325229645
+        },
+        {
+          "frame": 1638,
+          "timestamp": 54.6546,
+          "bbox": [
+            874.0,
+            886.0,
+            1079.0,
+            1312.0
+          ],
+          "confidence": 0.6696652770042419
+        },
+        {
+          "frame": 1659,
+          "timestamp": 55.3553,
+          "bbox": [
+            868.0,
+            1110.0,
+            1079.0,
+            1917.0
+          ],
+          "confidence": 0.44320735335350037
+        },
+        {
+          "frame": 1673,
+          "timestamp": 55.822433333333336,
+          "bbox": [
+            862.0,
+            1130.0,
+            1079.0,
+            1916.0
+          ],
+          "confidence": 0.25027745962142944
+        },
+        {
+          "frame": 231,
+          "timestamp": 7.7077,
+          "bbox": [
+            701.0,
+            1482.0,
+            1078.0,
+            1918.0
+          ],
+          "confidence": 0.8973969221115112
+        },
+        {
+          "frame": 238,
+          "timestamp": 7.9412666666666665,
+          "bbox": [
+            674.0,
+            1363.0,
+            1078.0,
+            1918.0
+          ],
+          "confidence": 0.8771706223487854
+        },
+        {
+          "frame": 245,
+          "timestamp": 8.174833333333334,
+          "bbox": [
+            641.0,
+            1242.0,
+            1079.0,
+            1918.0
+          ],
+          "confidence": 0.9183858633041382
+        },
+        {
+          "frame": 252,
+          "timestamp": 8.4084,
+          "bbox": [
+            645.0,
+            1147.0,
+            1079.0,
+            1918.0
+          ],
+          "confidence": 0.8920455574989319
+        },
+        {
+          "frame": 259,
+          "timestamp": 8.641966666666667,
+          "bbox": [
+            696.0,
+            1126.0,
+            1079.0,
+            1777.0
+          ],
+          "confidence": 0.8793538212776184
+        },
+        {
+          "frame": 1736,
+          "timestamp": 57.924533333333336,
+          "bbox": [
+            727.0,
+            1342.0,
+            1078.0,
+            1918.0
+          ],
+          "confidence": 0.8916483521461487
+        },
+        {
+          "frame": 1743,
+          "timestamp": 58.158100000000005,
+          "bbox": [
+            515.0,
+            1258.0,
+            1075.0,
+            1919.0
+          ],
+          "confidence": 0.915941596031189
+        },
+        {
+          "frame": 1757,
+          "timestamp": 58.625233333333334,
+          "bbox": [
+            528.0,
+            1537.0,
+            855.0,
+            1918.0
+          ],
+          "confidence": 0.8051593899726868
+        },
+        {
+          "frame": 1764,
+          "timestamp": 58.8588,
+          "bbox": [
+            492.0,
+            1516.0,
+            813.0,
+            1918.0
+          ],
+          "confidence": 0.8089751601219177
+        },
+        {
+          "frame": 1771,
+          "timestamp": 59.09236666666667,
+          "bbox": [
+            492.0,
+            1449.0,
+            841.0,
+            1918.0
+          ],
+          "confidence": 0.8636378049850464
+        },
+        {
+          "frame": 1778,
+          "timestamp": 59.32593333333333,
+          "bbox": [
+            514.0,
+            1329.0,
+            1022.0,
+            1918.0
+          ],
+          "confidence": 0.898398756980896
+        },
+        {
+          "frame": 1785,
+          "timestamp": 59.5595,
+          "bbox": [
+            527.0,
+            1267.0,
+            1077.0,
+            1918.0
+          ],
+          "confidence": 0.9231710433959961
+        },
+        {
+          "frame": 1792,
+          "timestamp": 59.79306666666667,
+          "bbox": [
+            423.0,
+            1265.0,
+            1076.0,
+            1918.0
+          ],
+          "confidence": 0.9225374460220337
+        },
+        {
+          "frame": 1799,
+          "timestamp": 60.026633333333336,
+          "bbox": [
+            202.0,
+            1379.0,
+            815.0,
+            1918.0
+          ],
+          "confidence": 0.8649606704711914
+        }
+      ]
+    },
+    {
+      "entity_id": "merged_entity_4",
+      "object_class": "handbag",
+      "appearance_count": 26,
+      "first_seen_frame": 0,
+      "last_seen_frame": 1946,
+      "description": "The image depicts a black, irregularly-shaped object with a yellow, irregularly-shaped mark on its surface. The object appears to be made of a matte material, possibly plastic or rubber, and has a slightly reflective surface. The yellow mark is centrally located on the object and has a jagged, irregular outline, suggesting it might be a sticker or a paint mark. The background is a solid, dark gray color, which contrasts with the black object and the yellow mark, making them stand out prominently. The lighting in the image is uneven, with a noticeable glare on the bottom right corner of the object, indicating a light source from that direction. The overall composition of the image is simple and focuses on the contrast between the black object and the yellow mark.\nThe object's shape is ambiguous; it could be a bag, a piece of clothing, or another type of item. The yellow mark is irregular and appears to be applied with a marker or paint, given its jagged edges and",
+      "description_frame": 105,
+      "observations": [
+        {
+          "frame": 0,
+          "timestamp": 0.0,
+          "bbox": [
+            269.0,
+            831.0,
+            387.0,
+            904.0
+          ],
+          "confidence": 0.429470956325531
+        },
+        {
+          "frame": 7,
+          "timestamp": 0.23356666666666667,
+          "bbox": [
+            270.0,
+            830.0,
+            390.0,
+            905.0
+          ],
+          "confidence": 0.5260094404220581
+        },
+        {
+          "frame": 14,
+          "timestamp": 0.46713333333333334,
+          "bbox": [
+            274.0,
+            845.0,
+            392.0,
+            920.0
+          ],
+          "confidence": 0.6528975367546082
+        },
+        {
+          "frame": 21,
+          "timestamp": 0.7007,
+          "bbox": [
+            293.0,
+            868.0,
+            410.0,
+            942.0
+          ],
+          "confidence": 0.2957279682159424
+        },
+        {
+          "frame": 28,
+          "timestamp": 0.9342666666666667,
+          "bbox": [
+            313.0,
+            893.0,
+            429.0,
+            964.0
+          ],
+          "confidence": 0.3781769275665283
+        },
+        {
+          "frame": 35,
+          "timestamp": 1.1678333333333333,
+          "bbox": [
+            334.0,
+            915.0,
+            449.0,
+            986.0
+          ],
+          "confidence": 0.4839913547039032
+        },
+        {
+          "frame": 42,
+          "timestamp": 1.4014,
+          "bbox": [
+            344.0,
+            922.0,
+            457.0,
+            992.0
+          ],
+          "confidence": 0.42747652530670166
+        },
+        {
+          "frame": 49,
+          "timestamp": 1.6349666666666667,
+          "bbox": [
+            341.0,
+            928.0,
+            451.0,
+            998.0
+          ],
+          "confidence": 0.5674247145652771
+        },
+        {
+          "frame": 56,
+          "timestamp": 1.8685333333333334,
+          "bbox": [
+            328.0,
+            932.0,
+            440.0,
+            1001.0
+          ],
+          "confidence": 0.5591536164283752
+        },
+        {
+          "frame": 63,
+          "timestamp": 2.1021,
+          "bbox": [
+            308.0,
+            938.0,
+            419.0,
+            1009.0
+          ],
+          "confidence": 0.36509019136428833
+        },
+        {
+          "frame": 70,
+          "timestamp": 2.3356666666666666,
+          "bbox": [
+            260.0,
+            952.0,
+            370.0,
+            1021.0
+          ],
+          "confidence": 0.4624330699443817
+        },
+        {
+          "frame": 84,
+          "timestamp": 2.8028,
+          "bbox": [
+            103.0,
+            950.0,
+            209.0,
+            1019.0
+          ],
+          "confidence": 0.5021448135375977
+        },
+        {
+          "frame": 91,
+          "timestamp": 3.036366666666667,
+          "bbox": [
+            27.0,
+            949.0,
+            131.0,
+            1015.0
+          ],
+          "confidence": 0.35324305295944214
+        },
+        {
+          "frame": 1890,
+          "timestamp": 63.063,
+          "bbox": [
+            35.0,
+            1469.0,
+            298.0,
+            1656.0
+          ],
+          "confidence": 0.9012537002563477
+        },
+        {
+          "frame": 1897,
+          "timestamp": 63.29656666666667,
+          "bbox": [
+            225.0,
+            1579.0,
+            500.0,
+            1778.0
+          ],
+          "confidence": 0.6332632899284363
+        },
+        {
+          "frame": 1897,
+          "timestamp": 63.29656666666667,
+          "bbox": [
+            145.0,
+            1017.0,
+            235.0,
+            1064.0
+          ],
+          "confidence": 0.4376380145549774
+        },
+        {
+          "frame": 1904,
+          "timestamp": 63.53013333333333,
+          "bbox": [
+            392.0,
+            1669.0,
+            693.0,
+            1880.0
+          ],
+          "confidence": 0.7933080196380615
+        },
+        {
+          "frame": 1904,
+          "timestamp": 63.53013333333333,
+          "bbox": [
+            328.0,
+            1018.0,
+            414.0,
+            1070.0
+          ],
+          "confidence": 0.4571770429611206
+        },
+        {
+          "frame": 1918,
+          "timestamp": 63.99726666666667,
+          "bbox": [
+            516.0,
+            997.0,
+            609.0,
+            1057.0
+          ],
+          "confidence": 0.3035975396633148
+        },
+        {
+          "frame": 1925,
+          "timestamp": 64.23083333333334,
+          "bbox": [
+            494.0,
+            993.0,
+            593.0,
+            1057.0
+          ],
+          "confidence": 0.3270114064216614
+        },
+        {
+          "frame": 1946,
+          "timestamp": 64.93153333333333,
+          "bbox": [
+            381.0,
+            1059.0,
+            496.0,
+            1130.0
+          ],
+          "confidence": 0.25579944252967834
+        },
+        {
+          "frame": 91,
+          "timestamp": 3.036366666666667,
+          "bbox": [
+            962.0,
+            1268.0,
+            1078.0,
+            1486.0
+          ],
+          "confidence": 0.8388165235519409
+        },
+        {
+          "frame": 98,
+          "timestamp": 3.2699333333333334,
+          "bbox": [
+            830.0,
+            1213.0,
+            984.0,
+            1407.0
+          ],
+          "confidence": 0.8659863471984863
+        },
+        {
+          "frame": 105,
+          "timestamp": 3.5035000000000003,
+          "bbox": [
+            687.0,
+            1172.0,
+            832.0,
+            1344.0
+          ],
+          "confidence": 0.9226648807525635
+        },
+        {
+          "frame": 112,
+          "timestamp": 3.7370666666666668,
+          "bbox": [
+            518.0,
+            1155.0,
+            650.0,
+            1316.0
+          ],
+          "confidence": 0.8232236504554749
+        },
+        {
+          "frame": 119,
+          "timestamp": 3.9706333333333332,
+          "bbox": [
+            299.0,
+            1177.0,
+            433.0,
+            1333.0
+          ],
+          "confidence": 0.6940680146217346
+        }
+      ]
+    },
+    {
+      "entity_id": "merged_entity_2",
+      "object_class": "keyboard",
+      "appearance_count": 24,
+      "first_seen_frame": 0,
+      "last_seen_frame": 1974,
+      "description": "The image depicts a close-up view of a computer keyboard. The keyboard is primarily black with a few distinctive features:\n\n1. **Color and Layout**: The keyboard is primarily black with white lettering on the keys. The keys are arranged in a standard QWERTY layout, typical of most computer keyboards. The keys are uniform in size and shape, with a slight curvature at the top for ergonomic comfort.\n\n2. **Key Colors and Indicators**: \n   - **Key Caps**: The keys have white lettering, with some keys having colored backlighting. For example, the number keys (1-0) have a red backlight, while the shift keys (Y, U, I, O, R, Z) have a green backlight. \n   - **Function Keys**: The function keys (F1-F12) are also visible, with the F1 key being highlighted in orange, indicating it is currently active or selected.\n   - **Escape Key**: The escape key is",
+      "description_frame": 1939,
+      "observations": [
+        {
+          "frame": 0,
+          "timestamp": 0.0,
+          "bbox": [
+            228.0,
+            946.0,
+            1064.0,
+            1355.0
+          ],
+          "confidence": 0.8682519793510437
+        },
+        {
+          "frame": 7,
+          "timestamp": 0.23356666666666667,
+          "bbox": [
+            229.0,
+            946.0,
+            1071.0,
+            1360.0
+          ],
+          "confidence": 0.8461233973503113
+        },
+        {
+          "frame": 14,
+          "timestamp": 0.46713333333333334,
+          "bbox": [
+            232.0,
+            964.0,
+            1072.0,
+            1381.0
+          ],
+          "confidence": 0.8105825781822205
+        },
+        {
+          "frame": 21,
+          "timestamp": 0.7007,
+          "bbox": [
+            253.0,
+            986.0,
+            1077.0,
+            1401.0
+          ],
+          "confidence": 0.6737794280052185
+        },
+        {
+          "frame": 28,
+          "timestamp": 0.9342666666666667,
+          "bbox": [
+            277.0,
+            1008.0,
+            1078.0,
+            1416.0
+          ],
+          "confidence": 0.6989067792892456
+        },
+        {
+          "frame": 35,
+          "timestamp": 1.1678333333333333,
+          "bbox": [
+            304.0,
+            1029.0,
+            1078.0,
+            1425.0
+          ],
+          "confidence": 0.6973168253898621
+        },
+        {
+          "frame": 42,
+          "timestamp": 1.4014,
+          "bbox": [
+            318.0,
+            1035.0,
+            1077.0,
+            1421.0
+          ],
+          "confidence": 0.7939602732658386
+        },
+        {
+          "frame": 49,
+          "timestamp": 1.6349666666666667,
+          "bbox": [
+            317.0,
+            1040.0,
+            1077.0,
+            1412.0
+          ],
+          "confidence": 0.6178865432739258
+        },
+        {
+          "frame": 56,
+          "timestamp": 1.8685333333333334,
+          "bbox": [
+            307.0,
+            1040.0,
+            1077.0,
+            1403.0
+          ],
+          "confidence": 0.6969590187072754
+        },
+        {
+          "frame": 63,
+          "timestamp": 2.1021,
+          "bbox": [
+            291.0,
+            1045.0,
+            1061.0,
+            1393.0
+          ],
+          "confidence": 0.7736822962760925
+        },
+        {
+          "frame": 70,
+          "timestamp": 2.3356666666666666,
+          "bbox": [
+            238.0,
+            1055.0,
+            999.0,
+            1385.0
+          ],
+          "confidence": 0.8869565725326538
+        },
+        {
+          "frame": 77,
+          "timestamp": 2.5692333333333335,
+          "bbox": [
+            143.0,
+            1062.0,
+            892.0,
+            1368.0
+          ],
+          "confidence": 0.8961042761802673
+        },
+        {
+          "frame": 84,
+          "timestamp": 2.8028,
+          "bbox": [
+            64.0,
+            1047.0,
+            794.0,
+            1324.0
+          ],
+          "confidence": 0.9257588386535645
+        },
+        {
+          "frame": 91,
+          "timestamp": 3.036366666666667,
+          "bbox": [
+            0.0,
+            1037.0,
+            683.0,
+            1280.0
+          ],
+          "confidence": 0.891241192817688
+        },
+        {
+          "frame": 98,
+          "timestamp": 3.2699333333333334,
+          "bbox": [
+            2.0,
+            1031.0,
+            577.0,
+            1232.0
+          ],
+          "confidence": 0.8741975426673889
+        },
+        {
+          "frame": 1953,
+          "timestamp": 65.1651,
+          "bbox": [
+            129.0,
+            1270.0,
+            1078.0,
+            1919.0
+          ],
+          "confidence": 0.9529603719711304
+        },
+        {
+          "frame": 1960,
+          "timestamp": 65.39866666666667,
+          "bbox": [
+            107.0,
+            1318.0,
+            1076.0,
+            1919.0
+          ],
+          "confidence": 0.9568265080451965
+        },
+        {
+          "frame": 1967,
+          "timestamp": 65.63223333333333,
+          "bbox": [
+            90.0,
+            1317.0,
+            1064.0,
+            1883.0
+          ],
+          "confidence": 0.9470401406288147
+        },
+        {
+          "frame": 1974,
+          "timestamp": 65.86580000000001,
+          "bbox": [
+            124.0,
+            1269.0,
+            1072.0,
+            1749.0
+          ],
+          "confidence": 0.9185306429862976
+        },
+        {
+          "frame": 1911,
+          "timestamp": 63.7637,
+          "bbox": [
+            215.0,
+            1045.0,
+            730.0,
+            1513.0
+          ],
+          "confidence": 0.9381626844406128
+        },
+        {
+          "frame": 1918,
+          "timestamp": 63.99726666666667,
+          "bbox": [
+            277.0,
+            1059.0,
+            866.0,
+            1596.0
+          ],
+          "confidence": 0.9521438479423523
+        },
+        {
+          "frame": 1925,
+          "timestamp": 64.23083333333334,
+          "bbox": [
+            259.0,
+            1072.0,
+            927.0,
+            1664.0
+          ],
+          "confidence": 0.9390753507614136
+        },
+        {
+          "frame": 1932,
+          "timestamp": 64.4644,
+          "bbox": [
+            244.0,
+            1085.0,
+            989.0,
+            1711.0
+          ],
+          "confidence": 0.9350197315216064
+        },
+        {
+          "frame": 1939,
+          "timestamp": 64.69796666666667,
+          "bbox": [
+            203.0,
+            1120.0,
+            1023.0,
+            1776.0
+          ],
+          "confidence": 0.9611316323280334
+        }
+      ]
+    },
+    {
+      "entity_id": "merged_entity_20",
+      "object_class": "bed",
+      "appearance_count": 48,
+      "first_seen_frame": 581,
+      "last_seen_frame": 1792,
+      "description": "The image depicts a scene with a focus on a notebook and some clothing items. The notebook is positioned on a textured, mesh-like surface that appears to be made of metal or plastic. The surface has a pattern of interlocking metal wires forming a grid-like structure, giving it a somewhat industrial or utilitarian appearance.\n\nThe notebook itself is open, revealing a blank page with text written on it. The text is not legible due to the blurriness of the image. The binding of the notebook is visible, and it appears to be a spiral-bound type, commonly used for writing or journaling.\n\nTo the right of the notebook, there is a piece of clothing, likely a shirt or a similar garment. The clothing is white and appears to be slightly crumpled or folded, suggesting it might have been recently used or is in the process of being worn.\n\nIn the upper left corner of the image, there is a small portion of another item visible, which seems to be a piece of",
+      "description_frame": 1127,
+      "observations": [
+        {
+          "frame": 581,
+          "timestamp": 19.386033333333334,
+          "bbox": [
+            1.0,
+            674.0,
+            478.0,
+            1276.0
+          ],
+          "confidence": 0.7338643074035645
+        },
+        {
+          "frame": 588,
+          "timestamp": 19.619600000000002,
+          "bbox": [
+            0.0,
+            614.0,
+            607.0,
+            1405.0
+          ],
+          "confidence": 0.5608078241348267
+        },
+        {
+          "frame": 595,
+          "timestamp": 19.853166666666667,
+          "bbox": [
+            0.0,
+            658.0,
+            730.0,
+            1464.0
+          ],
+          "confidence": 0.6638272404670715
+        },
+        {
+          "frame": 602,
+          "timestamp": 20.086733333333335,
+          "bbox": [
+            0.0,
+            560.0,
+            866.0,
+            1531.0
+          ],
+          "confidence": 0.7501018643379211
+        },
+        {
+          "frame": 609,
+          "timestamp": 20.3203,
+          "bbox": [
+            0.0,
+            566.0,
+            945.0,
+            1531.0
+          ],
+          "confidence": 0.7002094388008118
+        },
+        {
+          "frame": 616,
+          "timestamp": 20.553866666666668,
+          "bbox": [
+            0.0,
+            493.0,
+            1013.0,
+            1534.0
+          ],
+          "confidence": 0.7285189628601074
+        },
+        {
+          "frame": 623,
+          "timestamp": 20.787433333333333,
+          "bbox": [
+            1.0,
+            370.0,
+            1063.0,
+            1572.0
+          ],
+          "confidence": 0.40045166015625
+        },
+        {
+          "frame": 630,
+          "timestamp": 21.021,
+          "bbox": [
+            0.0,
+            348.0,
+            1075.0,
+            1628.0
+          ],
+          "confidence": 0.6492224931716919
+        },
+        {
+          "frame": 637,
+          "timestamp": 21.254566666666665,
+          "bbox": [
+            1.0,
+            525.0,
+            1070.0,
+            1659.0
+          ],
+          "confidence": 0.6851763129234314
+        },
+        {
+          "frame": 644,
+          "timestamp": 21.488133333333334,
+          "bbox": [
+            0.0,
+            212.0,
+            1077.0,
+            1670.0
+          ],
+          "confidence": 0.896178662776947
+        },
+        {
+          "frame": 651,
+          "timestamp": 21.721700000000002,
+          "bbox": [
+            0.0,
+            452.0,
+            1076.0,
+            1685.0
+          ],
+          "confidence": 0.6276031732559204
+        },
+        {
+          "frame": 658,
+          "timestamp": 21.955266666666667,
+          "bbox": [
+            0.0,
+            38.0,
+            1079.0,
+            1796.0
+          ],
+          "confidence": 0.6951860189437866
+        },
+        {
+          "frame": 763,
+          "timestamp": 25.458766666666666,
+          "bbox": [
+            756.0,
+            222.0,
+            1080.0,
+            1145.0
+          ],
+          "confidence": 0.40598905086517334
+        },
+        {
+          "frame": 1050,
+          "timestamp": 35.035000000000004,
+          "bbox": [
+            239.0,
+            1.0,
+            1079.0,
+            523.0
+          ],
+          "confidence": 0.6059932708740234
+        },
+        {
+          "frame": 1057,
+          "timestamp": 35.268566666666665,
+          "bbox": [
+            2.0,
+            1.0,
+            1079.0,
+            564.0
+          ],
+          "confidence": 0.8557309508323669
+        },
+        {
+          "frame": 1337,
+          "timestamp": 44.61123333333333,
+          "bbox": [
+            0.0,
+            394.0,
+            274.0,
+            1517.0
+          ],
+          "confidence": 0.25781726837158203
+        },
+        {
+          "frame": 1778,
+          "timestamp": 59.32593333333333,
+          "bbox": [
+            733.0,
+            0.0,
+            1080.0,
+            840.0
+          ],
+          "confidence": 0.9051406383514404
+        },
+        {
+          "frame": 1785,
+          "timestamp": 59.5595,
+          "bbox": [
+            660.0,
+            16.0,
+            1079.0,
+            880.0
+          ],
+          "confidence": 0.9172401428222656
+        },
+        {
+          "frame": 1792,
+          "timestamp": 59.79306666666667,
+          "bbox": [
+            516.0,
+            76.0,
+            1079.0,
+            940.0
+          ],
+          "confidence": 0.9219889044761658
+        },
+        {
+          "frame": 742,
+          "timestamp": 24.758066666666668,
+          "bbox": [
+            0.0,
+            7.0,
+            1079.0,
+            1807.0
+          ],
+          "confidence": 0.8367769718170166
+        },
+        {
+          "frame": 749,
+          "timestamp": 24.991633333333333,
+          "bbox": [
+            0.0,
+            8.0,
+            1077.0,
+            1908.0
+          ],
+          "confidence": 0.6539314389228821
+        },
+        {
+          "frame": 1064,
+          "timestamp": 35.50213333333333,
+          "bbox": [
+            1.0,
+            1.0,
+            1033.0,
+            644.0
+          ],
+          "confidence": 0.9313238263130188
+        },
+        {
+          "frame": 1071,
+          "timestamp": 35.7357,
+          "bbox": [
+            1.0,
+            1.0,
+            904.0,
+            814.0
+          ],
+          "confidence": 0.9013634920120239
+        },
+        {
+          "frame": 1078,
+          "timestamp": 35.96926666666667,
+          "bbox": [
+            1.0,
+            2.0,
+            820.0,
+            982.0
+          ],
+          "confidence": 0.9014838933944702
+        },
+        {
+          "frame": 1085,
+          "timestamp": 36.20283333333333,
+          "bbox": [
+            0.0,
+            1.0,
+            815.0,
+            1139.0
+          ],
+          "confidence": 0.8929257392883301
+        },
+        {
+          "frame": 1092,
+          "timestamp": 36.4364,
+          "bbox": [
+            1.0,
+            5.0,
+            883.0,
+            1265.0
+          ],
+          "confidence": 0.7961077690124512
+        },
+        {
+          "frame": 1099,
+          "timestamp": 36.66996666666667,
+          "bbox": [
+            0.0,
+            4.0,
+            1010.0,
+            1565.0
+          ],
+          "confidence": 0.3987952470779419
+        },
+        {
+          "frame": 1106,
+          "timestamp": 36.903533333333336,
+          "bbox": [
+            0.0,
+            14.0,
+            1076.0,
+            1802.0
+          ],
+          "confidence": 0.7268529534339905
+        },
+        {
+          "frame": 1113,
+          "timestamp": 37.137100000000004,
+          "bbox": [
+            0.0,
+            9.0,
+            1077.0,
+            1914.0
+          ],
+          "confidence": 0.9433625340461731
+        },
+        {
+          "frame": 1120,
+          "timestamp": 37.370666666666665,
+          "bbox": [
+            3.0,
+            4.0,
+            1079.0,
+            1898.0
+          ],
+          "confidence": 0.9294319152832031
+        },
+        {
+          "frame": 1127,
+          "timestamp": 37.60423333333333,
+          "bbox": [
+            1.0,
+            4.0,
+            1078.0,
+            1916.0
+          ],
+          "confidence": 0.9485020637512207
+        },
+        {
+          "frame": 1134,
+          "timestamp": 37.8378,
+          "bbox": [
+            2.0,
+            2.0,
+            1078.0,
+            1912.0
+          ],
+          "confidence": 0.7580776214599609
+        },
+        {
+          "frame": 1141,
+          "timestamp": 38.07136666666667,
+          "bbox": [
+            1.0,
+            3.0,
+            1078.0,
+            1910.0
+          ],
+          "confidence": 0.6790646910667419
+        },
+        {
+          "frame": 1148,
+          "timestamp": 38.30493333333333,
+          "bbox": [
+            1.0,
+            4.0,
+            1079.0,
+            1913.0
+          ],
+          "confidence": 0.6867019534111023
+        },
+        {
+          "frame": 1155,
+          "timestamp": 38.5385,
+          "bbox": [
+            1.0,
+            5.0,
+            1078.0,
+            1909.0
+          ],
+          "confidence": 0.8445565104484558
+        },
+        {
+          "frame": 1162,
+          "timestamp": 38.77206666666667,
+          "bbox": [
+            1.0,
+            5.0,
+            1077.0,
+            1911.0
+          ],
+          "confidence": 0.8128969669342041
+        },
+        {
+          "frame": 1169,
+          "timestamp": 39.005633333333336,
+          "bbox": [
+            1.0,
+            2.0,
+            1079.0,
+            1908.0
+          ],
+          "confidence": 0.9086991548538208
+        },
+        {
+          "frame": 1176,
+          "timestamp": 39.239200000000004,
+          "bbox": [
+            1.0,
+            3.0,
+            1079.0,
+            1913.0
+          ],
+          "confidence": 0.9234875440597534
+        },
+        {
+          "frame": 665,
+          "timestamp": 22.188833333333335,
+          "bbox": [
+            3.0,
+            320.0,
+            1079.0,
+            1901.0
+          ],
+          "confidence": 0.9452772736549377
+        },
+        {
+          "frame": 672,
+          "timestamp": 22.4224,
+          "bbox": [
+            3.0,
+            194.0,
+            1076.0,
+            1893.0
+          ],
+          "confidence": 0.9255066514015198
+        },
+        {
+          "frame": 679,
+          "timestamp": 22.655966666666668,
+          "bbox": [
+            3.0,
+            147.0,
+            1078.0,
+            1851.0
+          ],
+          "confidence": 0.7688847780227661
+        },
+        {
+          "frame": 686,
+          "timestamp": 22.889533333333333,
+          "bbox": [
+            2.0,
+            57.0,
+            1078.0,
+            1910.0
+          ],
+          "confidence": 0.9068572521209717
+        },
+        {
+          "frame": 693,
+          "timestamp": 23.1231,
+          "bbox": [
+            0.0,
+            22.0,
+            1078.0,
+            1917.0
+          ],
+          "confidence": 0.8585720658302307
+        },
+        {
+          "frame": 700,
+          "timestamp": 23.356666666666666,
+          "bbox": [
+            0.0,
+            117.0,
+            1076.0,
+            1912.0
+          ],
+          "confidence": 0.9334355592727661
+        },
+        {
+          "frame": 707,
+          "timestamp": 23.590233333333334,
+          "bbox": [
+            3.0,
+            4.0,
+            1079.0,
+            1914.0
+          ],
+          "confidence": 0.9282867312431335
+        },
+        {
+          "frame": 714,
+          "timestamp": 23.823800000000002,
+          "bbox": [
+            4.0,
+            3.0,
+            1077.0,
+            1916.0
+          ],
+          "confidence": 0.8955047726631165
+        },
+        {
+          "frame": 721,
+          "timestamp": 24.057366666666667,
+          "bbox": [
+            4.0,
+            64.0,
+            1077.0,
+            1915.0
+          ],
+          "confidence": 0.9256797432899475
+        },
+        {
+          "frame": 728,
+          "timestamp": 24.290933333333335,
+          "bbox": [
+            2.0,
+            153.0,
+            1079.0,
+            1915.0
+          ],
+          "confidence": 0.8743416666984558
+        }
+      ]
+    },
+    {
+      "entity_id": "merged_entity_0",
+      "object_class": "tv",
+      "appearance_count": 24,
+      "first_seen_frame": 0,
+      "last_seen_frame": 1967,
+      "description": "The image depicts a computer monitor displaying a large, black screen with numerous white lines of text. The text appears to be a list or a series of entries, possibly a document or a series of messages. The lines are densely packed, making it difficult to discern individual words or phrases. The text is organized in a structured manner, with each line separated by a thin, horizontal line. \n\nThe monitor itself is a Dell brand, as indicated by the logo at the bottom of the bezel. The screen is mounted on a white wall, and there are visible cables or wires running along the left side of the monitor. The cables appear to be connected to the monitor, possibly for power or data transfer.\n\nThe overall appearance suggests that the screen is in a state of being actively used, possibly for a task that involves reading or processing a large amount of text. The lack of any other visible elements or objects in the image focuses the viewer's attention solely on the screen and its contents.\n\nGiven the context",
+      "description_frame": 98,
+      "observations": [
+        {
+          "frame": 0,
+          "timestamp": 0.0,
+          "bbox": [
+            0.0,
+            1.0,
+            1079.0,
+            598.0
+          ],
+          "confidence": 0.9062485098838806
+        },
+        {
+          "frame": 7,
+          "timestamp": 0.23356666666666667,
+          "bbox": [
+            1.0,
+            1.0,
+            1079.0,
+            593.0
+          ],
+          "confidence": 0.9174746870994568
+        },
+        {
+          "frame": 14,
+          "timestamp": 0.46713333333333334,
+          "bbox": [
+            1.0,
+            1.0,
+            1079.0,
+            610.0
+          ],
+          "confidence": 0.921553373336792
+        },
+        {
+          "frame": 21,
+          "timestamp": 0.7007,
+          "bbox": [
+            0.0,
+            2.0,
+            1079.0,
+            636.0
+          ],
+          "confidence": 0.8543815612792969
+        },
+        {
+          "frame": 28,
+          "timestamp": 0.9342666666666667,
+          "bbox": [
+            1.0,
+            1.0,
+            1078.0,
+            658.0
+          ],
+          "confidence": 0.9027044773101807
+        },
+        {
+          "frame": 35,
+          "timestamp": 1.1678333333333333,
+          "bbox": [
+            2.0,
+            1.0,
+            1079.0,
+            681.0
+          ],
+          "confidence": 0.940044641494751
+        },
+        {
+          "frame": 42,
+          "timestamp": 1.4014,
+          "bbox": [
+            3.0,
+            1.0,
+            1080.0,
+            690.0
+          ],
+          "confidence": 0.9454374313354492
+        },
+        {
+          "frame": 49,
+          "timestamp": 1.6349666666666667,
+          "bbox": [
+            3.0,
+            1.0,
+            1080.0,
+            694.0
+          ],
+          "confidence": 0.9439011216163635
+        },
+        {
+          "frame": 1911,
+          "timestamp": 63.7637,
+          "bbox": [
+            467.0,
+            192.0,
+            1078.0,
+            1000.0
+          ],
+          "confidence": 0.9229145050048828
+        },
+        {
+          "frame": 1918,
+          "timestamp": 63.99726666666667,
+          "bbox": [
+            516.0,
+            121.0,
+            1080.0,
+            937.0
+          ],
+          "confidence": 0.9102866053581238
+        },
+        {
+          "frame": 1925,
+          "timestamp": 64.23083333333334,
+          "bbox": [
+            462.0,
+            48.0,
+            1079.0,
+            907.0
+          ],
+          "confidence": 0.93333899974823
+        },
+        {
+          "frame": 1932,
+          "timestamp": 64.4644,
+          "bbox": [
+            401.0,
+            1.0,
+            1078.0,
+            880.0
+          ],
+          "confidence": 0.9414486885070801
+        },
+        {
+          "frame": 1939,
+          "timestamp": 64.69796666666667,
+          "bbox": [
+            294.0,
+            0.0,
+            1078.0,
+            868.0
+          ],
+          "confidence": 0.9466594457626343
+        },
+        {
+          "frame": 1946,
+          "timestamp": 64.93153333333333,
+          "bbox": [
+            180.0,
+            1.0,
+            1079.0,
+            887.0
+          ],
+          "confidence": 0.9436937570571899
+        },
+        {
+          "frame": 56,
+          "timestamp": 1.8685333333333334,
+          "bbox": [
+            2.0,
+            1.0,
+            1080.0,
+            700.0
+          ],
+          "confidence": 0.9351882934570312
+        },
+        {
+          "frame": 63,
+          "timestamp": 2.1021,
+          "bbox": [
+            0.0,
+            1.0,
+            1079.0,
+            707.0
+          ],
+          "confidence": 0.914520263671875
+        },
+        {
+          "frame": 70,
+          "timestamp": 2.3356666666666666,
+          "bbox": [
+            0.0,
+            0.0,
+            1079.0,
+            717.0
+          ],
+          "confidence": 0.8888751268386841
+        },
+        {
+          "frame": 77,
+          "timestamp": 2.5692333333333335,
+          "bbox": [
+            0.0,
+            1.0,
+            1080.0,
+            734.0
+          ],
+          "confidence": 0.8655491471290588
+        },
+        {
+          "frame": 84,
+          "timestamp": 2.8028,
+          "bbox": [
+            0.0,
+            5.0,
+            1079.0,
+            720.0
+          ],
+          "confidence": 0.8996421694755554
+        },
+        {
+          "frame": 91,
+          "timestamp": 3.036366666666667,
+          "bbox": [
+            0.0,
+            40.0,
+            1045.0,
+            705.0
+          ],
+          "confidence": 0.9284310936927795
+        },
+        {
+          "frame": 98,
+          "timestamp": 3.2699333333333334,
+          "bbox": [
+            1.0,
+            74.0,
+            875.0,
+            695.0
+          ],
+          "confidence": 0.9591042995452881
+        },
+        {
+          "frame": 1953,
+          "timestamp": 65.1651,
+          "bbox": [
+            28.0,
+            0.0,
+            1080.0,
+            911.0
+          ],
+          "confidence": 0.9391397833824158
+        },
+        {
+          "frame": 1960,
+          "timestamp": 65.39866666666667,
+          "bbox": [
+            1.0,
+            0.0,
+            1079.0,
+            920.0
+          ],
+          "confidence": 0.9417557120323181
+        },
+        {
+          "frame": 1967,
+          "timestamp": 65.63223333333333,
+          "bbox": [
+            0.0,
+            0.0,
+            1078.0,
+            885.0
+          ],
+          "confidence": 0.9392263293266296
+        }
+      ]
+    },
+    {
+      "entity_id": "merged_entity_7",
+      "object_class": "backpack",
+      "appearance_count": 11,
+      "first_seen_frame": 112,
+      "last_seen_frame": 1456,
+      "description": "The image depicts a black backpack or duffel bag positioned on the ground. The bag is upright, with its front facing the viewer. It appears to be made of a sturdy, possibly nylon or polyester fabric, which gives it a somewhat rugged appearance. The bag has a zipper closure, which is partially open, revealing some of the contents inside. The zipper is partially obscured by the bag's folds and creases, making it difficult to see the exact contents. \n\nThe backpack has a shoulder strap, which is visible on the right side of the image. The strap is black and seems to be made of a similar material as the rest of the bag. The bag is placed on a light-colored carpet, which contrasts with the darker color of the bag. The carpet appears to be a standard indoor carpet, likely part of a room or hallway.\n\nIn the background, there is a small portion of a white or light-colored bench visible on the left side of the image. The bench has a simple",
+      "description_frame": 119,
+      "observations": [
+        {
+          "frame": 504,
+          "timestamp": 16.8168,
+          "bbox": [
+            101.0,
+            1110.0,
+            328.0,
+            1332.0
+          ],
+          "confidence": 0.5008831024169922
+        },
+        {
+          "frame": 511,
+          "timestamp": 17.050366666666665,
+          "bbox": [
+            472.0,
+            1087.0,
+            695.0,
+            1296.0
+          ],
+          "confidence": 0.659830629825592
+        },
+        {
+          "frame": 518,
+          "timestamp": 17.283933333333334,
+          "bbox": [
+            817.0,
+            1110.0,
+            1038.0,
+            1316.0
+          ],
+          "confidence": 0.769560694694519
+        },
+        {
+          "frame": 1435,
+          "timestamp": 47.881166666666665,
+          "bbox": [
+            785.0,
+            776.0,
+            941.0,
+            911.0
+          ],
+          "confidence": 0.35673409700393677
+        },
+        {
+          "frame": 1442,
+          "timestamp": 48.114733333333334,
+          "bbox": [
+            552.0,
+            764.0,
+            712.0,
+            913.0
+          ],
+          "confidence": 0.5278403162956238
+        },
+        {
+          "frame": 1449,
+          "timestamp": 48.3483,
+          "bbox": [
+            296.0,
+            800.0,
+            449.0,
+            949.0
+          ],
+          "confidence": 0.3767063319683075
+        },
+        {
+          "frame": 1456,
+          "timestamp": 48.58186666666667,
+          "bbox": [
+            0.0,
+            843.0,
+            143.0,
+            1016.0
+          ],
+          "confidence": 0.3352343738079071
+        },
+        {
+          "frame": 112,
+          "timestamp": 3.7370666666666668,
+          "bbox": [
+            649.0,
+            1266.0,
+            1063.0,
+            1883.0
+          ],
+          "confidence": 0.7905717492103577
+        },
+        {
+          "frame": 119,
+          "timestamp": 3.9706333333333332,
+          "bbox": [
+            454.0,
+            1255.0,
+            942.0,
+            1887.0
+          ],
+          "confidence": 0.9286575317382812
+        },
+        {
+          "frame": 126,
+          "timestamp": 4.2042,
+          "bbox": [
+            221.0,
+            1271.0,
+            726.0,
+            1849.0
+          ],
+          "confidence": 0.8102704286575317
+        },
+        {
+          "frame": 133,
+          "timestamp": 4.437766666666667,
+          "bbox": [
+            6.0,
+            1305.0,
+            497.0,
+            1890.0
+          ],
+          "confidence": 0.6724011301994324
+        }
+      ]
+    },
+    {
+      "entity_id": "entity_16",
+      "object_class": "traffic light",
+      "appearance_count": 4,
+      "first_seen_frame": 315,
+      "last_seen_frame": 770,
+      "description": "The image provided is a grayscale photograph characterized by a predominantly gray and white color scheme. The photograph appears to be taken outdoors, as suggested by the natural lighting and the presence of what seems to be a faint, indistinct object in the center, which could be a tree or a similar natural element. The image is somewhat blurry, making it difficult to discern specific details.\n\nThe grayscale palette includes various shades of gray, ranging from light gray to dark gray, with subtle variations in tone. The background appears to be a cloudy sky, with no distinct shapes or objects visible. The overall impression is one of a serene, natural setting, possibly taken during the daytime given the natural light.\n\nGiven the lack of clear details and the blurriness, it is challenging to provide more specific information about the scene. However, the presence of a tree or similar object in the center suggests a natural environment, and the overall composition hints at a peaceful, possibly overcast day.\n\nIn summary, the image is a",
+      "description_frame": 315,
+      "observations": [
+        {
+          "frame": 315,
+          "timestamp": 10.5105,
+          "bbox": [
+            932.0,
+            0.0,
+            1075.0,
+            52.0
+          ],
+          "confidence": 0.32903680205345154
+        },
+        {
+          "frame": 763,
+          "timestamp": 25.458766666666666,
+          "bbox": [
+            293.0,
+            485.0,
+            407.0,
+            726.0
+          ],
+          "confidence": 0.28527241945266724
+        },
+        {
+          "frame": 770,
+          "timestamp": 25.692333333333334,
+          "bbox": [
+            507.0,
+            612.0,
+            571.0,
+            809.0
+          ],
+          "confidence": 0.27230894565582275
+        },
+        {
+          "frame": 770,
+          "timestamp": 25.692333333333334,
+          "bbox": [
+            947.0,
+            591.0,
+            1037.0,
+            925.0
+          ],
+          "confidence": 0.26320648193359375
+        }
+      ]
+    },
+    {
+      "entity_id": "entity_9",
+      "object_class": "cat",
+      "appearance_count": 3,
+      "first_seen_frame": 147,
+      "last_seen_frame": 1190,
+      "description": "The image depicts a scene with several items scattered on a surface. The primary focus is on a book, which is placed on a bedspread or blanket. The book appears to be a hardcover, with a white or light-colored cover, and it is open, revealing a page or two of text. The book is positioned on the right side of the image.\n\nTo the left of the book, there is a white, fluffy object that looks like a piece of cotton or a similar soft material. This object is slightly blurred, suggesting motion or a quick capture of the image. \n\nIn the upper left corner of the image, there are two additional items. One is a blue object, which could be a piece of clothing or fabric, and the other is a yellow object, possibly another piece of clothing or fabric. Both items are also blurred, indicating they might have been in motion during the capture of the image.\n\nThe background consists of a patterned surface, which appears to be a bedspread",
+      "description_frame": 1183,
+      "observations": [
+        {
+          "frame": 147,
+          "timestamp": 4.9049000000000005,
+          "bbox": [
+            2.0,
+            1799.0,
+            147.0,
+            1919.0
+          ],
+          "confidence": 0.3619621694087982
+        },
+        {
+          "frame": 1183,
+          "timestamp": 39.472766666666665,
+          "bbox": [
+            1.0,
+            209.0,
+            1080.0,
+            1916.0
+          ],
+          "confidence": 0.7347678542137146
+        },
+        {
+          "frame": 1190,
+          "timestamp": 39.70633333333333,
+          "bbox": [
+            2.0,
+            302.0,
+            1078.0,
+            1857.0
+          ],
+          "confidence": 0.3165769577026367
+        }
+      ]
+    },
+    {
+      "entity_id": "entity_23",
+      "object_class": "vase",
+      "appearance_count": 2,
+      "first_seen_frame": 581,
+      "last_seen_frame": 588,
+      "description": "The image appears to be a very blurry photograph, making it difficult to discern specific details. However, it seems to depict a structure or object with a central, cylindrical shape, possibly a container or a piece of equipment. The cylindrical object has a flat base and a slightly elevated central section. Extending from the top of the cylinder are several long, thin, and pointed extensions that resemble blades or needles. These extensions are arranged in a radial pattern, converging towards the center of the cylinder. The background of the image is predominantly white, which contrasts with the darker tones of the central object. There are no clear indications of additional objects or context within the image. The overall impression is of a complex, possibly industrial or scientific device, with the radial extensions suggesting a functional purpose, potentially related to energy or material handling.\n### Detailed Description:\n- **Central Object**: The central object is cylindrical and appears to be made of a solid material. It has a flat base and a slightly",
+      "description_frame": 588,
+      "observations": [
+        {
+          "frame": 581,
+          "timestamp": 19.386033333333334,
+          "bbox": [
+            670.0,
+            311.0,
+            819.0,
+            499.0
+          ],
+          "confidence": 0.3699507713317871
+        },
+        {
+          "frame": 588,
+          "timestamp": 19.619600000000002,
+          "bbox": [
+            825.0,
+            329.0,
+            995.0,
+            520.0
+          ],
+          "confidence": 0.6567314863204956
+        }
+      ]
+    },
+    {
+      "entity_id": "entity_25",
+      "object_class": "traffic light",
+      "appearance_count": 2,
+      "first_seen_frame": 1197,
+      "last_seen_frame": 1211,
+      "description": "The image depicts a close-up view of the rear section of a vehicle, specifically focusing on the tire and part of the wheel well. The tire is partially visible, characterized by its dark color, likely black or dark gray, with a visible tread pattern. The tire treads are slightly raised and appear to be in good condition, indicating that the vehicle is relatively new or well-maintained. The rim of the wheel is also visible, showing a metallic sheen, suggesting it is made of steel or aluminum. The rim is partially obscured by the tire, but a red reflector or light is noticeable near the edge of the rim, which is a common safety feature on many vehicles.\n\nThe background of the image is blurred, which makes it difficult to discern specific details. However, the surface on which the vehicle is parked appears to be a concrete or asphalt surface, typical for parking lots or roads. The lighting in the image suggests it might be taken during the day, as there are no visible",
+      "description_frame": 1211,
+      "observations": [
+        {
+          "frame": 1197,
+          "timestamp": 39.9399,
+          "bbox": [
+            467.0,
+            564.0,
+            648.0,
+            674.0
+          ],
+          "confidence": 0.30204635858535767
+        },
+        {
+          "frame": 1211,
+          "timestamp": 40.40703333333333,
+          "bbox": [
+            0.0,
+            1037.0,
+            468.0,
+            1918.0
+          ],
+          "confidence": 0.4918137192726135
+        }
+      ]
+    },
+    {
+      "entity_id": "entity_8",
+      "object_class": "traffic light",
+      "appearance_count": 1,
+      "first_seen_frame": 126,
+      "last_seen_frame": 126,
+      "description": "The image is quite blurry, making it challenging to discern specific details. However, it appears to depict an object that could be a piece of electronic equipment or a device with a prominent feature. The object has a dark, possibly black or dark gray, surface with a circular element in the center. This circular element is yellow and somewhat irregular in shape, suggesting it might be a button, a sensor, or a logo. The object is mounted on a white or light-colored base, which could be part of a larger device or stand. The background is indistinct, with a light gray or white hue, which might indicate a neutral or plain setting. The overall appearance suggests that the object is likely a component of a larger system, possibly related to electronics or machinery.\nTo summarize:\n- The image is blurry and out of focus.\n- The central feature is a circular yellow element.\n- The object is mounted on a white or light-colored base.\n- The background is indistinct,",
+      "description_frame": 126,
+      "observations": [
+        {
+          "frame": 126,
+          "timestamp": 4.2042,
+          "bbox": [
+            0.0,
+            1094.0,
+            402.0,
+            1483.0
+          ],
+          "confidence": 0.2787187099456787
+        }
+      ]
+    },
+    {
+      "entity_id": "entity_24",
+      "object_class": "traffic light",
+      "appearance_count": 1,
+      "first_seen_frame": 1183,
+      "last_seen_frame": 1183,
+      "description": "The image depicts a blurred, abstract composition primarily characterized by a series of horizontal and diagonal lines. The lines vary in thickness and direction, creating a sense of movement and fluidity. The colors present in the image are primarily shades of gray and white, with some areas appearing darker and more shadowed.\n\nThe horizontal lines are more pronounced and appear to be slightly wavy, suggesting a dynamic motion. These lines are interspersed with diagonal lines, which also contribute to the sense of movement and depth. The diagonal lines are more uniform and evenly spaced, providing a contrast to the more irregular horizontal lines.\n\nThe overall effect is reminiscent of a water surface with ripples, or perhaps a close-up view of a textured surface, such as a piece of fabric or a wall with a pattern. The image lacks any distinct objects or figures, focusing instead on the interplay of light, shadow, and texture.\n\nIn summary, the image is a monochromatic abstract composition featuring wavy and diagonal lines in shades",
+      "description_frame": 1183,
+      "observations": [
+        {
+          "frame": 1183,
+          "timestamp": 39.472766666666665,
+          "bbox": [
+            454.0,
+            633.0,
+            967.0,
+            895.0
+          ],
+          "confidence": 0.3694475591182709
+        }
+      ]
+    }
+  ],
+  "metrics": {
+    "timings": {
+      "detection_seconds": 313.74260926246643,
+      "embedding_seconds": 37.723376750946045,
+      "clustering_seconds": 0.051133155822753906,
+      "reid_seconds": 0.006261587142944336,
+      "description_seconds": 267.97624683380127,
+      "class_correction_seconds": 0.7428939342498779,
+      "cis_seconds": 0.004575252532958984,
+      "total_seconds": 625.2209651470184
+    },
+    "sampled_frames": 187,
+    "detections_per_sampled_frame": 2.3262032085561497,
+    "embedding_backend": "clip",
+    "embedding_dim": 512,
+    "detector_backend": "yolo",
+    "detector_model": "yolo11x",
+    "tracker_backend": "simple",
+    "tapnet_tracks": 0,
+    "cluster_embeddings": 0,
+    "avg_cluster_size": 1.0,
+    "class_correction": {
+      "corrected_entities": 7,
+      "min_similarity": 0.3
+    },
+    "reid": {
+      "backend": "clip",
+      "base_threshold": 0.65,
+      "class_thresholds": {
+        "book": 0.8771578788757324,
+        "person": 0.896463942527771,
+        "mouse": 0.8748536825180053,
+        "keyboard": 0.9,
+        "bed": 0.8935946941375732,
+        "tv": 0.9,
+        "backpack": 0.8987718343734741,
+        "cat": 0.65,
+        "potted plant": 0.65,
+        "suitcase": 0.65,
+        "laptop": 0.65,
+        "bird": 0.65
+      },
+      "similarity_stats": {
+        "book": {
+          "mean": 0.9187058607737223,
+          "std": 0.03991843410144612,
+          "median": 0.9271578788757324,
+          "p95": 0.962948739528656,
+          "threshold": 0.8771578788757324,
+          "pair_count": 6.0
+        },
+        "person": {
+          "mean": 0.9488252639770508,
+          "std": 0.021859814202378387,
+          "median": 0.946463942527771,
+          "p95": 0.9806088387966156,
+          "threshold": 0.896463942527771,
+          "pair_count": 15.0
+        },
+        "mouse": {
+          "mean": 0.9248536825180054,
+          "std": 0.0,
+          "median": 0.9248536825180054,
+          "p95": 0.9248536825180054,
+          "threshold": 0.8748536825180053,
+          "pair_count": 1.0
+        },
+        "keyboard": {
+          "mean": 0.9816175699234009,
+          "std": 0.0,
+          "median": 0.9816175699234009,
+          "p95": 0.9816175699234009,
+          "threshold": 0.9,
+          "pair_count": 1.0
+        },
+        "bed": {
+          "mean": 0.9414137999216715,
+          "std": 0.016460325157221546,
+          "median": 0.9435946941375732,
+          "p95": 0.9587144136428833,
+          "threshold": 0.8935946941375732,
+          "pair_count": 3.0
+        },
+        "tv": {
+          "mean": 0.9900582432746887,
+          "std": 0.0,
+          "median": 0.9900582432746887,
+          "p95": 0.9900582432746887,
+          "threshold": 0.9,
+          "pair_count": 1.0
+        },
+        "backpack": {
+          "mean": 0.9487718343734741,
+          "std": 0.0,
+          "median": 0.9487718343734741,
+          "p95": 0.9487718343734741,
+          "threshold": 0.8987718343734741,
+          "pair_count": 1.0
+        }
+      },
+      "merges_total": 13,
+      "per_class_merges": {
+        "book": 2,
+        "person": 5,
+        "mouse": 1,
+        "keyboard": 1,
+        "bed": 2,
+        "tv": 1,
+        "backpack": 1,
+        "cat": 0,
+        "potted plant": 0,
+        "suitcase": 0,
+        "laptop": 0,
+        "bird": 0
+      },
+      "reduction": 13
+    }
+  }
+}

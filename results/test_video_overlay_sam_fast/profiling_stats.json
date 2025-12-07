@@ -1,0 +1,58 @@
+{
+  "observer_detect_with_yolo": {
+    "count": 69,
+    "total_time": 66.10943499999121,
+    "avg_time": 0.958107753623061,
+    "min_time": 0.42634330003056675,
+    "max_time": 14.592836400028318
+  },
+  "observer_detect_objects": {
+    "count": 69,
+    "total_time": 1587.756772300345,
+    "avg_time": 23.010967714497752,
+    "min_time": 0.4428635999793187,
+    "max_time": 123.02895530010574
+  },
+  "observer_process_video": {
+    "count": 1,
+    "total_time": 1600.7126166999806,
+    "avg_time": 1600.7126166999806,
+    "min_time": 1600.7126166999806,
+    "max_time": 1600.7126166999806
+  },
+  "embedder_embed_batch": {
+    "count": 4,
+    "total_time": 10.057312300195917,
+    "avg_time": 2.5143280750489794,
+    "min_time": 0.8486807000590488,
+    "max_time": 3.483933600015007
+  },
+  "embedder_embed_detections": {
+    "count": 1,
+    "total_time": 10.05905000003986,
+    "avg_time": 10.05905000003986,
+    "min_time": 10.05905000003986,
+    "max_time": 10.05905000003986
+  },
+  "describer_generate_description": {
+    "count": 9,
+    "total_time": 263.3173792997841,
+    "avg_time": 29.257486588864897,
+    "min_time": 19.02816420001909,
+    "max_time": 69.18859000003431
+  },
+  "describer_describe_observation": {
+    "count": 9,
+    "total_time": 263.3175039999187,
+    "avg_time": 29.25750044443541,
+    "min_time": 19.028172599966638,
+    "max_time": 69.18862139992416
+  },
+  "describer_describe_entities": {
+    "count": 1,
+    "total_time": 265.7532480999362,
+    "avg_time": 265.7532480999362,
+    "min_time": 265.7532480999362,
+    "max_time": 265.7532480999362
+  }
+}

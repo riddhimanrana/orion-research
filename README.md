@@ -62,6 +62,7 @@ Key Scripts:
 - `scripts/print_reid_metrics.py` – Quick adaptive Re-ID metrics report.
 - `scripts/test_clip_classification.py` – CLIP classification/embedding smoke test.
 - `scripts/test_spatial_mapping_room.py` – Depth / spatial mapping validation.
+- `scripts/run_pipeline_with_overlay.py` – PerceptionEngine run + overlay export in one command.
 - `python -m orion.cli.run_quality_sweep` – Automated Phase1→Phase2→graph→QA sweeps.
 - `python -m orion.cli.run_showcase` – Full pipeline demo with overlay + Memgraph ingest.
 
@@ -86,6 +87,12 @@ python scripts/render_video_overlay.py \
 	--video data/examples/test.mp4 \
 	--results results/test_demo \
 	--output results/test_demo/overlay.mp4
+
+# Lightweight PerceptionEngine + overlay (no episode scaffolding)
+python scripts/run_pipeline_with_overlay.py \
+	--video data/examples/video.mp4 \
+	--results-dir results/full_video_analysis \
+	--disable-depth --overlay-output results/full_video_analysis/overlay.mp4
 ```
 
 Outputs land in `results/<episode_id>/`:

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Deque, Dict, List, Optional, Tuple
 
 import cv2
+import numpy as np
 
 from orion.perception.spatial_zones import ZoneManager
 
@@ -170,6 +171,7 @@ class InsightOverlayRenderer:
             category = det.get("category", "object")
             track_id = int(det.get("track_id", -1))
             mem_id = self._match_memory(det)
+            color: Tuple[int, int, int]
             if mem_id and mem_id in self.memory:
                 mem_info = self.memory[mem_id]
                 zone_id = mem_info.get("zone_id", 0)
@@ -183,6 +185,9 @@ class InsightOverlayRenderer:
                 label = f"{category} #{track_id}"
                 sub_label = "detected"
                 color = (255, 255, 255)
+            segmentation = det.get("segmentation")
+            if segmentation:
+                self._draw_segmentation_mask(frame, (x1, y1, x2, y2), segmentation, color)
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             self._draw_label(frame, label, sub_label, (x1, max(y1 - 30, 20)), color)
 
@@ -321,6 +326,81 @@ class InsightOverlayRenderer:
         self.state_messages.append((text, color, ttl))
         while len(self.state_messages) > self.options.max_state_messages:
             self.state_messages.popleft()
+
+    def _draw_segmentation_mask(
+        self,
+        frame,
+        bbox: Tuple[int, int, int, int],
+        segmentation: Dict,
+        color: Tuple[int, int, int],
+        alpha: float = 0.45,
+    ) -> None:
+        mask = self._decode_mask(segmentation)
+        if mask is None:
+            return
+        x1, y1, x2, y2 = bbox
+        h, w = frame.shape[:2]
+        x1 = max(0, min(w, x1))
+        x2 = max(0, min(w, x2))
+        y1 = max(0, min(h, y1))
+        y2 = max(0, min(h, y2))
+        if x2 <= x1 or y2 <= y1:
+            return
+        roi = frame[y1:y2, x1:x2]
+        if roi.size == 0:
+            return
+        mask_h, mask_w = mask.shape[:2]
+        target_h = y2 - y1
+        target_w = x2 - x1
+        if mask_h != target_h or mask_w != target_w:
+            mask = cv2.resize(mask.astype(np.uint8), (target_w, target_h), interpolation=cv2.INTER_NEAREST).astype(bool)
+        else:
+            mask = mask.astype(bool)
+        if not mask.any():
+            return
+        color_layer = np.zeros_like(roi, dtype=np.uint8)
+        color_layer[mask] = color
+        cv2.addWeighted(color_layer, alpha, roi, 1 - alpha, 0, roi)
+
+    def _decode_mask(self, segmentation: Dict) -> Optional[np.ndarray]:
+        if not segmentation:
+            return None
+        if segmentation.get("encoding") == "rle" and segmentation.get("data"):
+            return self._decode_rle(segmentation.get("data"))
+        if "rle" in segmentation:
+            return self._decode_rle(segmentation.get("rle"))
+        return None
+
+    @staticmethod
+    def _decode_rle(rle: Optional[Dict]) -> Optional[np.ndarray]:
+        if not rle:
+            return None
+        size = rle.get("size")
+        counts = rle.get("counts")
+        if not size or not counts:
+            return None
+        height, width = map(int, size)
+        total = max(0, int(height) * int(width))
+        if total == 0:
+            return None
+        start_value = int(rle.get("start", 0))
+        flat = np.zeros(total, dtype=np.uint8)
+        idx = 0
+        value = start_value
+        for raw_count in counts:
+            count = int(raw_count)
+            if count <= 0:
+                value = 1 - value
+                continue
+            end = min(total, idx + count)
+            flat[idx:end] = value
+            idx = end
+            value = 1 - value
+            if idx >= total:
+                break
+        if idx < total:
+            flat[idx:] = 0
+        return flat.reshape((height, width))
 
 
 def render_insight_overlay(
