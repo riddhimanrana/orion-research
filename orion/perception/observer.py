@@ -15,7 +15,7 @@ Date: October 2025
 """
 
 import logging
-from typing import Any, Dict, List, Tuple, Optional, Literal, TYPE_CHECKING
+from typing import Any, Dict, List, Tuple, Optional, Literal, TYPE_CHECKING, Union
 
 import cv2
 import numpy as np
@@ -36,7 +36,13 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from orion.perception.sam_segmenter import SegmentAnythingMaskGenerator
+    from orion.perception.sam_segmenter import SegmentAnythingMaskGenerator, Sam3MaskGenerator
+    SegmentationRefinerType = Union[
+        "SegmentAnythingMaskGenerator",
+        "Sam3MaskGenerator",
+    ]
+else:  # pragma: no cover - runtime fallback for typing only
+    SegmentationRefinerType = Any
 
 
 class FrameObserver:
@@ -59,7 +65,7 @@ class FrameObserver:
         depth_model: str = "midas",
         enable_occlusion: bool = False,
         segmentation_config: Optional[SegmentationConfig] = None,
-        segmentation_refiner: Optional["SegmentAnythingMaskGenerator"] = None,
+        segmentation_refiner: Optional[SegmentationRefinerType] = None,
     ):
         """
         Initialize observer.

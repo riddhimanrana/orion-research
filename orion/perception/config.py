@@ -126,11 +126,17 @@ class SegmentationConfig:
     enabled: bool = False
     """Enable SAM-based mask refinement after detection."""
 
+    backend: Literal["sam_v1", "sam3"] = "sam3"
+    """Segmentation backend to use (legacy SAM v1 or SAM3)."""
+
     model_type: Literal["vit_h", "vit_l", "vit_b"] = "vit_h"
     """SAM backbone variant to load."""
 
     checkpoint_path: Optional[str] = None
     """Override path to SAM checkpoint (.pth). Defaults to models/weights/sam_<model>.pth."""
+
+    sam3_checkpoint_path: Optional[str] = None
+    """Optional local path to SAM3 checkpoint (defaults to downloading from Hugging Face)."""
 
     device: Literal["auto", "cuda", "cpu"] = "auto"
     """Device for SAM inference (auto selects CUDA when available)."""
@@ -140,6 +146,9 @@ class SegmentationConfig:
 
     stability_score_threshold: float = 0.85
     """Minimum stability score accepted from SAM outputs."""
+
+    sam3_confidence_threshold: float = 0.4
+    """Minimum confidence from SAM3 outputs (applied within Sam3Processor)."""
 
     min_mask_area: int = 400
     """Minimum number of pixels required for a mask to be retained."""
@@ -154,10 +163,14 @@ class SegmentationConfig:
     """Zero out background pixels in crops using the predicted mask."""
 
     def __post_init__(self):
+        if self.backend not in {"sam_v1", "sam3"}:
+            raise ValueError("backend must be 'sam_v1' or 'sam3'")
         if self.mask_threshold <= 0 or self.mask_threshold >= 1:
             raise ValueError("mask_threshold must be in (0,1)")
         if self.stability_score_threshold <= 0 or self.stability_score_threshold > 1:
             raise ValueError("stability_score_threshold must be in (0,1]")
+        if self.sam3_confidence_threshold <= 0 or self.sam3_confidence_threshold >= 1:
+            raise ValueError("sam3_confidence_threshold must be in (0,1)")
         if self.min_mask_area < 1:
             raise ValueError("min_mask_area must be >= 1")
         if self.batch_size < 1:

@@ -47,7 +47,7 @@ from orion.perception.embedder import VisualEmbedder
 from orion.perception.tracker import EntityTracker
 from orion.perception.describer import EntityDescriber
 from orion.perception.depth import DepthEstimator
-from orion.perception.sam_segmenter import SegmentAnythingMaskGenerator
+from orion.perception.sam_segmenter import SegmentAnythingMaskGenerator, Sam3MaskGenerator
 from orion.perception.class_corrector import ClassCorrector
 
 if TYPE_CHECKING:  # pragma: no cover - import guard for type checking only
@@ -128,7 +128,7 @@ class PerceptionEngine:
         self.slam_engine: Optional[SLAMEngine] = None
         self.tapnet_tracker: Optional['TapNetTracker'] = None
         self.depth_estimator: Optional[DepthEstimator] = None
-        self.sam_segmenter: Optional[SegmentAnythingMaskGenerator] = None
+        self.sam_segmenter: Optional[Union[SegmentAnythingMaskGenerator, Sam3MaskGenerator]] = None
         self.cis_scorer: Optional['CausalInfluenceScorer3D'] = None
         self.class_corrector: Optional[ClassCorrector] = None
         self.clip_model = None
@@ -508,31 +508,58 @@ class PerceptionEngine:
             logger.info("  ✓ Skipping FastVLM load (descriptions disabled)")
 
         segmentation_cfg = getattr(self.config, "segmentation", None)
+        self.sam_segmenter = None
+        self.model_manager.sam_device_override = None
+        self.model_manager.sam3_device_override = None
         if segmentation_cfg and segmentation_cfg.enabled:
-            try:
-                if segmentation_cfg.checkpoint_path:
-                    self.model_manager.sam_checkpoint_path = Path(segmentation_cfg.checkpoint_path)
-                self.model_manager.sam_model_type = segmentation_cfg.model_type
-                self.model_manager.sam_device_override = (
-                    None if segmentation_cfg.device == "auto" else segmentation_cfg.device
-                )
-                sam_predictor = self.model_manager.sam_predictor
-                self.sam_segmenter = SegmentAnythingMaskGenerator(
-                    predictor=sam_predictor,
-                    mask_threshold=segmentation_cfg.mask_threshold,
-                    stability_score_threshold=segmentation_cfg.stability_score_threshold,
-                    min_mask_area=segmentation_cfg.min_mask_area,
-                    batch_size=segmentation_cfg.batch_size,
-                    refine_bounding_box=segmentation_cfg.refine_bounding_box,
-                )
-                logger.info("  ✓ SAM segmentation enabled (%s)", segmentation_cfg.model_type)
-            except Exception as exc:
-                logger.warning(f"  ✗ Failed to initialize SAM: {exc}")
-                self.sam_segmenter = None
-                self.model_manager.sam_device_override = None
-        else:
-            self.sam_segmenter = None
-            self.model_manager.sam_device_override = None
+            backend = segmentation_cfg.backend
+            if backend == "sam_v1":
+                try:
+                    if segmentation_cfg.checkpoint_path:
+                        self.model_manager.sam_checkpoint_path = Path(segmentation_cfg.checkpoint_path)
+                    self.model_manager.sam_model_type = segmentation_cfg.model_type
+                    self.model_manager.sam_device_override = (
+                        None if segmentation_cfg.device == "auto" else segmentation_cfg.device
+                    )
+                    sam_predictor = self.model_manager.sam_predictor
+                    self.sam_segmenter = SegmentAnythingMaskGenerator(
+                        predictor=sam_predictor,
+                        mask_threshold=segmentation_cfg.mask_threshold,
+                        stability_score_threshold=segmentation_cfg.stability_score_threshold,
+                        min_mask_area=segmentation_cfg.min_mask_area,
+                        batch_size=segmentation_cfg.batch_size,
+                        refine_bounding_box=segmentation_cfg.refine_bounding_box,
+                    )
+                    logger.info("  ✓ SAM v1 segmentation enabled (%s)", segmentation_cfg.model_type)
+                except Exception as exc:
+                    logger.warning(f"  ✗ Failed to initialize SAM v1: {exc}")
+                    self.sam_segmenter = None
+                    self.model_manager.sam_device_override = None
+            elif backend == "sam3":
+                try:
+                    if segmentation_cfg.sam3_checkpoint_path:
+                        self.model_manager.sam3_checkpoint_path = Path(segmentation_cfg.sam3_checkpoint_path)
+                    else:
+                        self.model_manager.sam3_checkpoint_path = None
+                    self.model_manager.sam3_device_override = (
+                        None if segmentation_cfg.device == "auto" else segmentation_cfg.device
+                    )
+                    self.model_manager.sam3_confidence_threshold = (
+                        segmentation_cfg.sam3_confidence_threshold
+                    )
+                    sam3_processor = self.model_manager.sam3_processor
+                    self.sam_segmenter = Sam3MaskGenerator(
+                        processor=sam3_processor,
+                        min_mask_area=segmentation_cfg.min_mask_area,
+                        refine_bounding_box=segmentation_cfg.refine_bounding_box,
+                    )
+                    logger.info("  ✓ SAM3 segmentation enabled")
+                except Exception as exc:
+                    logger.warning(f"  ✗ Failed to initialize SAM3: {exc}")
+                    self.sam_segmenter = None
+                    self.model_manager.sam3_device_override = None
+            else:
+                logger.warning("Unknown segmentation backend '%s'", backend)
         
         # Create components
         self.observer = FrameObserver(

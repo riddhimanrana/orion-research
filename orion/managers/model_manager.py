@@ -92,6 +92,7 @@ class ModelManager:
         self._dino: Optional[Any] = None
         self._groundingdino: Optional[Any] = None
         self._sam_predictor: Optional[Any] = None
+        self._sam3_processor: Optional[Any] = None
         
         # Model configuration
         self.yolo_model_name = "yolo11m"  # Default to medium (balanced)
@@ -99,6 +100,9 @@ class ModelManager:
         self.sam_checkpoint_path: Optional[Path] = None
         self.sam_model_type: str = "vit_h"
         self.sam_device_override: Optional[str] = None
+        self.sam3_checkpoint_path: Optional[Path] = None
+        self.sam3_device_override: Optional[str] = None
+        self.sam3_confidence_threshold: float = 0.4
         
         # LLM for contextual understanding
         self._ollama_client: Optional[Any] = None
@@ -352,6 +356,57 @@ class ModelManager:
         predictor = SamPredictor(sam)
         logger.info("✓ SAM ready on %s", device_choice)
         return predictor
+
+    # ========================================================================
+    # SAM3 Processor
+    # ========================================================================
+
+    @property
+    def sam3_processor(self) -> Any:
+        """Get SAM3 processor (lazy loaded)."""
+        if self._sam3_processor is None:
+            self._sam3_processor = self._load_sam3_processor()
+        return self._sam3_processor
+
+    def _load_sam3_processor(self) -> Any:
+        """Load SAM3 and wrap it with the processor helper."""
+        try:
+            from sam3.model_builder import build_sam3_image_model
+            from sam3.model.sam3_image_processor import Sam3Processor
+        except ImportError as exc:
+            raise RuntimeError(
+                "sam3 is required for the SAM3 backend; install it with the official instructions"
+            ) from exc
+
+        checkpoint_path = str(self.sam3_checkpoint_path) if self.sam3_checkpoint_path else None
+        load_from_hf = checkpoint_path is None
+
+        device_choice = self.sam3_device_override or self.device
+        if device_choice == "auto":
+            device_choice = "cuda" if torch.cuda.is_available() else "cpu"
+        if device_choice != "cuda":
+            logger.warning(
+                "SAM3 is optimized for CUDA; running on %s may fail or be extremely slow",
+                device_choice,
+            )
+
+        logger.info("Loading SAM3 image model (device=%s)…", device_choice)
+        model = build_sam3_image_model(
+            device=device_choice,
+            checkpoint_path=checkpoint_path,
+            load_from_HF=load_from_hf,
+            eval_mode=True,
+            enable_segmentation=True,
+            enable_inst_interactivity=False,
+        )
+
+        processor = Sam3Processor(
+            model=model,
+            device=device_choice,
+            confidence_threshold=self.sam3_confidence_threshold,
+        )
+        logger.info("✓ SAM3 processor ready (confidence ≥ %.2f)", self.sam3_confidence_threshold)
+        return processor
     
     # ========================================================================
     # FastVLM Describer
@@ -428,6 +483,9 @@ class ModelManager:
         if self._sam_predictor is not None:
             del self._sam_predictor
             self._sam_predictor = None
+        if self._sam3_processor is not None:
+            del self._sam3_processor
+            self._sam3_processor = None
         
         # Clear GPU memory
         if torch.cuda.is_available():
@@ -446,6 +504,7 @@ class ModelManager:
             "dino_loaded": self._dino is not None,
             "groundingdino_loaded": self._groundingdino is not None,
             "sam_loaded": self._sam_predictor is not None,
+            "sam3_loaded": self._sam3_processor is not None,
         }
         
         if torch.cuda.is_available():
