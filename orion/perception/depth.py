@@ -17,44 +17,41 @@ import cv2
 import sys
 from pathlib import Path
 
-# Add Depth-Anything-3/src to path if available
+# Add Depth-Anything-V2 to path
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
-DA3_PATH = WORKSPACE_ROOT / "Depth-Anything-3" / "src"
-if DA3_PATH.exists() and str(DA3_PATH) not in sys.path:
-    sys.path.append(str(DA3_PATH))
+DA_V2_PATH = WORKSPACE_ROOT / "Depth-Anything-V2-temp"
+if DA_V2_PATH.exists() and str(DA_V2_PATH) not in sys.path:
+    sys.path.append(str(DA_V2_PATH))
 
 try:
-    from depth_anything_3.api import DepthAnything3
-    DA3_AVAILABLE = True
+    from depth_anything_v2.dpt import DepthAnythingV2
+    DA2_AVAILABLE = True
 except ImportError as e:
-    DA3_AVAILABLE = False
-    print(f"[DepthEstimator] DepthAnything3 module not found. V3 local loading will fail. Error: {e}")
+    DA2_AVAILABLE = False
+    print(f"[DepthEstimator] DepthAnythingV2 module not found. V2 local loading will fail. Error: {e}")
 
 
 class DepthEstimator:
-    """Monocular depth estimation using Depth Anything V3 (with V2 fallback)."""
+    """Monocular depth estimation using Depth Anything V2."""
     
     def __init__(
         self,
-        model_name: str = "depth_anything_v3",
+        model_name: str = "depth_anything_v2",
         model_size: str = "small",
         device: Optional[str] = None,
         half_precision: bool = False,
     ):
         """
-        Initialize depth estimator with Depth Anything V3.
+        Initialize depth estimator with Depth Anything V2.
         
         Args:
-            model_name: Must be "depth_anything_v3" (retained for compatibility)
+            model_name: Must be "depth_anything_v2"
             model_size: "small", "base", or "large"
             device: Device to run on ("cuda", "mps", "cpu", or None for auto-detect)
             half_precision: Use FP16 for faster inference (GPU only)
         """
-        if model_name != "depth_anything_v3":
-            raise ValueError(
-                f"DepthEstimator now ONLY supports Depth Anything V3. "
-                f"Got: {model_name}. Use model_name='depth_anything_v3'"
-            )
+        if model_name != "depth_anything_v2":
+            raise ValueError(f"DepthEstimator now ONLY supports Depth Anything V2. Got: {model_name}")
         
         self.model_name = model_name
         self.model_size = model_size
@@ -71,101 +68,64 @@ class DepthEstimator:
         else:
             self.device = torch.device(device)
         
-        print(f"[DepthEstimator] Using Depth Anything V3 ({model_size}) on {self.device}")
+        print(f"[DepthEstimator] Using Depth Anything V2 ({model_size}) on {self.device}")
         
         # Load model
-        self.model = self._load_depth_anything()
+        self.model = self._load_depth_anything_v2()
         self.model.eval()
         
         if self.half_precision and self.device.type in ["cuda", "mps"]:
             self.model.half()
             print(f"[DepthEstimator] Using FP16 precision")
     
-    def _load_depth_anything(self) -> torch.nn.Module:
-        """Load Depth Anything model with V3 preference and V2 fallback."""
-        try:
-            return self._load_depth_anything_v3()
-        except Exception as v3_exc:
-            print(f"[DepthEstimator] V3 torch hub load failed: {v3_exc}")
-            print("[DepthEstimator] Falling back to Depth Anything V2 weights...")
-            try:
-                return self._load_depth_anything_v2()
-            except Exception as v2_exc:
-                raise RuntimeError(
-                    "Failed to load Depth Anything models (V3 primary, V2 fallback). "
-                    f"V3 error: {v3_exc}\nV2 error: {v2_exc}"
-                ) from v2_exc
-
-    def _load_depth_anything_v3(self) -> torch.nn.Module:
-        """Load Depth Anything V3 variant via local clone or torch hub."""
-        print("[DepthEstimator] Loading Depth Anything V3...")
-
-        if DA3_AVAILABLE:
-            print("[DepthEstimator] Using local Depth-Anything-3 repository.")
-            size_to_hf_repo = {
-                'small': 'depth-anything/DA3-Small',
-                'base': 'depth-anything/DA3-Base',
-                'large': 'depth-anything/DA3-Large',
-            }
-            
-            if self.model_size not in size_to_hf_repo:
-                raise ValueError(
-                    f"Invalid model_size: {self.model_size}. "
-                    f"Choose from: {list(size_to_hf_repo.keys())}"
-                )
-                
-            repo_id = size_to_hf_repo[self.model_size]
-            model = DepthAnything3.from_pretrained(repo_id)
-            model = model.to(self.device)
-            print(f"[DepthEstimator] Depth Anything V3 ({self.model_size}) loaded from {repo_id}")
-            return model
-        else:
-            print("[DepthEstimator] Local Depth-Anything-3 not found. Trying torch hub...")
-            # Fallback to torch hub if local repo is missing but somehow we want V3
-            # Note: The user specifically asked to clone the repo, so this path might be less relevant
-            # but good for robustness if they delete the folder.
-            # However, the torch hub V3 loading I wrote before might not be compatible with the new V3 repo structure
-            # if the hubconf changed. Assuming it works as before or we fail over to V2.
-            
-            size_to_variant = {
-                'small': 'depth_anything_v3_vits',
-                'base': 'depth_anything_v3_vitb',
-                'large': 'depth_anything_v3_vitl',
-            }
-
-            if self.model_size not in size_to_variant:
-                raise ValueError(
-                    f"Invalid model_size: {self.model_size}. "
-                    f"Choose from: {list(size_to_variant.keys())}"
-                )
-
-            variant = size_to_variant[self.model_size]
-            model: torch.nn.Module = torch.hub.load(
-                'DepthAnything/Depth-Anything-V3',
-                variant,
-                pretrained=True,
-                trust_repo=True,
-            )
-            model = model.to(self.device)
-            print(f"[DepthEstimator] Depth Anything V3 ({self.model_size}) loaded via Hub")
-            return model
-
     def _load_depth_anything_v2(self) -> torch.nn.Module:
-        """Fallback to Depth Anything V2 via torch hub (no local deps)."""
-        size_to_variant = {
-            'small': 'depth_anything_v2_vits',
-            'base': 'depth_anything_v2_vitb',
-            'large': 'depth_anything_v2_vitl',
+        """Load Depth Anything V2 model directly from local files."""
+        if not DA2_AVAILABLE:
+            raise ImportError("DepthAnythingV2 module is not available. Check the path and installation.")
+
+        print("[DepthEstimator] Loading Depth Anything V2 from local repository...")
+        
+        # Define model configurations
+        model_configs = {
+            'small': {'encoder': 'vits', 'features': 64, 'out_channels': [48, 96, 192, 384]},
+            'base': {'encoder': 'vitb', 'features': 128, 'out_channels': [96, 192, 384, 768]},
+            'large': {'encoder': 'vitl', 'features': 256, 'out_channels': [192, 384, 768, 1536]}
         }
-        variant = size_to_variant[self.model_size]
-        model: torch.nn.Module = torch.hub.load(
-            'DepthAnything/Depth-Anything-V2',
-            variant,
-            pretrained=True,
-            trust_repo=True,
-        )
+        
+        if self.model_size not in model_configs:
+            raise ValueError(f"Invalid model_size: {self.model_size}. Choose from: {list(model_configs.keys())}")
+
+        # Instantiate model
+        model = DepthAnythingV2(**model_configs[self.model_size])
+        
+        # Load weights
+        weights_dir = WORKSPACE_ROOT / "models" / "_torch" / "depth_anything_v2"
+        weights_dir.mkdir(parents=True, exist_ok=True)
+        encoder = model_configs[self.model_size]['encoder']
+        weights_path = weights_dir / f"depth_anything_v2_{encoder}.pth"
+        
+        if not weights_path.exists():
+            print(f"[DepthEstimator] Weights not found at {weights_path}, downloading...")
+            # The official HF repo is now gated, using a community mirror
+            url = f"https://huggingface.co/spaces/LiheYoung/Depth-Anything-V2/resolve/main/checkpoints/depth_anything_v2_{encoder}.pth"
+            try:
+                torch.hub.download_url_to_file(url, weights_path)
+            except Exception as e:
+                print(f"[DepthEstimator] ✗ Failed to download model weights: {e}")
+                raise e
+
+        model.load_state_dict(torch.load(weights_path, map_location=self.device))
+        
+        return model
+        
+        # Load pretrained weights
+        # Weights are typically downloaded to a cache dir by the model's own logic,
+        # or we can point to a local file if we download them manually.
+        # For now, we rely on the model's default weight loading.
+        model.load_state_dict(torch.load(f'https://huggingface.co/depth-anything/Depth-Anything-V2-{self.model_size.capitalize()}-hf/resolve/main/pytorch_model.bin', map_location='cpu'))
+
         model = model.to(self.device)
-        print(f"[DepthEstimator] Depth Anything V2 ({self.model_size}) fallback loaded")
+        print(f"[DepthEstimator] Depth Anything V2 ({self.model_size}) loaded successfully.")
         return model
     
     @torch.no_grad()
@@ -176,7 +136,7 @@ class DepthEstimator:
         input_size: int = 518,
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
-        Estimate depth for a frame using Depth Anything V3.
+        Estimate depth for a frame using Depth Anything V2.
         
         Args:
             frame: RGB frame (H, W, 3) as uint8 numpy array
@@ -192,35 +152,17 @@ class DepthEstimator:
         
         h, w = frame.shape[:2]
         
-        # Check if using local V3 model
-        is_local_v3 = DA3_AVAILABLE and type(self.model).__name__ == 'DepthAnything3'
+        # Preprocess (V2)
+        input_tensor = self._preprocess(frame, input_size)
         
-        if is_local_v3:
-            # Use the inference API from DepthAnything3
-            # It handles preprocessing, inference, and postprocessing
-            prediction = self.model.inference(
-                [frame],
-                process_res=input_size,
-                show_cameras=False
-            )
-            depth_map = prediction.depth[0]  # (H, W)
-            
-            # Ensure output matches input dimensions
-            if depth_map.shape[:2] != (h, w):
-                depth_map = cv2.resize(depth_map, (w, h), interpolation=cv2.INTER_LINEAR)
-                
-        else:
-            # Preprocess (V2 or Hub V3)
-            input_tensor = self._preprocess(frame, input_size)
-            
-            # Inference
-            if self.half_precision:
-                input_tensor = input_tensor.half()
-            
-            depth_tensor = self.model(input_tensor)
-            
-            # Postprocess
-            depth_map = self._postprocess(depth_tensor, (h, w))
+        # Inference
+        if self.half_precision and self.device.type in ["cuda", "mps"]:
+            input_tensor = input_tensor.half()
+        
+        depth_tensor = self.model(input_tensor)
+        
+        # Postprocess
+        depth_map = self._postprocess(depth_tensor, (h, w))
         
         elapsed_ms = (time.time() - start_time) * 1000
         

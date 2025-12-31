@@ -50,7 +50,7 @@ class FrameObserver:
         detector_backend: Literal["yolo", "groundingdino"] = "yolo",
         yolo_model: Optional[Any] = None,
         grounding_dino: Optional[Any] = None,
-        target_fps: float = 4.0,
+        target_fps: float = 2.0,
         show_progress: bool = True,
         enable_3d: bool = False,
         depth_model: str = "midas",
@@ -73,9 +73,7 @@ class FrameObserver:
         self.detector_backend = detector_backend
         self.yolo = yolo_model if detector_backend == "yolo" else None
         self.grounding_dino = grounding_dino if detector_backend == "groundingdino" else None
-        self.config = config
-        self.target_fps = target_fps
-        self.show_progress = show_progress
+        self.yoloworld = None if detector_backend != "yoloworld" else None
 
         if self.detector_backend == "yolo" and self.yolo is None:
             raise ValueError("YOLO backend selected but yolo_model was not provided")
@@ -87,6 +85,15 @@ class FrameObserver:
             self.detector_classes: List[str] = list(self.yolo.names.values())
         else:
             self.detector_classes = list(self.config.grounding_categories())
+            if self.detector_backend == "yoloworld" and self.yoloworld is None:
+                from orion.perception.yoloworld_detector import YOLOWorldDetector
+                self.yoloworld = YOLOWorldDetector(
+                    model_path=None,
+                    confidence_threshold=self.config.confidence_threshold,
+                    device="mps",
+                    batch_size=8,
+                    categories=None,
+                )
         self._grounding_label_map = {
             label.lower(): idx for idx, label in enumerate(self.detector_classes)
         }
@@ -114,6 +121,11 @@ class FrameObserver:
             target_fps,
             self.perception_engine is not None,
         )
+
+    def update_camera_intrinsics(self, intrinsics: "CameraIntrinsics"):
+        """Passes camera intrinsics update to the 3D perception engine."""
+        if self.perception_engine:
+            self.perception_engine.update_camera_intrinsics(intrinsics)
     
     @profile("observer_process_video")
     def process_video(self, video_path: str) -> List[Dict]:
@@ -141,6 +153,14 @@ class FrameObserver:
         frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         duration = total_frames / video_fps if video_fps > 0 else 0
+
+        # === FIX: Detect and handle portrait video rotation ===
+        needs_rotation = frame_height > frame_width
+        if needs_rotation:
+            logger.info("Portrait video detected. Frames will be rotated for processing.")
+            # Swap width and height for processing logic
+            frame_width, frame_height = frame_height, frame_width
+        # === END FIX ===
         
         logger.info(f"Video: {video_path}")
         logger.info(f"  FPS: {video_fps:.2f}, Frames: {total_frames}, Duration: {duration:.2f}s")
@@ -170,6 +190,12 @@ class FrameObserver:
                 if not ret:
                     break
                 
+                # === FIX: Apply rotation if needed ===
+                if needs_rotation:
+                    # Rotate frame 90 degrees counter-clockwise
+                    frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+                # === END FIX ===
+
                 # Sample frames at target FPS
                 if frame_count % frame_interval == 0:
                     timestamp = frame_count / video_fps if video_fps > 0 else 0.0
@@ -203,7 +229,16 @@ class FrameObserver:
         """Dispatch to the configured detection backend."""
         if self.detector_backend == "groundingdino":
             return self._detect_with_groundingdino(frame)
-        return self._detect_with_yolo(frame)
+        elif self.detector_backend == "yoloworld":
+            return self._detect_with_yoloworld(frame)
+        else:
+            return self._detect_with_yolo(frame)
+
+    def _detect_with_yoloworld(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+        if self.yoloworld is None:
+            return []
+        # Optionally pass categories for open-vocab detection
+        return self.yoloworld.detect_frame(frame)
 
     @profile("observer_detect_with_yolo")
     def _detect_with_yolo(self, frame: np.ndarray) -> List[Dict[str, Any]]:
@@ -352,6 +387,10 @@ class FrameObserver:
                 "frame_height": frame_height,
                 "spatial_zone": spatial_zone,
             }
+            # Ensure YOLO-World detections have description and object_class fields
+            if self.detector_backend == "yoloworld":
+                detection["description"] = class_name
+                detection["object_class"] = class_name
 
             if perception_3d is not None and perception_3d.entities:
                 for entity_3d in perception_3d.entities:

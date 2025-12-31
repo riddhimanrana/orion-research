@@ -23,11 +23,13 @@ class Perception3DEngine:
         enable_hands: bool = False,
         enable_occlusion: bool = False,
         enable_slam: bool = True,
+        camera_intrinsics: Optional[CameraIntrinsics] = None,
     ):
         self.enable_depth = enable_depth
         self.enable_hands = enable_hands
         self.enable_occlusion = enable_occlusion
         self.enable_slam = enable_slam
+        self.camera_intrinsics = camera_intrinsics
         
         self.depth_estimator = None
         if enable_depth:
@@ -44,6 +46,11 @@ class Perception3DEngine:
                 logger.info("Perception3DEngine: SLAMEngine initialized")
             except Exception as e:
                 logger.error(f"Failed to initialize SLAMEngine: {e}")
+
+    def update_camera_intrinsics(self, intrinsics: CameraIntrinsics):
+        """Update the camera intrinsics used for 3D calculations."""
+        self.camera_intrinsics = intrinsics
+        logger.info(f"Perception3DEngine: Camera intrinsics updated to {intrinsics.width}x{intrinsics.height}")
 
     def process_frame(
         self,
@@ -64,8 +71,16 @@ class Perception3DEngine:
         # Lift detections to 3D
         entities_3d = []
         if depth_map is not None:
-            h, w = depth_map.shape
-            intrinsics = CameraIntrinsics.auto_estimate(w, h)
+            h, w = frame.shape[:2] # Use frame dimensions
+            
+            # Use provided intrinsics or estimate from frame dimensions
+            if self.camera_intrinsics:
+                intrinsics = self.camera_intrinsics
+                if intrinsics.width != w or intrinsics.height != h:
+                    logger.warning(f"Intrinsics dimensions ({intrinsics.width}x{intrinsics.height}) mismatch frame dimensions ({w}x{h}). Using frame dimensions for estimation.")
+                    intrinsics = CameraIntrinsics.auto_estimate(w, h)
+            else:
+                intrinsics = CameraIntrinsics.auto_estimate(w, h)
             
             for det in detections:
                 bbox = det.get('bbox') # (x1, y1, x2, y2)

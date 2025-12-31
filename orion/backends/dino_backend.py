@@ -137,7 +137,7 @@ class DINOEmbedder:
             self._timm_transform = transforms.Compose(
                 [
                     transforms.ToTensor(),
-                    transforms.Resize((256, 256), antialias=True),
+                    transforms.Resize((518, 518), antialias=True),
                     transforms.ConvertImageDtype(dtype=torch.float32),
                     transforms.Normalize(
                         mean=(0.485, 0.456, 0.406),
@@ -160,7 +160,7 @@ class DINOEmbedder:
         if img.ndim == 3 and img.shape[2] == 3:
             # Try to detect if BGR (OpenCV) by checking correlation with swapped channels
             # Simple heuristic: treat as BGR and convert to RGB
-            return img[..., ::-1]
+            return img[..., ::-1].copy()
         return img
 
     def encode_image(self, image: np.ndarray, normalize: bool = True) -> np.ndarray:
@@ -310,8 +310,13 @@ class DINOEmbedder:
                 features = self._timm_model.forward_features(batch_tensor)
                 if isinstance(features, (list, tuple)):
                     features = features[-1]
-                if features.dim() == 4:
+                
+                # Pool the features to get a single vector per image
+                if features.dim() == 3:  # (Batch, Tokens, Dim) -> (Batch, Dim)
+                    features = features.mean(dim=1)
+                elif features.dim() == 4:  # (Batch, Channels, H, W) -> (Batch, Channels)
                     features = features.mean(dim=(2, 3))
+
                 embs = features.detach().cpu().float().numpy()
             if normalize:
                 norms = np.linalg.norm(embs, axis=1, keepdims=True) + 1e-8

@@ -128,10 +128,15 @@ def grab_frame(cap: cv2.VideoCapture, frame_id: int):
 
 def draw_detections(frame, detections: Sequence[Detection]):
     for det in detections:
-        x1, y1, x2, y2 = det["bbox"]
+        # Use bbox_2d if available, else bbox
+        bbox = det.get("bbox_2d") or det.get("bbox")
+        if not bbox:
+            continue
+        x1, y1, x2, y2 = bbox
         p1 = (int(x1), int(y1))
         p2 = (int(x2), int(y2))
-        label = str(det.get("category", "unknown"))
+        # Use class_name if available, else category
+        label = str(det.get("class_name") or det.get("category", "unknown"))
         conf = float(det.get("confidence", 0.0))
         color = color_for_label(label)
         cv2.rectangle(frame, p1, p2, color, 2)

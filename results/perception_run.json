@@ -1,24 +1,24 @@
 {
-  "video": "data/examples/video.mp4",
-  "mode": "quick",
-  "yolo_model": "yolo11n",
+  "video": "data/examples/test.mp4",
+  "mode": "balanced",
+  "yolo_model": null,
   "embedding_backend": "clip",
   "embedding_dim": 512,
-  "unique_entities": 6,
-  "total_detections": 45,
-  "sampled_frames": 21,
-  "detections_per_sampled_frame": 2.142857142857143,
+  "unique_entities": 14,
+  "total_detections": 779,
+  "sampled_frames": 224,
+  "detections_per_sampled_frame": 3.4776785714285716,
   "timings_seconds": {
-    "detection": 26.371,
-    "embedding": 8.676,
-    "tracking": 0.569,
-    "clustering": 0.014,
-    "description": 24.658,
-    "total": 64.298
+    "detection": 706.51,
+    "embedding": 13.321,
+    "tracking": 0.109,
+    "clustering": 0.071,
+    "description": 0.0,
+    "total": 720.019
   },
   "tracking_metrics": {
-    "total_tracks": 5,
-    "confirmed_tracks": 5,
-    "active_tracks": 2
+    "total_tracks": 11,
+    "confirmed_tracks": 11,
+    "active_tracks": 7
   }
 }

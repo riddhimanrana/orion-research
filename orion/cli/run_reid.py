@@ -24,7 +24,7 @@ from orion.config import (
     get_episode_video_path,
     ensure_results_dir,
 )
-from orion.perception.reid import build_memory_from_tracks
+from orion.perception.reid_matcher import build_memory_from_tracks
 
 logging.basicConfig(
     level=logging.INFO,
@@ -65,7 +65,7 @@ def main():
 
     if not tracks_path.exists():
         raise FileNotFoundError(f"tracks.jsonl not found: {tracks_path}")
-    if not Path(video_path).exists():
+    if not video_path.exists():
         raise FileNotFoundError(f"Video not found: {video_path}")
     results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -99,7 +99,6 @@ def main():
         max_crops_per_track=args.max_crops_per_track,
         class_thresholds=class_thresholds,
     )
-
     logger.info("[3/3] Done.")
     logger.info("================================================================")
     logger.info(f"  Saved: {memory_path}")

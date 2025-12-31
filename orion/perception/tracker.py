@@ -254,6 +254,14 @@ class EntityTracker:
             
             # Extract and normalize embeddings for this class
             embeddings = np.array([obs.visual_embedding for obs in class_obs])
+            
+            # Ensure embeddings are 2D
+            if embeddings.ndim == 3 and embeddings.shape[1] == 1:
+                embeddings = np.squeeze(embeddings, axis=1)
+            elif embeddings.ndim != 2:
+                logger.error(f"  [ERROR] Unexpected embedding shape for class '{obj_class}': {embeddings.shape}. Skipping clustering for this class.")
+                continue
+
             norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
             embeddings_normalized = embeddings / (norms + 1e-8)
             

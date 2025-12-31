@@ -65,7 +65,6 @@ def main():
     cfg = build_config(args.mode, args.tracking, args.target_fps, args.conf)
 
     res = run_perception(args.video, config=cfg)
-
     metrics = res.metrics or {}
     timings = metrics.get("timings", {})
 
@@ -108,6 +107,18 @@ def main():
     )
     if summary["tracking_metrics"]:
         print(f"Tracking: {summary['tracking_metrics']}")
+
+    # Print entity details
+    print("\n=== Identified Entities ===")
+    if res.entities:
+        for entity in sorted(res.entities, key=lambda e: e.entity_id):
+            print(
+                f"- {entity.entity_id} ({entity.object_class}): "
+                f"{entity.appearance_count} observations. "
+                f"Description: {entity.description or 'N/A'}"
+            )
+    else:
+        print("No entities were identified.")
 
     if not args.no_save:
         out_dir = Path("results")

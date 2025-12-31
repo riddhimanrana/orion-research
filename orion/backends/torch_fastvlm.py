@@ -68,10 +68,9 @@ class FastVLMTorchWrapper:
             self.model_source,
             trust_remote_code=True,
             torch_dtype=torch.float16 if self.device != "cpu" else torch.float32,
-            local_files_only=True
         ).to(self.device)
         
-        self.processor = AutoProcessor.from_pretrained(self.model_source, trust_remote_code=True, local_files_only=True)
+        self.processor = AutoProcessor.from_pretrained(self.model_source, trust_remote_code=True)
         self.model.eval()
         logger.info(f"✓ FastVLM model loaded on {self.device}")
 

@@ -90,9 +90,7 @@ class GroundingDINOWrapper:
         target_sizes = torch.tensor([[pil_image.height, pil_image.width]], device=self.device)
         processed = self.processor.post_process_grounded_object_detection(
             outputs=outputs,
-            inputs=tensor_inputs,
-            box_threshold=box_threshold,
-            text_threshold=text_threshold,
+            input_ids=tensor_inputs["input_ids"],
             target_sizes=target_sizes,
         )
 

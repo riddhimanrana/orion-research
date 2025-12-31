@@ -23,6 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-messages", type=int, default=5, help="Maximum concurrent narrative messages")
     parser.add_argument("--max-relations", type=int, default=4, help="Max relations listed per frame")
     parser.add_argument("--refind-gap", type=int, default=45, help="Frames that qualify as a refind event")
+    parser.add_argument("--frame-offset", type=int, default=0, help="Shift overlays by this many frames (positive = overlays appear later)")
     return parser.parse_args()
 
 
@@ -38,6 +39,7 @@ def main() -> None:
         max_state_messages=args.max_messages,
         gap_frames_for_refind=args.refind_gap,
         overlay_basename=(Path(args.output).name if args.output else "video_overlay_insights.mp4"),
+        frame_offset=args.frame_offset,
     )
     output_path = Path(args.output) if args.output else None
     rendered_path = render_insight_overlay(

@@ -14,12 +14,15 @@ Author: Orion Research Team
 Date: October 2025
 """
 
+import os
 import logging
 import math
 import time
 from pathlib import Path
 import numpy as np
 from typing import Dict, List, Optional, Tuple
+import json
+from dataclasses import dataclass, field
 
 # Initialise logger early so try/except blocks can use it
 logger = logging.getLogger(__name__)
@@ -27,7 +30,7 @@ logger = logging.getLogger(__name__)
 from orion.perception.types import (
     Observation,
     PerceptionEntity,
-    PerceptionResult,
+    # PerceptionResult,
     ObjectClass,
     EntityState3D,
     Perception3DResult,
@@ -42,7 +45,53 @@ from orion.perception.observer import FrameObserver
 from orion.perception.embedder import VisualEmbedder
 from orion.perception.tracker import EntityTracker
 from orion.perception.describer import EntityDescriber
+# from orion.perception.reid import ReidModel
 from orion.perception.depth import DepthEstimator
+# from orion.utils.file_utils import find_latest_file
+from orion.settings import OrionSettings
+from orion.perception.groundingdino_wrapper import GroundingDINOWrapper
+
+# Add this import
+from orion.perception.enhanced_tracker import Track
+
+
+@dataclass
+class PerceptionResult:
+    """Structured result object for perception pipeline.
+
+    Contains detected entities, raw observations, and metadata about the
+    processing pipeline and performance.
+
+    Attributes:
+        entities: List of detected entities
+        raw_observations: List of raw observation data
+        video_path: Path to the input video
+        total_frames: Total number of frames in the video
+        fps: Frames per second of the video
+        duration_seconds: Duration of the video in seconds
+        processing_time_seconds: Total processing time in seconds
+        metrics: Optional dictionary of additional metrics
+    """
+
+    entities: List[PerceptionEntity] = field(default_factory=list)
+    raw_observations: List[Observation] = field(default_factory=list)
+    video_path: str = ""
+    total_frames: int = 0
+    fps: float = 0.0
+    duration_seconds: float = 0.0
+    processing_time_seconds: float = 0.0
+    metrics: Optional[Dict[str, float]] = None
+
+    @property
+    def total_detections(self) -> int:
+        """Total number of raw detections/observations."""
+        return len(self.raw_observations)
+
+    @property
+    def unique_entities(self) -> int:
+        """Total number of unique entities found."""
+        return len(self.entities)
+
 
 # Phase 2: Tracking imports (legacy tracker removed)
 TRACKING_AVAILABLE = False
@@ -54,45 +103,41 @@ from orion.perception.tracker import TrackerProtocol
 try:
     from orion.perception.enhanced_tracker import EnhancedTracker
     ENHANCED_TRACKER_AVAILABLE = True
-except Exception:
+except Exception as e:
+    logging.warning(f"EnhancedTracker import failed: {e}")
     ENHANCED_TRACKER_AVAILABLE = False
 
 # Optional SLAM for camera motion compensation
 try:
     from orion.slam.slam_engine import SLAMEngine, SLAMConfig
     SLAM_AVAILABLE = True
-except Exception:
+except Exception as e:
+    logging.warning(f"SLAMEngine import failed: {e}")
     SLAM_AVAILABLE = False
 
 # Optional TapNet point tracker (BootsTAPIR / TAPIR)
 try:
     from orion.perception.tapnet_tracker import TapNetTracker
     TAPNET_AVAILABLE = True
-except Exception:
+except Exception as e:
+    logging.warning(f"TapNetTracker import failed: {e}")
     TAPNET_AVAILABLE = False
 
 # Memgraph Backend
 try:
     from orion.graph.memgraph_backend import MemgraphBackend
     MEMGRAPH_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logging.warning(f"MemgraphBackend import failed: {e}")
     MEMGRAPH_AVAILABLE = False
 
 from orion.perception.spatial_zones import ZoneManager
 from orion.utils.profiling import profile, Profiler
 
 class PerceptionEngine:
-    """
-    Complete perception pipeline orchestrator.
-    
-    Manages the full Phase 1 pipeline from video to described entities.
-    """
-    
-    def __init__(
-        self,
-        config: Optional[PerceptionConfig] = None,
-        verbose: bool = False,
-    ):
+    """High-level orchestrator for the perception pipeline."""
+
+    def __init__(self, config: PerceptionConfig, db_manager=None, verbose: bool = False):
         """
         Initialize perception engine.
         
@@ -102,9 +147,8 @@ class PerceptionEngine:
         """
         self.config = config or PerceptionConfig()
         self.verbose = verbose
-        
-        if verbose:
-            logging.getLogger("orion.perception").setLevel(logging.DEBUG)
+        self.memgraph = db_manager
+        self.zone_manager = ZoneManager()
         
         # Model manager (lazy loading)
         self.model_manager = ModelManager.get_instance()
@@ -114,61 +158,81 @@ class PerceptionEngine:
         self.embedder: Optional[VisualEmbedder] = None
         self.tracker: Optional[EntityTracker] = None
         self.describer: Optional[EntityDescriber] = None
+        # self.reid_model: Optional[ReidModel] = None
+        self.depth_estimator: Optional[DepthEstimator] = None
         self.enhanced_tracker: Optional[TrackerProtocol] = None
         self.slam_engine: Optional[SLAMEngine] = None
         self.tapnet_tracker: Optional['TapNetTracker'] = None
-        self.depth_estimator: Optional[DepthEstimator] = None
-        
-        # Memgraph & Spatial Zones
-        self.memgraph: Optional[MemgraphBackend] = None
-        self.zone_manager: ZoneManager = ZoneManager()
 
-        if getattr(self.config, "use_memgraph", False):
-            if MEMGRAPH_AVAILABLE:
-                try:
-                    self.memgraph = MemgraphBackend(
-                        host=self.config.memgraph_host,
-                        port=self.config.memgraph_port,
-                    )
-                    # Create vector index sized to embedding dim for semantic search
-                    self.memgraph.create_vector_index(
-                        dimension=self.config.embedding.embedding_dim
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to initialize MemgraphBackend: {e}")
-                    self.memgraph = None
+        # Tracking history
+        self.tracking_history: Dict[int, List[Track]] = {}  # To store track history
+        self._initialize_components()
+
+    def _initialize_components(self):
+        """Initializes all perception components based on the config."""
+        settings = OrionSettings.load()
+        # GroundingDINO detector
+        if self.config.detection.backend == "groundingdino":
+            logger.info("Initializing GroundingDINO detector...")
+            # self.grounding_dino = GroundingDino(self.model_manager)
+            self.grounding_dino = GroundingDINOWrapper(
+                model_id=self.config.detection.groundingdino_model_id,
+                device=self.config.embedding.device,
+                use_half_precision=False
+            )
+        else:
+            self.grounding_dino = None
+
+        # Frame observer
+        self.observer = FrameObserver(
+            config=self.config.detection,
+            detector_backend=self.config.detection.backend,
+            yolo_model=self.model_manager.yolo if self.config.detection.backend == "yolo" else None,
+            grounding_dino=self.grounding_dino,
+            target_fps=self.config.target_fps
+        )
+        # Visual embedder
+        self.embedder = VisualEmbedder(self.model_manager.clip, self.config.embedding)
+        # Entity tracker (optional, can be None)
+        self.tracker = EntityTracker(self.config)
+        # Entity describer
+        self.describer = None
+        # self.describer = EntityDescriber(
+        #     vlm_model=self.model_manager.fastvlm,
+        #     config=self.config.description,
+        #     enable_class_correction=True,
+        #     enable_spatial_analysis=True,
+        # )
+        # self.reid_model = ReidModel(self.config.reid)
+        # self.depth_estimator = DepthEstimator(self.config.depth.model_name)
+        self.depth_estimator = None
+        self.enhanced_tracker = EnhancedTracker(
+            max_age=self.config.tracking.max_age,
+            min_hits=self.config.tracking.min_hits,
+            iou_threshold=self.config.tracking.iou_threshold,
+            appearance_threshold=self.config.tracking.appearance_threshold,
+        )
+
+        logger.info("✓ All components initialized\n")
+
+        # Initialize TapNet tracker (after other components)
+        if self.config.tracker_backend == "tapnet":
+            if not TAPNET_AVAILABLE:
+                logger.warning("TapNet backend requested but module unavailable.")
             else:
-                logger.warning(
-                    "Memgraph requested but MemgraphBackend not available (install pymgclient)."
-                )
+                try:
+                    self.tapnet_tracker = TapNetTracker(
+                        checkpoint_path=self.config.tapnet_checkpoint_path or "",
+                        max_points=self.config.tapnet_max_points,
+                        resolution=self.config.tapnet_resolution,
+                        device=self.config.embedding.device,
+                        online_mode=self.config.tapnet_online_mode,
+                        min_track_length=self.config.tapnet_min_track_length,
+                    )
+                    logger.info("  ✓ TapNetTracker initialized (point trajectories)")
+                except Exception as e:
+                    logger.warning(f"  ✗ TapNetTracker failed to initialize: {e}")
 
-        # Phase 2: Tracking component
-        self.tracker_3d = None
-
-        if self.config.enable_tracking and ENHANCED_TRACKER_AVAILABLE:
-            logger.info("  EnhancedTracker: Enabled (appearance Re-ID + 3D KF)")
-        elif self.config.enable_tracking and not ENHANCED_TRACKER_AVAILABLE:
-            logger.warning("  EnhancedTracker requested but import failed")
-
-        if self.config.enable_3d and SLAM_AVAILABLE:
-            logger.info("  SLAM: Will be initialized (camera motion compensation)")
-        elif self.config.enable_3d and not SLAM_AVAILABLE:
-            logger.warning("  SLAM requested but import failed")
-        
-        logger.info("PerceptionEngine initialized")
-        detector_desc = (
-            self.config.detection.model
-            if self.config.detection.backend == "yolo"
-            else self.config.detection.groundingdino_model_id
-        )
-        logger.info(
-            "  Detection: backend=%s model=%s",
-            self.config.detection.backend,
-            detector_desc,
-        )
-        logger.info(f"  Embedding: backend={self.config.embedding.backend}, dim={self.config.embedding.embedding_dim}")
-        logger.info(f"  Target FPS: {self.config.target_fps}")
-    
     @profile("engine_process_video")
     def process_video(self, video_path: str, save_visualizations: bool = False, output_dir: str = "results") -> PerceptionResult:
         """
@@ -185,6 +249,35 @@ class PerceptionEngine:
         # Ensure output directory exists
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
+        # === FIX: Get actual video dimensions and update config ===
+        try:
+            import cv2
+            cap = cv2.VideoCapture(video_path)
+            if cap.isOpened():
+                actual_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                actual_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                
+                if self.config.camera.width != actual_width or self.config.camera.height != actual_height:
+                    logger.warning(
+                        f"Camera config resolution ({self.config.camera.width}x{self.config.camera.height}) "
+                        f"does not match video resolution ({actual_width}x{actual_height}). "
+                        f"Updating config to match video."
+                    )
+                    self.config.camera.width = actual_width
+                    self.config.camera.height = actual_height
+                
+                # Update observer's 3D engine with correct intrinsics
+                if self.observer:
+                    correct_intrinsics = self.config.camera.resolve_intrinsics(
+                        width=actual_width, height=actual_height
+                    )
+                    self.observer.update_camera_intrinsics(correct_intrinsics)
+
+            cap.release()
+        except Exception as e:
+            logger.error(f"Failed to read video dimensions to update config: {e}")
+        # === END FIX ===
+
         logger.info("\n" + "="*80)
         logger.info("PERCEPTION ENGINE - PHASE 1")
         logger.info("="*80)
@@ -193,7 +286,7 @@ class PerceptionEngine:
         metrics_timings: dict = {}
         
         # Initialize pipeline components
-        self._initialize_components()
+        # self._initialize_components()
         
         # Step 1: Observe & detect
         t0 = time.time()
@@ -225,8 +318,9 @@ class PerceptionEngine:
             t0 = time.time()
             try:
                 self._run_enhanced_tracking(detections)
+                self._save_tracking_results(output_dir)
             except Exception as e:
-                logger.warning(f"Enhanced tracking failed: {e}")
+                logging.warning(f"Enhanced tracking failed: {e}")
             finally:
                 metrics_timings["tracking_seconds"] = time.time() - t0
         
@@ -242,17 +336,18 @@ class PerceptionEngine:
         t0 = time.time()
         entities = self._reid_deduplicate_entities(entities)
         metrics_timings["reid_seconds"] = time.time() - t0
-        
+
         # Step 5: Describe entities
         t0 = time.time()
-        entities = self.describer.describe_entities(entities)
+        if self.describer:
+            entities = self.describer.describe_entities(entities)
         metrics_timings["description_seconds"] = time.time() - t0
 
         if self.config.use_memgraph and self.memgraph is not None:
             try:
                 self._sync_memgraph_entities(entities)
             except Exception as e:
-                logger.warning(f"Memgraph sync failed: {e}")
+                logging.warning(f"Memgraph sync failed: {e}")
         
         # Get video metadata (approximate from observations)
         total_frames = max([obs.frame_number for obs in observations]) if observations else 0
@@ -266,8 +361,8 @@ class PerceptionEngine:
                 stats = self.enhanced_tracker.get_statistics()
                 keys = [k for k in ["total_tracks", "confirmed_tracks", "active_tracks", "id_switches"] if k in stats]
                 result_metrics.update({k: stats[k] for k in keys})
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Exception during profiling stats save: {e}")
 
         # Add aggregate timings and run stats
         elapsed_total = time.time() - start_time
@@ -279,7 +374,8 @@ class PerceptionEngine:
         # Frame and detection stats
         try:
             sampled_frames = len({int(d["frame_number"]) for d in detections})
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Exception calculating sampled_frames: {e}")
             sampled_frames = 0
         result_metrics.update({
             "timings": metrics_timings,
@@ -325,131 +421,16 @@ class PerceptionEngine:
         # Export visualization data if requested
         if save_visualizations:
             self._export_visualization_data(result, output_dir)
-        
+            self._save_tracking_results(output_dir)
+            
         return result
-    
-    def _initialize_components(self):
-        """Initialize all pipeline components with models."""
-        logger.info("Loading models...")
-        
-        # Detector backend (YOLO or GroundingDINO)
-        yolo = None
-        grounding_dino = None
-        if self.config.detection.backend == "groundingdino":
-            self.model_manager.groundingdino_model_id = self.config.detection.groundingdino_model_id
-            grounding_dino = self.model_manager.groundingdino
-            logger.info(
-                "  ✓ GroundingDINO loaded (%s)",
-                self.config.detection.groundingdino_model_id,
-            )
-        else:
-            self.model_manager.yolo_model_name = self.config.detection.model
-            yolo = self.model_manager.yolo
-            logger.info("  ✓ YOLO detector loaded (%s)", self.config.detection.model)
-        
-        # CLIP (only load if requested by backend or text conditioning)
-        clip = None
-        try:
-            if self.config.embedding.backend == "clip" or self.config.embedding.use_text_conditioning:
-                clip = self.model_manager.clip
-                logger.info("  ✓ CLIP loaded (semantic + description)")
-            else:
-                logger.info("  ✓ Skipping CLIP load (backend does not require it)")
-        except Exception as e:
-            logger.warning(f"  ✗ CLIP load failed: {e}. Proceeding without CLIP.")
 
-        # DINO (instance-level embeddings) if requested
-        dino = None
-        if self.config.embedding.backend == "dino":
-            try:
-                dino = self.model_manager.dino
-                logger.info("  ✓ DINO loaded (instance-level embeddings)")
-            except Exception as e:
-                logger.warning(f"  ✗ Failed to load DINO backend: {e}. Falling back to CLIP embeddings.")
-                self.config.embedding.backend = "clip"
-        
-        # FastVLM
-        vlm = self.model_manager.fastvlm
-        logger.info("  ✓ FastVLM loaded")
-        
-        # Create components
-        self.observer = FrameObserver(
-            config=self.config.detection,
-            detector_backend=self.config.detection.backend,
-            yolo_model=yolo,
-            grounding_dino=grounding_dino,
-            target_fps=self.config.target_fps,
-            show_progress=True,
-            enable_3d=self.config.enable_3d,
-            depth_model=self.config.depth_model,
-            enable_occlusion=self.config.enable_occlusion,
-        )
-        
-        self.embedder = VisualEmbedder(
-            clip_model=clip,
-            dino_model=dino,
-            config=self.config.embedding,
-        )
-        
-        self.tracker = EntityTracker(
-            config=self.config,
-        )
-        
-        self.describer = EntityDescriber(
-            vlm_model=vlm,
-            config=self.config.description,
-        )
-        
-        if self.config.enable_depth:
-            self._get_depth_estimator()
-
-
-        
-        # Enhanced tracker (StrongSORT-inspired)
-        if self.config.enable_tracking and ENHANCED_TRACKER_AVAILABLE:
-            try:
-                self.enhanced_tracker = EnhancedTracker(
-                    clip_model=self.model_manager.clip  # Pass CLIP for label verification
-                )
-                logger.info("  ✓ EnhancedTracker initialized (with CLIP verification)")
-            except Exception as e:
-                logger.warning(f"  ✗ EnhancedTracker failed to initialize: {e}")
-        
-        # SLAM engine for camera motion compensation (CMC)
-        if self.config.enable_3d and SLAM_AVAILABLE:
-            try:
-                self.slam_engine = SLAMEngine(SLAMConfig())
-                logger.info("  ✓ SLAMEngine initialized (camera pose estimation)")
-            except Exception as e:
-                logger.warning(f"  ✗ SLAMEngine failed to initialize: {e}")
-        
-        logger.info("✓ All components initialized\n")
-
-        # Initialize TapNet tracker (after other components)
-        if self.config.tracker_backend == "tapnet":
-            if not TAPNET_AVAILABLE:
-                logger.warning("TapNet backend requested but module unavailable.")
-            else:
-                try:
-                    self.tapnet_tracker = TapNetTracker(
-                        checkpoint_path=self.config.tapnet_checkpoint_path or "",
-                        max_points=self.config.tapnet_max_points,
-                        resolution=self.config.tapnet_resolution,
-                        device=self.config.embedding.device,
-                        online_mode=self.config.tapnet_online_mode,
-                        min_track_length=self.config.tapnet_min_track_length,
-                    )
-                    logger.info("  ✓ TapNetTracker initialized (point trajectories)")
-                except Exception as e:
-                    logger.warning(f"  ✗ TapNetTracker failed to initialize: {e}")
-
-    def _run_tapnet_tracking(self, detections: List[dict]) -> None:
-        """Prototype TapNet tracking over aggregated detections.
-
-        Current stub logic:
-          - Seed tracks from first frame centroids
-          - Advance identity motion per frame (no model inference yet)
-          - Metrics only (does not modify entity clustering path yet)
+    def _run_tapnet_tracking(self, detections: List[Dict]):
+        """
+        Run TapNet point tracking on the video frames.
+        - Seed tracks from first frame centroids
+        - Advance identity motion per frame (no model inference yet)
+        - Metrics only (does not modify entity clustering path yet)
         """
         if self.tapnet_tracker is None:
             return
@@ -468,7 +449,6 @@ class PerceptionEngine:
     
     def _export_visualization_data(self, result: PerceptionResult, output_dir: str):
         """Export SLAM trajectory, camera intrinsics, and tracking data for visualization."""
-        import json
         from pathlib import Path
         
         output_path = Path(output_dir)
@@ -562,24 +542,24 @@ class PerceptionEngine:
 
         depth_value = None
         depth_map: Optional[np.ndarray] = None
-        if self.config.enable_depth:
-            estimator = self._get_depth_estimator()
-            if estimator is not None:
-                try:
-                    depth_map, _ = estimator.estimate(frame)
-                    if depth_map is not None:
-                        depth_map = depth_map.astype(np.float32)
-                        depth_map = np.clip(depth_map, 0.0, self.config.depth.max_depth_mm)
-                        valid = depth_map[(depth_map > 0) & np.isfinite(depth_map)]
-                        if valid.size > 0:
-                            depth_value = float(np.median(valid))
-                        else:
-                            depth_value = None
-                except Exception as exc:
-                    logger.warning(f"Depth estimation failed for frame {frame_number}: {exc}")
-            if depth_map is None:
-                depth_value = min(self.config.depth.max_depth_mm, 1500.0)
-                depth_map = np.full((height, width), depth_value, dtype=np.float32)
+        # if self.config.enable_depth:
+        #     estimator = self._get_depth_estimator()
+        #     if estimator is not None:
+        #         try:
+        #             depth_map, _ = estimator.estimate(frame)
+        #             if depth_map is not None:
+        #                 depth_map = depth_map.astype(np.float32)
+        #                 depth_map = np.clip(depth_map, 0.0, self.config.depth.max_depth_mm)
+        #                 valid = depth_map[(depth_map > 0) & np.isfinite(depth_map)]
+        #                 if valid.size > 0:
+        #                     depth_value = float(np.median(valid))
+        #                 else:
+        _value = None
+        #         except Exception as exc:
+        #             logger.warning(f"Depth estimation failed for frame {frame_number}: {exc}")
+        #     if depth_map is None:
+        #         depth_value = min(self.config.depth.max_depth_mm, 1500.0)
+        #         depth_map = np.full((height, width), depth_value, dtype=np.float32)
 
         entities: List[EntityState3D] = []
         for idx, det in enumerate(detections):
@@ -663,29 +643,7 @@ class PerceptionEngine:
 
     def _get_depth_estimator(self) -> Optional[DepthEstimator]:
         """Lazily initialize and return the shared depth estimator."""
-        if not self.config.enable_depth:
-            return None
-        if self.depth_estimator is not None:
-            return self.depth_estimator
-
-        depth_cfg = getattr(self.config, "depth", None)
-        model_name = getattr(depth_cfg, "model_name", "depth_anything_v3")
-        model_size = getattr(depth_cfg, "model_size", "small")
-        device = getattr(depth_cfg, "device", None)
-        half_precision = getattr(depth_cfg, "half_precision", True)
-
-        try:
-            self.depth_estimator = DepthEstimator(
-                model_name=model_name,
-                model_size=model_size,
-                device=device,
-                half_precision=half_precision,
-            )
-            logger.info(f"  ✓ DepthEstimator initialized ({model_name}/{model_size})")
-        except Exception as exc:
-            logger.warning(f"  ✗ Failed to initialize DepthEstimator: {exc}")
-            self.depth_estimator = None
-        return self.depth_estimator
+        return None
     
     def _sync_memgraph_entities(self, entities: List[PerceptionEntity]):
         """Push entity observations and relations to Memgraph."""
@@ -697,8 +655,8 @@ class PerceptionEngine:
         for entity in entities:
             try:
                 entity_numeric_id = self._entity_str_to_int(entity.entity_id)
-            except Exception:
-                logger.debug(f"Unable to parse entity_id {entity.entity_id} for Memgraph")
+            except Exception as e:
+                logger.debug(f"Unable to parse entity_id {entity.entity_id} for Memgraph: {e}")
                 continue
 
             zone_id = self.zone_manager.assign_zone(entity)
@@ -707,7 +665,8 @@ class PerceptionEngine:
             if embedding is None:
                 try:
                     embedding = entity.compute_average_embedding()
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Failed to compute average embedding for entity {entity.entity_id}: {e}")
                     embedding = None
 
             embedding_payload = (
@@ -835,8 +794,8 @@ class PerceptionEngine:
             if entity.average_embedding is None:
                 try:
                     entity.compute_average_embedding()
-                except Exception:
-                    logger.warning(f"Entity {entity.entity_id} missing average embedding and could not compute.")
+                except Exception as e:
+                    logger.warning(f"Entity {entity.entity_id} missing average embedding and could not compute: {e}")
                     continue
             embeddings.append(entity.average_embedding)
             valid_entities.append(entity)
@@ -1071,7 +1030,9 @@ class PerceptionEngine:
                 self.slam_engine.trajectory.append(t)
 
             # Update tracker with pose for camera motion compensation
-            self.enhanced_tracker.update(converted, embs, camera_pose=camera_pose, frame_idx=fidx)
+            active_tracks = self.enhanced_tracker.update(converted, embs, camera_pose=camera_pose, frame_idx=fidx)
+            if active_tracks:
+                self.tracking_history[fidx] = active_tracks
             last_stats = self.enhanced_tracker.get_statistics()
 
         if last_stats:
@@ -1132,6 +1093,36 @@ class PerceptionEngine:
             embeddings.append(emb if emb is not None else None)
 
         return converted, embeddings
+
+    def _save_tracking_results(self, output_dir: str):
+        """Saves tracking history to a JSONL file."""
+        if not self.tracking_history:
+            logging.warning("No tracking history to save.")
+            return
+
+        output_path = os.path.join(output_dir, "tracks.jsonl")
+        try:
+            # Get FPS for timestamp calculation. Fallback to a default if not available.
+            fps = self.config.target_fps or 30.0
+
+            with open(output_path, 'w') as f:
+                for frame_idx, tracks in self.tracking_history.items():
+                    for track in tracks:
+                        # Calculate timestamp in milliseconds
+                        timestamp_msec = (frame_idx / fps) * 1000
+                        track_data = {
+                            "frame_id": frame_idx,
+                            "timestamp": timestamp_msec,
+                            "track_id": track.id,
+                            "class_name": track.class_name,
+                            "bbox_2d": track.bbox_2d.tolist(),
+                            "bbox_3d": track.bbox_3d.tolist() if track.bbox_3d is not None else None,
+                            "confidence": track.confidence,
+                        }
+                        f.write(json.dumps(track_data) + '\n')
+            logging.info(f"Tracking results saved to {output_path}")
+        except Exception as e:
+            logging.warning(f"Failed to save tracking results: {e}")
 
 
 # ============================================================================

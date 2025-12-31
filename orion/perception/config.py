@@ -25,15 +25,15 @@ logger = logging.getLogger(__name__)
 class DetectionConfig:
     """Detection backend configuration (YOLO or GroundingDINO)."""
 
-    backend: Literal["yolo", "groundingdino"] = "yolo"
-    """Primary detector to use for frame observations."""
+    backend: Literal["yolo", "groundingdino", "yoloworld"] = "groundingdino"
+    """Primary detector to use for frame observations. Options: 'yolo', 'groundingdino', 'yoloworld'"""
 
     # YOLO-specific settings
     model: Literal["yolo11n", "yolo11s", "yolo11m", "yolo11x"] = "yolo11x"
     """YOLO model size (n=fastest, x=most accurate)."""
 
     # Detection thresholds (shared)
-    confidence_threshold: float = 0.25
+    confidence_threshold: float = 0.4
     """Minimum detection confidence (0-1, lower = more detections)."""
 
     iou_threshold: float = 0.45
@@ -281,7 +281,7 @@ class DescriptionConfig:
 class DepthConfig:
     """Depth estimation configuration for Phase 1 3D perception."""
 
-    model_name: Literal["depth_anything_v3"] = "depth_anything_v3"
+    model_name: Literal["depth_anything_v3", "depth_anything_v2"] = "depth_anything_v2"
     model_size: Literal["small", "base", "large"] = "small"
     device: Optional[str] = None  # auto-detect by default
     half_precision: bool = True
@@ -383,6 +383,20 @@ class CameraConfig:
 
 
 @dataclass
+class TrackingConfig:
+    """Configuration for the enhanced tracker."""
+    max_age: int = 30  # Increased from 1 to 30 for more stable tracking
+    min_hits: int = 3
+    iou_threshold: float = 0.3
+    appearance_threshold: float = 0.5
+    reid_window_frames: int = 90
+    class_belief_lr: float = 0.3
+    max_distance_pixels: float = 150.0
+    max_distance_3d_mm: float = 1500.0
+    ttl_frames: int = 30
+
+
+@dataclass
 class PerceptionConfig:
     """Complete perception engine configuration"""
     
@@ -393,6 +407,7 @@ class PerceptionConfig:
     hand_tracking: HandTrackingConfig = field(default_factory=HandTrackingConfig)
     occlusion: OcclusionConfig = field(default_factory=OcclusionConfig)
     camera: CameraConfig = field(default_factory=CameraConfig)
+    tracking: TrackingConfig = field(default_factory=TrackingConfig)
     
     # General settings
     target_fps: float = 4.0
@@ -404,9 +419,6 @@ class PerceptionConfig:
     # 3D Perception settings
     enable_3d: bool = True
     """Enable 3D perception (depth, 3D coordinates, occlusion)"""
-    
-    depth_model: Literal["depth_anything_v3", "depth_anything_v2"] = "depth_anything_v3"
-    """Depth estimation model (DepthAnything V3 primary, V2 fallback)."""
     
     enable_depth: bool = True
     """Enable depth estimation stage (Phase 1 3D)."""
@@ -424,21 +436,6 @@ class PerceptionConfig:
     # Phase 2: Tracking settings
     enable_tracking: bool = False
     """Enable temporal entity tracking with Bayesian beliefs"""
-    
-    tracking_max_distance_pixels: float = 150.0
-    """Maximum 2D distance for track association (pixels)"""
-    
-    tracking_max_distance_3d_mm: float = 1500.0
-    """Maximum 3D distance for track association (millimeters)"""
-    
-    tracking_ttl_frames: int = 30
-    """Frames before declaring entity disappeared"""
-    
-    tracking_reid_window_frames: int = 90
-    """Window for attempting re-identification after disappearance"""
-    
-    tracking_class_belief_lr: float = 0.3
-    """Learning rate for Bayesian class belief updates"""
 
     # Tracker backend selection (prototype: 'simple' existing logic or 'tapnet')
     tracker_backend: Literal["simple", "tapnet"] = "simple"
@@ -458,7 +455,7 @@ class PerceptionConfig:
     clustering_min_samples: int = 1
     """Minimum samples parameter for HDBSCAN (>=1)."""
 
-    clustering_cluster_selection_epsilon: float = 0.25
+    clustering_cluster_selection_epsilon: float = 0.5
     """Epsilon for HDBSCAN cluster selection (lower = more clusters)."""
 
     # Memgraph configuration
@@ -528,6 +525,34 @@ class PerceptionConfig:
 
 
 # Preset configurations
+def get_ultra_fast_config() -> PerceptionConfig:
+    """
+    Ultra-fast mode: maximum speed, minimum quality.
+    
+    Use for real-time previews or very fast iteration.
+    """
+    return PerceptionConfig(
+        detection=DetectionConfig(
+            backend="yolo",
+            model="yolo11n",
+            confidence_threshold=0.5,
+        ),
+        embedding=EmbeddingConfig(
+            embedding_dim=512,
+            batch_size=128,
+        ),
+        description=DescriptionConfig(
+            max_tokens=50,
+        ),
+        target_fps=1.0,
+        enable_3d=False,
+        enable_depth=False,
+        enable_tracking=False,
+        enable_occlusion=False,
+        use_memgraph=False,
+    )
+
+
 def get_fast_config() -> PerceptionConfig:
     """
     Fast mode: prioritize speed over accuracy
@@ -559,6 +584,7 @@ def get_balanced_config() -> PerceptionConfig:
     """
     return PerceptionConfig(
         detection=DetectionConfig(
+            backend="yoloworld",
             model="yolo11m",
             confidence_threshold=0.25,
         ),
@@ -583,11 +609,14 @@ def get_accurate_config() -> PerceptionConfig:
     """
     return PerceptionConfig(
         detection=DetectionConfig(
+            backend="groundingdino",
             model="yolo11x",
-            confidence_threshold=0.15,
+            confidence_threshold=0.1,  # Lowered for more recall
+            groundingdino_box_threshold=0.1,  # Lowered for more recall
+            groundingdino_text_threshold=0.1,  # Lowered for more recall
         ),
         embedding=EmbeddingConfig(
-            embedding_dim=1024,
+            embedding_dim=768,
             backend="dino",
             batch_size=16,
             device="auto",  # Use GPU if available
@@ -596,8 +625,11 @@ def get_accurate_config() -> PerceptionConfig:
             max_tokens=300,
             temperature=0.2,
         ),
+        depth=DepthConfig(
+            model_name="depth_anything_v2",
+        ),
         target_fps=8.0,
         enable_3d=True,
-        depth_model="midas",  # Note: DepthAnythingV2 used internally regardless
         enable_tracking=True,
+        clustering_cluster_selection_epsilon=0.5,
     )

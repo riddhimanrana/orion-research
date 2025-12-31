@@ -56,7 +56,7 @@ def handle_analyze(args: argparse.Namespace, settings: OrionSettings) -> None:
         start_time = time.time()
         console.print("[bold cyan]Starting perception pipeline...[/bold cyan]\n")
         
-        engine = PerceptionEngine(config=config, verbose=getattr(args, "verbose", False))
+        engine = PerceptionEngine(config=config)
         result = engine.process_video(
             str(args.video),
             save_visualizations=True,

@@ -191,10 +191,13 @@ class EntityDescriber:
             
             # Apply spatial analysis
             if self.enable_spatial_analysis and best_obs.bounding_box:
+                # Use frame dimensions from observation if available, else fallback
+                frame_width = getattr(best_obs, 'frame_width', 1920.0)
+                frame_height = getattr(best_obs, 'frame_height', 1080.0)
                 best_obs.spatial_zone = calculate_spatial_zone(
                     best_obs.bounding_box,
-                    frame_width=1920.0,  # TODO: Get from video metadata
-                    frame_height=1080.0,
+                    frame_width=frame_width,
+                    frame_height=frame_height,
                 )
                 spatial_count += 1
             
@@ -228,13 +231,15 @@ class EntityDescriber:
         
         Args:
             observation: Observation to describe
-            
         Returns:
             Generated description string
         """
+        # Fallback: if no image_patch, use raw_yolo_class or object_class as description
         if observation.image_patch is None:
-            return "No visual data available."
-            
+            # Use detection's description if available (e.g., YOLO-World class name)
+            if hasattr(observation, 'raw_yolo_class') and observation.raw_yolo_class:
+                return str(observation.raw_yolo_class)
+            return str(observation.object_class)
         return self._generate_description(
             observation.image_patch,
             observation.object_class,

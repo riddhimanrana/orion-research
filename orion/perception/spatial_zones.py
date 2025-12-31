@@ -5,7 +5,7 @@ Spatial Zone Manager
 Assigns entities to spatial zones based on their 3D position or semantic class.
 """
 
-from typing import Dict
+from typing import Dict, Tuple, Optional
 from orion.perception.types import PerceptionEntity
 
 class ZoneManager:
@@ -22,6 +22,14 @@ class ZoneManager:
             4: "Bedroom"
         }
         
+        self.zone_colors: Dict[int, Tuple[int, int, int]] = {
+            0: (128, 128, 128),  # Gray for Unknown
+            1: (255, 165, 0),    # Orange for Workspace
+            2: (0, 255, 0),      # Green for Living Area
+            3: (0, 0, 255),      # Blue for Kitchen
+            4: (255, 0, 255),    # Magenta for Bedroom
+        }
+
         # Semantic mapping (heuristic)
         self.semantic_map = {
             "laptop": 1, "mouse": 1, "keyboard": 1, "monitor": 1,
@@ -51,3 +59,13 @@ class ZoneManager:
 
     def get_zone_name(self, zone_id: int) -> str:
         return self.zones.get(zone_id, "Unknown")
+
+    def get_zone_color(self, zone_id: Optional[int] = None, zone_name: Optional[str] = None) -> Tuple[int, int, int]:
+        """Gets the color for a given zone ID or name."""
+        if zone_id is not None:
+            return self.zone_colors.get(zone_id, self.zone_colors[0])
+        if zone_name is not None:
+            for zid, name in self.zones.items():
+                if name.lower() == zone_name.lower():
+                    return self.zone_colors.get(zid, self.zone_colors[0])
+        return self.zone_colors[0]

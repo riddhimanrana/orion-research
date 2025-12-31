@@ -108,7 +108,7 @@ def compute_track_embeddings(
             # Limit samples per track
             if len(per_track_embs.get(tid, [])) >= max_crops_per_track:
                 continue
-            x1, y1, x2, y2 = _ensure_int_bbox(det["bbox"], W, H)
+            x1, y1, x2, y2 = _ensure_int_bbox(det.get("bbox_2d") or det.get("bbox"), W, H)
             crop = frame[y1:y2, x1:x2]
             if crop.size == 0:
                 continue
@@ -165,7 +165,7 @@ def cluster_tracks(
     track_meta: Dict[int, Dict[str, Any]] = {}
     for tid_str, obs in by_track.items():
         tid = int(tid_str)
-        cats = [o.get("category", "object") for o in obs]
+        cats = [o.get("class_name", "object") for o in obs]
         category = max(set(cats), key=cats.count) if cats else "object"
         frames = [int(o.get("frame_id", 0)) for o in obs]
         track_meta[tid] = {
@@ -213,11 +213,13 @@ def cluster_tracks(
                 new_proto = proto * (len(members) - 1) / len(members) + emb / len(members)
                 new_proto = new_proto / (np.linalg.norm(new_proto) + 1e-8)
                 clusters[best_idx] = (mem_id, new_proto.astype(np.float32), members)
+                track_to_memory[tid] = mem_id # Assign memory id to track
                 assigned = True
             if not assigned:
                 mem_id = f"mem_{mem_counter:03d}"
                 mem_counter += 1
                 clusters.append((mem_id, emb, [tid]))
+                track_to_memory[tid] = mem_id # Assign new memory id
 
         # Finalize clusters into memory objects
         for mem_id, proto, members in clusters:
@@ -228,6 +230,11 @@ def cluster_tracks(
             first = min(track_meta[tid]["first"] for tid in members)
             last = max(track_meta[tid]["last"] for tid in members)
             total_obs = sum(track_meta[tid]["count"] for tid in members)
+            
+            # Determine the most common category among the member tracks
+            member_categories = [track_meta[tid]["category"] for tid in members]
+            final_category = max(set(member_categories), key=member_categories.count) if member_categories else "object"
+
             appearance_history = []
             for tid in members:
                 appearance_history.append({
@@ -236,11 +243,11 @@ def cluster_tracks(
                     "last_frame": track_meta[tid]["last"],
                     "observations": track_meta[tid]["count"],
                 })
-                track_to_memory[tid] = mem_id
+                
 
             memory_objects[mem_id] = {
                 "memory_id": mem_id,
-                "class": category,
+                "class": final_category,
                 "first_seen_frame": first,
                 "last_seen_frame": last,
                 "total_observations": total_obs,

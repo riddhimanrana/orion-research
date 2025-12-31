@@ -1,226 +1,136 @@
 {
-  "total_entities": 24,
+  "total_entities": 14,
   "entities": [
     {
       "id": 0,
-      "class": "potted plant",
-      "confidence": 0.7976414561271667,
-      "observation_count": 83,
-      "first_frame": 406,
-      "last_frame": 1225,
-      "description": "The image depicts a horse in a blurred state, making it difficult to discern specific details. The horse appears to be in motion, with its legs extended and its head turned slightly to the side. The color of the horse is a muted, earthy tone, blending with the background. The shape of the horse is somewhat elongated, with a prominent head, a long neck, and a flowing mane. The background is indistinct, with a soft, hazy effect that obscures any finer details. The overall impression is one of motion and fluidity, with the horse seemingly captured in a dynamic moment."
+      "class": "unknown",
+      "confidence": 0.7088936567306519,
+      "observation_count": 293,
+      "first_frame": 0,
+      "last_frame": 1820,
+      "description": "No description"
     },
     {
       "id": 1,
-      "class": "chair",
-      "confidence": 0.9086659550666809,
-      "observation_count": 71,
-      "first_frame": 0,
-      "last_frame": 1162,
-      "description": "The image depicts a close-up view of a chair. The chair has a dark brown or black color, with a visible texture that suggests it might be made of wood or a similar material. The chair's backrest is slightly curved, and the seat appears to be cushioned, indicating a comfortable seating arrangement. The chair is positioned against a backdrop that includes a light-colored wall and a portion of a blue and white checkered object, possibly a tablecloth or a piece of fabric. The overall appearance of the chair is simple and functional, with no additional decorative elements visible in the image."
+      "class": "person",
+      "confidence": 0.6633874177932739,
+      "observation_count": 75,
+      "first_frame": 21,
+      "last_frame": 1820,
+      "description": "No description"
     },
     {
       "id": 2,
-      "class": "couch",
-      "confidence": 0.9574936032295227,
-      "observation_count": 51,
-      "first_frame": 553,
-      "last_frame": 1393,
-      "description": "The image depicts a beige-colored couch with a slightly worn appearance. The couch has a smooth, slightly curved surface and is positioned against a white wall. On the couch, there is a pair of white slippers with a floral pattern, placed on the seat cushion. The slippers are positioned in such a way that they appear to be partially covering the couch. The couch is situated on a dark-colored rug, which contrasts with the lighter tones of the couch and the wall. The overall setting suggests a cozy, lived-in space, possibly a living room or a similar area in a home."
+      "class": "book",
+      "confidence": 0.6688722372055054,
+      "observation_count": 96,
+      "first_frame": 35,
+      "last_frame": 1806,
+      "description": "No description"
     },
     {
       "id": 3,
-      "class": "person",
-      "confidence": 0.9165263175964355,
-      "observation_count": 33,
-      "first_frame": 665,
-      "last_frame": 1820,
-      "description": "The image depicts a close-up view of a person's skin, specifically focusing on the area around the midriff. The skin appears smooth and pale, with a uniform beige color. There are no visible pores, freckles, or other distinguishing features. The texture of the skin is consistent, with no visible wrinkles or blemishes. The background is blurred, making it difficult to discern any additional details or objects. The overall impression is of a clean, unblemished skin surface."
+      "class": "bed",
+      "confidence": 0.5781137943267822,
+      "observation_count": 41,
+      "first_frame": 231,
+      "last_frame": 1715,
+      "description": "No description"
     },
     {
       "id": 4,
-      "class": "tv",
-      "confidence": 0.9306132197380066,
-      "observation_count": 27,
+      "class": "chair",
+      "confidence": 0.49724212288856506,
+      "observation_count": 36,
       "first_frame": 0,
-      "last_frame": 1820,
-      "description": "The image depicts a large, rectangular object with a predominantly dark blue color. The object appears to be a piece of furniture, possibly a table or a desk, given its size and shape. The surface of the object is smooth and flat, with a few visible lines or markings that suggest it might be made of wood or a similar material. The edges of the object are straight and well-defined, indicating a sturdy construction. The background of the image is blurred, making it difficult to discern any additional details about the surroundings. The overall appearance suggests a modern, minimalist design, commonly found in contemporary furniture."
+      "last_frame": 1729,
+      "description": "No description"
     },
     {
       "id": 5,
-      "class": "book",
-      "confidence": 0.8467318415641785,
-      "observation_count": 39,
-      "first_frame": 567,
+      "class": "tv",
+      "confidence": 0.4567365050315857,
+      "observation_count": 32,
+      "first_frame": 14,
       "last_frame": 1743,
-      "description": "The image depicts a close-up view of a computer screen displaying a webpage. The webpage appears to be a music-related site, as indicated by the prominent text \"PIANO\" at the top. The text is written in a bold, black font, making it stand out against the lighter background of the webpage. The webpage itself is partially obscured by a layer of smudges or dirt, which obscures some of the text and the overall appearance of the webpage. The background of the webpage is a light color, possibly white or a very light shade of another color, which contrasts with the darker text. The overall appearance suggests that the webpage is not in pristine condition, possibly due to frequent use or exposure to dust or other environmental factors. The image does not provide a clear view of the entire webpage, but the focus on the \"PIANO\" text suggests that the content of the webpage is related to music, specifically piano-related information or resources."
+      "description": "No description"
     },
     {
       "id": 6,
-      "class": "vase",
-      "confidence": 0.8511295914649963,
-      "observation_count": 25,
-      "first_frame": 406,
-      "last_frame": 1673,
-      "description": "The image depicts a cat with a predominantly brown and black fur coat. The cat's fur appears to be short and dense, with a mix of dark and light patches. The coloration is somewhat mottled, giving it a somewhat mottled appearance. The cat's face is not clearly visible, but the visible parts of its body suggest it is a domestic cat. The background is a plain, light-colored surface, which contrasts with the darker tones of the cat's fur. The overall impression is of a small, furry animal with a somewhat rugged and textured appearance."
+      "class": "oven",
+      "confidence": 0.5204018354415894,
+      "observation_count": 20,
+      "first_frame": 770,
+      "last_frame": 1533,
+      "description": "No description"
     },
     {
       "id": 7,
-      "class": "mouse",
-      "confidence": 0.9165430665016174,
-      "observation_count": 19,
-      "first_frame": 0,
+      "class": "bottle",
+      "confidence": 0.4953683912754059,
+      "observation_count": 18,
+      "first_frame": 14,
       "last_frame": 1820,
-      "description": "The image depicts a black, oval-shaped object with a pink, triangular-shaped protrusion on its right side. The object appears to be a part of a larger structure, possibly a piece of machinery or equipment. The background is blurred, making it difficult to discern any additional details. The pink protrusion stands out against the black background, drawing attention to its shape and color. The overall appearance suggests that the object could be a component of a larger system, such as a valve, connector, or part of a mechanical assembly. The image does not provide enough context to determine the exact nature or function of the object."
+      "description": "No description"
     },
     {
       "id": 8,
-      "class": "dining table",
-      "confidence": 0.8803531527519226,
-      "observation_count": 16,
-      "first_frame": 805,
-      "last_frame": 1792,
-      "description": "The image depicts a dining table covered with a blue and white checkered tablecloth. On the table, there is a book titled \"Piano\" with a cover image of a piano. The table also has a placemat with a dark, woven texture. The tablecloth has a pattern of alternating light and dark blue squares. The book is open, revealing a page with a black and white image of a piano. The table is set against a white wall with a window, and there is a black chair visible in the foreground. The overall setting suggests a dining or kitchen area."
+      "class": "keyboard",
+      "confidence": 0.5707985162734985,
+      "observation_count": 13,
+      "first_frame": 546,
+      "last_frame": 1820,
+      "description": "No description"
     },
     {
       "id": 9,
       "class": "sink",
-      "confidence": 0.6939156651496887,
-      "observation_count": 11,
-      "first_frame": 42,
-      "last_frame": 1750,
-      "description": "The image depicts a black stove with a blue object on top of it. The stove has a smooth, glossy surface, and the blue object appears to be a small, rectangular item, possibly a container or a piece of cookware. The stove is situated on a white countertop, and there is a glimpse of a blue object in the background, which could be a bottle or a container. The overall scene suggests a kitchen setting, with the stove being the central focus. The lighting in the image is soft, creating a gentle reflection on the stove's surface. The blue object stands out against the black stove, making it a noticeable feature in the image."
+      "confidence": 0.4022373557090759,
+      "observation_count": 8,
+      "first_frame": 1183,
+      "last_frame": 1680,
+      "description": "No description"
     },
     {
       "id": 10,
-      "class": "clock",
-      "confidence": 0.6488847136497498,
-      "observation_count": 12,
-      "first_frame": 217,
-      "last_frame": 1540,
-      "description": "The image depicts a close-up view of a dark brown, elongated object with a smooth, rounded edge. The object appears to be a piece of fabric or a similar material, possibly a scarf or a piece of clothing. The texture of the object is not clearly visible due to the close-up nature of the image, but it seems to have a consistent color and smooth surface. The background is predominantly white, which contrasts with the dark brown color of the object, making it stand out. There are no discernible patterns or additional details on the object itself. The image is slightly blurry, which affects the clarity of the object's shape and features."
+      "class": "microwave",
+      "confidence": 0.5711008310317993,
+      "observation_count": 3,
+      "first_frame": 476,
+      "last_frame": 1246,
+      "description": "No description"
     },
     {
       "id": 11,
-      "class": "toilet",
-      "confidence": 0.6151869297027588,
-      "observation_count": 11,
-      "first_frame": 665,
-      "last_frame": 1337,
-      "description": "The image depicts a round, white ottoman situated in a room. The ottoman has a smooth, slightly textured surface and is placed on a carpeted floor. It features a circular base and a flat top, with a visible seam running along its edge. The ottoman is positioned between two chairs, one of which has a white cushion with a black and white striped pattern. The chairs are dark-colored, possibly black or dark brown, and have wooden legs. The room appears to be a living space or a lounge area, with a cozy and inviting atmosphere. The lighting in the room is soft, creating a warm ambiance. The overall scene suggests a comfortable and stylish interior design."
+      "class": "couch",
+      "confidence": 0.6057798862457275,
+      "observation_count": 3,
+      "first_frame": 609,
+      "last_frame": 952,
+      "description": "No description"
     },
     {
       "id": 12,
-      "class": "bed",
-      "confidence": 0.920189619064331,
-      "observation_count": 14,
-      "first_frame": 259,
-      "last_frame": 1715,
-      "description": "The image depicts a bedroom scene with a large bed as the central focus. The bed has a dark headboard and is covered with a red and beige bedspread. There are two pillows on the bed, one green and one black, and a stuffed animal, possibly a panda, is placed on top of the green pillow. The bed is positioned against a wall with a window covered by a beige curtain. The floor is carpeted in a light color, and there is a white shelf or cabinet to the left of the bed. The overall setting suggests a cozy and comfortable bedroom environment."
+      "class": "dog",
+      "confidence": 0.29110002517700195,
+      "observation_count": 2,
+      "first_frame": 350,
+      "last_frame": 350,
+      "description": "No description"
     },
     {
       "id": 13,
-      "class": "bird",
-      "confidence": 0.8899441957473755,
-      "observation_count": 3,
-      "first_frame": 910,
-      "last_frame": 931,
-      "description": "The image depicts a ceiling fan with a dark, possibly black, blade. The blades are arranged in a circular pattern, and the fan appears to be in motion, as indicated by the blurred motion lines. The fan's design includes a central hub with a visible motor housing, and the blades are slightly curved, suggesting they are designed to rotate freely. The background is a plain, light-colored ceiling, which contrasts with the dark color of the fan blades. The image is slightly blurry, making it difficult to discern finer details. The overall impression is of a stationary object, likely used for air circulation in a room."
-    },
-    {
-      "id": 14,
-      "class": "suitcase",
-      "confidence": 0.6441066265106201,
-      "observation_count": 2,
-      "first_frame": 1624,
-      "last_frame": 1652,
-      "description": "The image depicts a black and white photograph of a person's face. The individual appears to be a woman, with her face partially obscured by a white triangle. The triangle is positioned above her left eye, creating a stark contrast against her dark hair and the black background. The woman's right eye is visible, and she has a neutral expression. The photograph is taken from a slightly elevated angle, capturing her profile. The overall composition is simple, with the white triangle drawing attention to the upper part of her face. The image is in black and white, emphasizing the contrast between the white triangle and the darker tones of her face."
-    },
-    {
-      "id": 15,
-      "class": "teddy bear",
-      "confidence": 0.6579545140266418,
-      "observation_count": 2,
-      "first_frame": 1694,
-      "last_frame": 1701,
-      "description": "The image depicts a black and white cat. The cat's fur is predominantly black, with white patches on its face, chest, and paws. The cat appears to be sitting on a green surface, possibly grass or a mat. The background is blurred, making it difficult to discern specific details about the surroundings. The cat's eyes are closed, and it seems to be in a relaxed or resting position. The overall appearance is that of a typical domestic cat with a sleek and well-groomed coat."
-    },
-    {
-      "id": 16,
-      "class": "cell phone",
-      "confidence": 0.609853208065033,
+      "class": "cup",
+      "confidence": 0.28163450956344604,
       "observation_count": 1,
-      "first_frame": 35,
-      "last_frame": 35,
-      "description": "The image depicts a large, dark-colored object that appears to be a boat. The boat is situated on a body of water, which is partially visible in the background. The water is a light blue color, contrasting with the dark hue of the boat. The boat itself is elongated and has a smooth, streamlined shape, typical of a vessel designed for speed and stability on water. The boat's surface is smooth, and there are no visible markings or text on it. The background is blurred, making it difficult to discern specific details about the surrounding environment. The overall scene suggests a serene and possibly remote setting, with the boat being the central focus."
-    },
-    {
-      "id": 17,
-      "class": "cat",
-      "confidence": 0.5319027900695801,
-      "observation_count": 1,
-      "first_frame": 175,
-      "last_frame": 175,
-      "description": "The image depicts a dark, almost black, object that appears to be a piece of clothing, possibly a jacket or a coat. The texture of the fabric is not clearly visible due to the low lighting conditions, but the overall shape suggests a structured and possibly heavy garment. The color is uniform, with no discernible patterns or designs, and the material seems to be thick and possibly woolen or thick cotton. The lighting in the image is dim, casting shadows and creating a somewhat somber and mysterious atmosphere. The background is blurred and indistinct, making it difficult to identify any specific details or objects beyond the dark clothing. The image does not provide any clear context or additional information about the setting or the purpose of the clothing."
-    },
-    {
-      "id": 18,
-      "class": "wine glass",
-      "confidence": 0.3206719160079956,
-      "observation_count": 1,
-      "first_frame": 637,
-      "last_frame": 637,
-      "description": "The image appears to be a close-up of a brown object, possibly a piece of furniture or a container. The object has a rectangular shape with rounded edges and a slightly raised top. The color is a uniform brown, and there are no discernible patterns or textures visible on the surface. The background is blurred, making it difficult to identify any additional details about the object. The lighting in the image is soft, casting gentle shadows and giving the object a matte finish. The overall appearance suggests a simple, functional item, possibly made of wood or a similar material."
-    },
-    {
-      "id": 19,
-      "class": "tennis racket",
-      "confidence": 0.43140873312950134,
-      "observation_count": 1,
-      "first_frame": 728,
-      "last_frame": 728,
-      "description": "The image depicts a blurred object that appears to be a feather. The feather is predominantly yellow with hints of red and purple, and it has a long, slender shape. The feather's texture is not clearly visible due to the blur, but it seems to have a smooth, slightly curved surface. The background is a plain, light color, which contrasts with the vibrant colors of the feather, making it stand out. The feather's position and orientation suggest it is resting on a flat surface, possibly a table or a similar object. The overall impression is one of a delicate, natural object captured in a moment of motion, as indicated by the streaks of color that suggest movement."
-    },
-    {
-      "id": 20,
-      "class": "traffic light",
-      "confidence": 0.3312035799026489,
-      "observation_count": 1,
-      "first_frame": 756,
-      "last_frame": 756,
-      "description": "The image depicts a traffic light, which is a device used to control the flow of traffic at intersections. The traffic light is mounted on a pole and consists of three distinct lights: red, yellow, and green. The red light is at the top, the yellow light is in the middle, and the green light is at the bottom. The traffic light is currently displaying a yellow light, indicating that vehicles should prepare to stop. The background of the image is blurred, making it difficult to discern any additional details about the surroundings. The traffic light itself appears to be in good condition, with clear and distinct colors. The pole supporting the traffic light is also visible, providing a stable base for the device. The overall appearance of the traffic light is typical of standard traffic lights found in many urban and suburban areas."
-    },
-    {
-      "id": 21,
-      "class": "microwave",
-      "confidence": 0.2737645208835602,
-      "observation_count": 1,
-      "first_frame": 840,
-      "last_frame": 840,
-      "description": "The image appears to be a blurred photograph of a wall. The wall is predominantly gray, with a smooth texture. There are no discernible features or objects on the wall, making it difficult to provide further details about its appearance or any specific characteristics. The blurriness of the image obscures any potential details that might be present, such as any text, patterns, or distinct shapes."
-    },
-    {
-      "id": 22,
-      "class": "backpack",
-      "confidence": 0.3676670789718628,
-      "observation_count": 1,
-      "first_frame": 1715,
-      "last_frame": 1715,
-      "description": "The image depicts a large, dark-colored object that appears to be a piece of fabric or material. The fabric is predominantly dark, with shades of black and dark brown. It has a somewhat wrinkled and uneven texture, suggesting it might be a piece of clothing or a piece of fabric that has been used or worn. The fabric is draped over what seems to be a surface, possibly a bed or a table, and there is a hint of a lighter-colored fabric or material underneath it. The overall appearance is somewhat abstract and lacks clear definition, making it difficult to discern specific details about the object. The image does not provide any additional context or objects to help identify the object further."
-    },
-    {
-      "id": 23,
-      "class": "laptop",
-      "confidence": 0.6966307163238525,
-      "observation_count": 1,
-      "first_frame": 1736,
-      "last_frame": 1736,
-      "description": "The image depicts a large, dark gray object that appears to be a piece of fabric or material. The object has a smooth, slightly wrinkled surface, suggesting it might be a piece of clothing or a piece of fabric. The color is a uniform dark gray, and there are no visible patterns or designs on the fabric. The shape of the object is somewhat irregular, with a slight curve and a flat bottom. The texture appears to be soft and flexible, typical of materials like cotton or a similar fabric. The background is a light gray, which contrasts with the dark color of the object, making it stand out prominently. There are no other objects or details visible in the image."
+      "first_frame": 826,
+      "last_frame": 826,
+      "description": "No description"
     }
   ],
   "tracking_stats": {
-    "total_tracks": 8,
-    "confirmed_tracks": 8,
+    "total_tracks": 0,
+    "confirmed_tracks": 0,
     "id_switches": 0
   }
 }

@@ -319,7 +319,6 @@ def main():
         enable_depth=True,
         enable_hands=True,
         enable_occlusion=True,
-        depth_model="zoe",
     )
     console.print("[green]✓ 3D Perception Engine ready[/green]\n")
     
