@@ -131,25 +131,62 @@ def validate_frame_with_gemini(genai, frame_path, frame_id, frame_detections, ma
     import PIL.Image
     import time as _time
     
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    # Use gemini-3-flash-preview for best quality
+    model = genai.GenerativeModel("gemini-3-flash-preview")
     image = PIL.Image.open(frame_path)
     
     labels = [t['label'] for t in frame_detections]
     label_counts = dict(Counter(labels))
     
-    prompt = f"""Analyze this video frame and list all visible objects.
+    # Build detailed bbox info for each detection
+    detection_details = []
+    for t in frame_detections:
+        bbox = t.get('bbox', [])
+        conf = t.get('confidence', 0)
+        detection_details.append(f"  - {t['label']} (conf={conf:.2f}, bbox={[int(b) for b in bbox]})")
+    detection_str = "\n".join(detection_details[:30])  # Limit to 30 for prompt length
+    
+    prompt = f"""You are an expert computer vision evaluator. Carefully analyze this video frame and provide a DETAILED assessment of object detection quality.
 
-For context, a YOLO-World object detector found these objects in this frame:
+## YOLO-World Detections for this frame:
+{detection_str}
+
+## Detection Summary by Class:
 {json.dumps(label_counts, indent=2)}
 
-Please respond with JSON in this exact format:
+## Your Task:
+1. List EVERY visible object in the frame (be exhaustive - include furniture, electronics, decor, architectural features, people/body parts, etc.)
+2. For each YOLO detection, verify if it's correct (true positive) or incorrect (false positive)
+3. Identify important objects YOLO completely missed (false negatives)
+4. Pay special attention to:
+   - Partially visible objects at frame edges
+   - Small objects that may be missed
+   - Objects occluded by other things
+   - Lighting/reflection artifacts that may cause false positives
+   - Duplicate detections of same object
+
+## Response Format (JSON):
 {{
-    "objects_visible": ["list", "of", "all", "visible", "objects"],
+    "scene_description": "Detailed description of what's happening in this frame",
+    "room_type": "kitchen/bedroom/office/living_room/hallway/etc",
+    "objects_visible": {{
+        "furniture": ["list of visible furniture items"],
+        "electronics": ["list of visible electronics"],
+        "decor": ["list of decorative items"],
+        "architecture": ["doors, windows, walls, etc"],
+        "people_body_parts": ["any visible hands, faces, people"],
+        "other": ["other objects"]
+    }},
     "object_counts": {{"object_type": count}},
-    "false_positives": ["objects YOLO detected but not actually visible"],
-    "false_negatives": ["important objects YOLO missed"],
+    "true_positives": ["YOLO detections that are CORRECT"],
+    "false_positives": ["YOLO detections that are WRONG - object not actually there"],
+    "false_negatives": ["Important objects YOLO MISSED completely"],
+    "duplicate_detections": ["Cases where YOLO detected same object multiple times"],
+    "precision": 0.0-1.0,
+    "recall": 0.0-1.0,
     "accuracy_score": 0.0-1.0,
-    "comments": "brief assessment of detection quality"
+    "tracking_notes": "Any notes about objects that would be hard to track (moving, similar appearance, etc)",
+    "comments": "Detailed assessment of detection quality and recommendations"
 }}
 """
     
