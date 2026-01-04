@@ -136,7 +136,7 @@ try:
         print("\nState Changes (first 15):")
         for sc in semantic_result.state_changes[:15]:
             entity_class = sc.entity_id.split('_')[0] if '_' in sc.entity_id else 'unknown'
-            print(f"  - Frame {sc.frame_number}: [{entity_class}] {sc.change_type}")
+            print(f"  - Frame {sc.frame_after}: [{entity_class}] {sc.change_type}")
     else:
         print("\n⚠ No state changes detected")
     
@@ -144,9 +144,9 @@ try:
     if semantic_result.events:
         print("\nEvents Detected (first 10):")
         for i, event in enumerate(semantic_result.events[:10]):
-            participants = ', '.join(event.entity_ids[:3])  # First 3 entities
-            if len(event.entity_ids) > 3:
-                participants += f" (+{len(event.entity_ids)-3} more)"
+            participants = ', '.join(event.involved_entities[:3])  # First 3 entities
+            if len(event.involved_entities) > 3:
+                participants += f" (+{len(event.involved_entities)-3} more)"
             print(f"  {i+1}. {event.event_type}: {participants}")
             if hasattr(event, 'description') and event.description:
                 print(f"      \"{event.description[:80]}...\"")
