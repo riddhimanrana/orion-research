@@ -23,18 +23,21 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DetectionConfig:
-    """Detection backend configuration (YOLO or GroundingDINO)."""
+    """Detection backend configuration (YOLO, GroundingDINO, or YOLO-World)."""
 
-    backend: Literal["yolo", "groundingdino", "yoloworld"] = "groundingdino"
-    """Primary detector to use for frame observations. Options: 'yolo', 'groundingdino', 'yoloworld'"""
+    backend: Literal["yolo", "groundingdino", "yoloworld"] = "yoloworld"
+    """Primary detector to use for frame observations. Options: 'yolo', 'groundingdino', 'yoloworld'
+    
+    v2 default: 'yoloworld' for open-vocabulary detection without retraining.
+    """
 
     # YOLO-specific settings
     model: Literal["yolo11n", "yolo11s", "yolo11m", "yolo11x"] = "yolo11x"
     """YOLO model size (n=fastest, x=most accurate)."""
 
     # Detection thresholds (shared)
-    confidence_threshold: float = 0.4
-    """Minimum detection confidence (0-1, lower = more detections)."""
+    confidence_threshold: float = 0.25
+    """Minimum detection confidence (0-1, lower = more detections). v2 default: 0.25 for open-vocab."""
 
     iou_threshold: float = 0.45
     """NMS IoU threshold for overlapping boxes."""
@@ -67,19 +70,22 @@ class DetectionConfig:
     groundingdino_max_detections: int = 100
     """Upper bound on detections returned per frame when using GroundingDINO."""
 
-    # YOLO-World specific options
-    yoloworld_model: str = "yolov8m-worldv2.pt"
-    """YOLO-World model weights file (auto-downloads if not found)."""
+    # YOLO-World specific options (v2 primary detector)
+    yoloworld_model: str = "yolov8x-worldv2.pt"
+    """YOLO-World model weights file (largest model for best quality)."""
 
     yoloworld_prompt: str = (
-        "couch . chair . table . dining table . coffee table . tv . monitor . laptop . "
+        "person . hand . face . "
+        "couch . chair . table . dining table . coffee table . desk . "
+        "tv . monitor . laptop . keyboard . mouse . phone . remote . "
         "book . bookshelf . picture frame . painting . clock . vase . potted plant . "
         "lamp . chandelier . ceiling fan . rug . curtain . window . door . "
-        "refrigerator . microwave . oven . sink . cabinet . counter . bed . pillow . "
-        "blanket . dresser . mirror . fireplace . piano . staircase . banister . "
-        "vacuum cleaner . soccer ball . backpack . suitcase . bottle . cup . bowl"
+        "refrigerator . microwave . oven . sink . cabinet . counter . "
+        "bed . pillow . blanket . dresser . mirror . "
+        "cup . mug . glass . bottle . plate . bowl . "
+        "backpack . suitcase . bag . box . container"
     )
-    """Dot-separated open-vocabulary prompt used by YOLO-World. Excludes 'person' for object-focused detection."""
+    """Dot-separated open-vocabulary prompt for YOLO-World. v2: Includes person/hand for spatial reasoning."""
 
     yoloworld_use_custom_classes: bool = True
     """If True, constrain YOLO-World via `set_classes(yoloworld_categories())`. If False, run YOLO-World with its default/open vocabulary."""

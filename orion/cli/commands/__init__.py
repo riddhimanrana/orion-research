@@ -2,6 +2,7 @@
 
 from .analyze import handle_analyze
 from .config import handle_config
+from .detect import handle_detect
 from .init import handle_init
 from .qa import handle_qa
 from .research import handle_research
@@ -16,6 +17,7 @@ def handle_unified_pipeline(args, settings):
 __all__ = [
     "handle_analyze",
     "handle_config",
+    "handle_detect",
     "handle_init",
     "handle_qa",
     "handle_research",

@@ -10,6 +10,7 @@ from rich.console import Console
 from .commands import (
     handle_analyze,
     handle_config,
+    handle_detect,
     handle_init,
     handle_memgraph,
     handle_ollama,
@@ -112,6 +113,27 @@ For more help: orion <command> --help
     qa_parser.add_argument("--memgraph-user", help="Memgraph username (defaults to config)")
     qa_parser.add_argument("--memgraph-password", help="Memgraph password (defaults to config)")
     qa_parser.add_argument("--runtime", help="Select runtime backend (auto or torch; defaults to config)")
+
+    # ═══════════════════════════════════════════════════════════
+    # DETECT COMMAND (Phase 1: YOLO-World Detection + Tracking)
+    # ═══════════════════════════════════════════════════════════
+    detect_parser = subparsers.add_parser(
+        "detect", 
+        help="Run Phase 1: YOLO-World detection + tracking"
+    )
+    detect_parser.add_argument("--video", "-v", required=True, help="Path to video file")
+    detect_parser.add_argument("--episode", "-e", required=True, help="Episode name/ID for output")
+    detect_parser.add_argument("--output-dir", "-o", help="Output directory (default: results/<episode>)")
+    detect_parser.add_argument(
+        "--detector", 
+        default="yolov8x-worldv2",
+        choices=["yolov8s-worldv2", "yolov8m-worldv2", "yolov8l-worldv2", "yolov8x-worldv2"],
+        help="YOLO-World model variant (default: yolov8x-worldv2 for best quality)"
+    )
+    detect_parser.add_argument("--fps", type=float, default=5.0, help="Target FPS for sampling (default: 5)")
+    detect_parser.add_argument("--confidence", type=float, default=0.25, help="Detection confidence threshold (default: 0.25)")
+    detect_parser.add_argument("--device", default="cuda", choices=["cuda", "cpu", "mps"], help="Device to run on")
+    detect_parser.add_argument("--classes", nargs="+", help="Custom class prompts (overrides default vocabulary)")
 
     # ═══════════════════════════════════════════════════════════
     # INFO COMMANDS
@@ -349,6 +371,9 @@ def main() -> None:
     # Route to command handlers
     if args.command == "analyze":
         handle_analyze(args, settings)
+
+    elif args.command == "detect":
+        handle_detect(args, settings)
 
     elif args.command == "qa":
         handle_qa(args, settings)
