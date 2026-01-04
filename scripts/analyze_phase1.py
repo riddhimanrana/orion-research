@@ -237,141 +237,35 @@ def validate_with_gemini(video_path: str, tracks: list, sample_frames: list, res
 
 def run_detection(video_path: str, episode: str, device: str = "cuda", fps: float = 5.0, 
                   confidence: float = 0.25):
-    """Run Phase 1 detection pipeline."""
+    """Run Phase 1 detection pipeline using orion detect command."""
+    import subprocess
+    
     results_dir = Path(f"results/{episode}")
-    results_dir.mkdir(parents=True, exist_ok=True)
     
     print(f"\n{'='*80}")
     print(f"PHASE 1 DETECTION: {video_path}")
     print(f"{'='*80}")
     
-    # Import detection components
-    from orion.perception.config import DetectionConfig
-    from orion.backends.yoloworld_backend import YOLOWorldBackend
+    # Run the orion detect command
+    cmd = [
+        "python", "-m", "orion.cli.main", "detect",
+        "--video", video_path,
+        "--episode", episode,
+        "--device", device,
+        "--fps", str(fps),
+        "--confidence", str(confidence)
+    ]
     
-    # Initialize detector
-    config = DetectionConfig(
-        backend="yoloworld",
-        yoloworld_model="yolov8x-worldv2.pt",
-        confidence_threshold=confidence,
-        device=device,
-    )
+    print(f"  Running: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=False)
     
-    detector = YOLOWorldBackend(config)
+    if result.returncode != 0:
+        raise RuntimeError(f"Detection failed with code {result.returncode}")
     
-    # Open video
-    cap = cv2.VideoCapture(video_path)
-    video_fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    width = int(cap.get(cv2.CAP_PROP_CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    # Load the tracks
+    tracks = load_tracks(results_dir)
     
-    sample_interval = max(1, int(video_fps / fps))
-    
-    print(f"  Video: {total_frames} frames @ {video_fps:.2f} fps")
-    print(f"  Sampling every {sample_interval} frames (target {fps} fps)")
-    print(f"  Confidence threshold: {confidence}")
-    
-    # Process frames with tracking
-    from orion.perception.trackers.enhanced import EnhancedTracker
-    
-    tracker = EnhancedTracker(
-        max_age=30,
-        min_hits=3,
-        iou_threshold=0.3
-    )
-    
-    tracks = []
-    frame_count = 0
-    start_time = time.time()
-    
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        
-        frame_id = int(cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1
-        
-        if frame_id % sample_interval != 0:
-            continue
-        
-        # Detect
-        detections = detector.detect(frame)
-        
-        # Track
-        if detections:
-            bboxes = np.array([d['bbox'] for d in detections])
-            scores = np.array([d['confidence'] for d in detections])
-            class_ids = np.array([d.get('class_id', 0) for d in detections])
-            
-            tracked = tracker.update(bboxes, scores, class_ids)
-            
-            timestamp = frame_id / video_fps
-            
-            for track in tracked:
-                track_entry = {
-                    'frame_id': frame_id,
-                    'timestamp': round(timestamp, 3),
-                    'track_id': int(track[4]),
-                    'bbox': [round(x, 1) for x in track[:4]],
-                    'confidence': round(float(track[5]) if len(track) > 5 else scores[0], 4),
-                    'label': detections[0]['label'] if detections else 'unknown',
-                    'class_id': int(track[6]) if len(track) > 6 else 0
-                }
-                
-                # Find matching detection for label
-                for det in detections:
-                    if compute_iou(track[:4], det['bbox']) > 0.5:
-                        track_entry['label'] = det['label']
-                        track_entry['class_id'] = det.get('class_id', 0)
-                        break
-                
-                tracks.append(track_entry)
-        
-        frame_count += 1
-        if frame_count % 50 == 0:
-            elapsed = time.time() - start_time
-            print(f"    Processed {frame_count} frames ({elapsed:.1f}s, {frame_count/elapsed:.1f} fps)")
-    
-    cap.release()
-    elapsed = time.time() - start_time
-    
-    # Save tracks
-    tracks_path = results_dir / "tracks.jsonl"
-    with open(tracks_path, 'w') as f:
-        for t in tracks:
-            f.write(json.dumps(t) + "\n")
-    
-    # Save metadata
-    meta = {
-        'episode_id': episode,
-        'video_path': str(Path(video_path).resolve()),
-        'video': {
-            'fps': video_fps,
-            'total_frames': total_frames,
-            'width': width,
-            'height': height
-        },
-        'config': {
-            'detector': 'yolov8x-worldv2',
-            'device': device,
-            'target_fps': fps,
-            'sample_interval': sample_interval,
-            'confidence_threshold': confidence
-        },
-        'stats': {
-            'processed_frames': frame_count,
-            'total_detections': len(tracks),
-            'unique_tracks': len(set(t['track_id'] for t in tracks)),
-            'elapsed_seconds': round(elapsed, 1)
-        }
-    }
-    
-    with open(results_dir / "episode_meta.json", 'w') as f:
-        json.dump(meta, f, indent=2)
-    
-    print(f"\n  Completed: {frame_count} frames, {len(tracks)} detections, {meta['stats']['unique_tracks']} tracks")
-    print(f"  Time: {elapsed:.1f}s ({frame_count/elapsed:.1f} fps)")
+    print(f"\n  Detection complete: {len(tracks)} track observations loaded")
     
     return tracks, results_dir
 
