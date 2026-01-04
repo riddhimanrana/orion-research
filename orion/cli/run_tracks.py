@@ -150,10 +150,13 @@ def process_video_to_tracks(
     for frame_id in sorted(detections_by_frame.keys()):
         frame_dets = detections_by_frame[frame_id]
         tracked_dets = tracker.update(frame_dets)
-        # Annotate each track with frame_id before saving
+        # Get timestamp from detections (all dets in frame share same timestamp)
+        timestamp = frame_dets[0].get("timestamp", 0.0) if frame_dets else 0.0
+        # Annotate each track with frame_id and timestamp before saving
         for track in tracked_dets:
             track_dict = track.to_dict() if hasattr(track, 'to_dict') else track
             track_dict['frame_id'] = frame_id
+            track_dict['timestamp'] = timestamp
             all_tracks.append(track_dict)
     current_step += 1
     
