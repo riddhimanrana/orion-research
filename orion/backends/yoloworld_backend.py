@@ -25,20 +25,29 @@ DEFAULT_CLASSES = [
     "person", "face", "hand",
     # Furniture
     "chair", "table", "desk", "couch", "sofa", "bed", "cabinet", "shelf", "drawer",
+    "ottoman", "stool", "bench", "nightstand", "dresser", "wardrobe",
+    # Soft furnishings
+    "pillow", "blanket", "cushion", "rug", "carpet", "curtain", "mat",
     # Electronics
     "laptop", "phone", "cellphone", "tv", "television", "monitor", "screen", 
     "keyboard", "mouse", "remote", "controller", "camera",
+    "speaker", "headphones", "charger", "appliance",
     # Kitchen
     "cup", "mug", "glass", "bottle", "plate", "bowl", "fork", "spoon", "knife",
-    "pan", "pot", "microwave", "refrigerator", "sink", "faucet",
+    "pan", "pot", "microwave", "refrigerator", "sink", "faucet", "oven", "stove",
+    "toaster", "blender", "coffee maker", "kettle", "dishwasher",
     # Food
     "food", "fruit", "vegetable", "bread", "pizza", "sandwich",
     # Tools/Items
     "book", "notebook", "pen", "pencil", "paper", "document",
     "bag", "backpack", "purse", "wallet", "key", "keys",
-    "box", "container", "package", "tool",
-    # Misc
-    "pillow", "blanket", "towel", "plant", "lamp", "clock", "mirror", "window", "door",
+    "box", "container", "package", "tool", "toy", "toys",
+    # Lighting
+    "lamp", "light", "chandelier", "candle",
+    # Decor
+    "plant", "vase", "picture", "frame", "painting", "clock", "mirror", 
+    # Structure
+    "window", "door", "wall", "floor", "ceiling", "stairs",
     # Background class (helps with detection per Ultralytics docs)
     ""
 ]
