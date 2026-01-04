@@ -347,6 +347,10 @@ class EnhancedTracker:
         This addresses CLIP embedding limitations (0.78 avg similarity for different objects).
         Spatial and semantic consistency are more reliable than appearance for egocentric video.
         """
+        def get_bbox(det: Dict) -> List[float]:
+            """Get bbox from detection, handling both bbox_2d and bbox keys."""
+            return det.get('bbox_2d', det.get('bbox', [0, 0, 100, 100]))
+        
         num_tracks = len(self.tracks)
         num_dets = len(detections)
         
@@ -357,10 +361,13 @@ class EnhancedTracker:
         
         for t_idx, track in enumerate(self.tracks):
             for d_idx, det in enumerate(detections):
+                # Get bbox (handles both bbox_2d and bbox keys)
+                det_bbox = get_bbox(det)
+                
                 # 1. Spatial cost: distance between predicted and detected position
                 det_center = np.array([
-                    (det['bbox_2d'][0] + det['bbox_2d'][2]) / 2,
-                    (det['bbox_2d'][1] + det['bbox_2d'][3]) / 2
+                    (det_bbox[0] + det_bbox[2]) / 2,
+                    (det_bbox[1] + det_bbox[3]) / 2
                 ], dtype=np.float64)
                 
                 # Use 2D bbox center from track (not 3D backprojection)
@@ -376,10 +383,8 @@ class EnhancedTracker:
                 spatial_dist = np.linalg.norm(det_center - track_center)
                 spatial_cost = min(1.0, spatial_dist / frame_diag)
                 
-                # 2. Size cost: bbox area change
                 # 2. Size cost: bbox area change (use 2D bbox)
-                det_area = (det['bbox_2d'][2] - det['bbox_2d'][0]) * \
-                          (det['bbox_2d'][3] - det['bbox_2d'][1])
+                det_area = (det_bbox[2] - det_bbox[0]) * (det_bbox[3] - det_bbox[1])
                 track_area = (track.bbox_2d[2] - track.bbox_2d[0]) * \
                             (track.bbox_2d[3] - track.bbox_2d[1])
                 
@@ -394,7 +399,8 @@ class EnhancedTracker:
                     size_cost = 0.5
                 
                 # 3. Semantic cost: class mismatch (use normalized labels)
-                det_normalized = self._normalize_label(det['class_name'])
+                det_label = det.get('class_name', det.get('category', 'unknown'))
+                det_normalized = self._normalize_label(det_label)
                 track_normalized = self._normalize_label(track.class_name)
                 semantic_cost = 0.0 if det_normalized == track_normalized else 1.0
                 
