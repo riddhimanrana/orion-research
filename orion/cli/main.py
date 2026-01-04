@@ -350,8 +350,8 @@ def main() -> None:
     try:
         settings = OrionSettings.load()
     except SettingsError:
-        # If config doesn't exist and command is init, allow it
-        if args.command == "init":
+        # Commands that don't need settings
+        if args.command in ("init", "detect"):
             settings = OrionSettings()
         else:
             console.print("[yellow]⚠ Config not found. Run 'orion init' to initialize.[/yellow]")
