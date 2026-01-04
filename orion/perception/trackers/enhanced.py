@@ -459,17 +459,30 @@ class EnhancedTracker:
         embedding: Optional[np.ndarray],
     ):
         """Update track with matched detection."""
-        # Kalman update with 3D measurement
-        measurement = detection['bbox_3d'][:3]  # [x, y, z]
+        # Handle both 3D and 2D-only detections
+        bbox_3d = detection.get('bbox_3d')
+        bbox_2d = detection.get('bbox_2d', detection.get('bbox'))
+        depth_mm = detection.get('depth_mm', 0.0)
+        
+        if bbox_3d is not None:
+            measurement = bbox_3d[:3]
+        elif bbox_2d is not None:
+            x1, y1, x2, y2 = bbox_2d
+            measurement = np.array([(x1 + x2) / 2, (y1 + y2) / 2, track.state[2]])  # Keep previous Z
+        else:
+            measurement = track.state[:3]  # Keep previous position
+        
+        # Kalman update with measurement
         track.state, track.covariance = self.kf.update(
             track.state, track.covariance, measurement
         )
         
         # Update bounding box (use measurement, not predicted)
-        track.bbox_3d = detection['bbox_3d']
-        track.bbox_2d = detection['bbox_2d']
+        if bbox_3d is not None:
+            track.bbox_3d = bbox_3d
+        track.bbox_2d = bbox_2d
         track.confidence = detection['confidence']
-        track.depth_mm = detection['depth_mm']
+        track.depth_mm = depth_mm
         
         # Update appearance (EMA)
         if embedding is not None:
@@ -492,7 +505,19 @@ class EnhancedTracker:
     
     def _initiate_track(self, detection: Dict, embedding: Optional[np.ndarray]):
         """Create new track from unmatched detection."""
-        pos = detection['bbox_3d'][:3]
+        # Handle both 3D and 2D-only detections
+        bbox_3d = detection.get('bbox_3d')
+        bbox_2d = detection.get('bbox_2d', detection.get('bbox'))
+        depth_mm = detection.get('depth_mm', 0.0)
+        
+        if bbox_3d is not None:
+            pos = bbox_3d[:3]
+        elif bbox_2d is not None:
+            # Use 2D center + default depth if no 3D available
+            x1, y1, x2, y2 = bbox_2d
+            pos = np.array([(x1 + x2) / 2, (y1 + y2) / 2, 1000.0])  # Default 1m depth
+        else:
+            pos = np.array([0.0, 0.0, 1000.0])
         
         # Verify and correct label using CLIP
         corrected_label, label_confidence, method = self._verify_and_correct_label(
@@ -513,8 +538,8 @@ class EnhancedTracker:
         track = Track(
             id=self.next_id,
             class_name=corrected_label,  # Use corrected label, not YOLO's guess
-            bbox_3d=detection['bbox_3d'],
-            bbox_2d=detection['bbox_2d'],
+            bbox_3d=bbox_3d if bbox_3d is not None else np.array([pos[0], pos[1], pos[2], 50, 50, 50]),
+            bbox_2d=bbox_2d,
             confidence=detection['confidence'],
             state=state,
             covariance=covariance,
@@ -523,7 +548,7 @@ class EnhancedTracker:
             age=1,
             hits=1,
             time_since_update=0,
-            depth_mm=detection['depth_mm'],
+            depth_mm=depth_mm,
             zone_id=None,
         )
         
