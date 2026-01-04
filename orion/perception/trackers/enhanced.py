@@ -510,6 +510,9 @@ class EnhancedTracker:
         bbox_2d = detection.get('bbox_2d', detection.get('bbox'))
         depth_mm = detection.get('depth_mm', 0.0)
         
+        # Handle class_name vs category key (different detectors use different keys)
+        raw_label = detection.get('class_name', detection.get('category', 'unknown'))
+        
         if bbox_3d is not None:
             pos = bbox_3d[:3]
         elif bbox_2d is not None:
@@ -521,7 +524,7 @@ class EnhancedTracker:
         
         # Verify and correct label using CLIP
         corrected_label, label_confidence, method = self._verify_and_correct_label(
-            detection['class_name'],
+            raw_label,
             embedding
         )
         
