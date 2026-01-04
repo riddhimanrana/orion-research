@@ -75,17 +75,34 @@ class DetectionConfig:
     """YOLO-World model weights file (largest model for best quality)."""
 
     yoloworld_prompt: str = (
-        "person . hand . face . "
-        "couch . chair . table . dining table . coffee table . desk . "
-        "tv . monitor . laptop . keyboard . mouse . phone . remote . "
-        "book . bookshelf . picture frame . painting . clock . vase . potted plant . "
-        "lamp . chandelier . ceiling fan . rug . curtain . window . door . "
-        "refrigerator . microwave . oven . sink . cabinet . counter . "
-        "bed . pillow . blanket . dresser . mirror . "
-        "cup . mug . glass . bottle . plate . bowl . "
-        "backpack . suitcase . bag . box . container"
+        # People and body parts
+        "person . hand . face . arm . "
+        # Seating furniture
+        "couch . sofa . chair . office chair . stool . ottoman . footrest . "
+        # Tables and surfaces
+        "table . dining table . coffee table . desk . counter . shelf . bookshelf . "
+        # Electronics
+        "tv . television . monitor . laptop . keyboard . mouse . mousepad . phone . remote . "
+        "microphone . speaker . headphones . airpods . webcam . "
+        # Office items
+        "wrist rest . pencil case . notebook . paper . pen . pencil . stapler . "
+        # Art and decor
+        "picture frame . painting . poster . clock . vase . potted plant . plant . "
+        "figurine . sculpture . decoration . wall art . wall hanging . "
+        # Lighting
+        "lamp . floor lamp . table lamp . chandelier . ceiling fan . light . light fixture . "
+        # Flooring and architecture
+        "rug . carpet . floor mat . curtain . drapes . window . door . doorknob . "
+        "wall . ceiling . baseboard . staircase . railing . banister . light switch . "
+        # Kitchen
+        "refrigerator . microwave . oven . sink . cabinet . fridge . dishwasher . toaster . "
+        # Bedroom
+        "bed . pillow . blanket . dresser . mirror . nightstand . wardrobe . closet . "
+        # Containers and objects
+        "cup . mug . glass . bottle . water bottle . plate . bowl . "
+        "backpack . suitcase . bag . box . container . basket . bin . package"
     )
-    """Dot-separated open-vocabulary prompt for YOLO-World. v2: Includes person/hand for spatial reasoning."""
+    """Dot-separated open-vocabulary prompt for YOLO-World. v2: Comprehensive object vocabulary for home environments."""
 
     yoloworld_use_custom_classes: bool = True
     """If True, constrain YOLO-World via `set_classes(yoloworld_categories())`. If False, run YOLO-World with its default/open vocabulary."""
