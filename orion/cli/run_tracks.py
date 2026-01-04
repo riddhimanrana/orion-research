@@ -38,6 +38,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def get_default_device() -> str:
+    """Auto-detect the best available device."""
+    import torch
+    if torch.cuda.is_available():
+        return "cuda"
+    elif torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
 def process_video_to_tracks(
     video_path: str,
     episode_id: str,
@@ -46,7 +56,7 @@ def process_video_to_tracks(
     confidence_threshold: float = 0.25,
     iou_threshold: float = 0.3,
     max_age: int = 30,
-    device: str = "mps",
+    device: str = "auto",
     save_viz: bool = False,
     enable_hand_detector: bool = False,
     hand_max_hands: int = 2,
@@ -64,12 +74,17 @@ def process_video_to_tracks(
         confidence_threshold: Min detection confidence
         iou_threshold: Min IoU for track association
         max_age: Frames to keep unmatched tracks
-        device: Device to run on
+        device: Device to run on ('auto', 'cuda', 'mps', 'cpu')
         save_viz: Save visualization outputs
         
     Returns:
         Dictionary with statistics
     """
+    # Auto-detect device if needed
+    if device == "auto":
+        device = get_default_device()
+        logger.info(f"Auto-detected device: {device}")
+    
     logger.info("="*80)
     logger.info("PHASE 1: DETECTION + TRACKING BASELINE")
     logger.info("="*80)
@@ -242,9 +257,9 @@ def main():
     parser.add_argument(
         "--device",
         type=str,
-        default="mps",
-        choices=["cuda", "mps", "cpu"],
-        help="Device to run on (default: mps)"
+        default="auto",
+        choices=["auto", "cuda", "mps", "cpu"],
+        help="Device to run on (default: auto-detect)"
     )
     parser.add_argument(
         "--detect-hands",
