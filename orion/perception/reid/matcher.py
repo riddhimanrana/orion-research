@@ -98,6 +98,96 @@ def _read_frames_for_ids(video_path: Path, frame_ids: List[int]) -> Dict[int, np
     return frames
 
 
+def compute_observation_embedding(
+    video_path: Path,
+    observation: Dict[str, Any],
+) -> np.ndarray:
+    """Compute a DINO embedding for a single track observation.
+
+    This is intended for diagnostics and uses the same crop/un-rotation logic
+    as Phase-2 track embedding aggregation.
+
+    Args:
+        video_path: Path to source video
+        observation: A single JSONL record/observation containing at least
+            `frame_id` and (`bbox_2d` or `bbox`).
+
+    Returns:
+        L2-normalized embedding vector as np.ndarray (float32)
+    """
+    frame_id = observation.get("frame_id")
+    if frame_id is None:
+        frame_id = observation.get("frame_number")
+    if frame_id is None:
+        raise ValueError("Observation missing frame_id")
+    fid = int(frame_id)
+
+    raw_bbox = observation.get("bbox_2d") or observation.get("bbox")
+    if raw_bbox is None:
+        raise ValueError("Observation missing bbox")
+    if isinstance(raw_bbox, dict):
+        raw_bbox = [raw_bbox.get("x1"), raw_bbox.get("y1"), raw_bbox.get("x2"), raw_bbox.get("y2")]
+    if not isinstance(raw_bbox, (list, tuple)) or len(raw_bbox) != 4:
+        raise ValueError("Observation bbox must be length-4")
+    raw_bbox_list = [float(v) for v in raw_bbox]
+
+    frames = _read_frames_for_ids(video_path, [fid])
+    frame = frames.get(fid)
+    if frame is None:
+        raise RuntimeError(f"Failed to decode frame {fid} from {video_path}")
+
+    H, W = frame.shape[:2]
+    raw_bbox_list = _maybe_unrotate_bbox_for_portrait(raw_bbox_list, frame_w=W, frame_h=H)
+    x1, y1, x2, y2 = _ensure_int_bbox(raw_bbox_list, W, H)
+    crop = frame[y1:y2, x1:x2]
+    if crop.size == 0:
+        raise RuntimeError(f"Empty crop for bbox {raw_bbox_list} @ frame {fid}")
+
+    mm = ModelManager.get_instance()
+    dino = mm.dino
+    emb = dino.encode_image(crop, normalize=True)
+    return emb.astype(np.float32)
+
+
+def extract_observation_crop(
+    video_path: Path,
+    observation: Dict[str, Any],
+) -> Tuple[np.ndarray, Tuple[int, int, int, int], int]:
+    """Extract the canonical crop used for Phase-2 ReID embedding.
+
+    Returns:
+        (crop_bgr, (x1,y1,x2,y2), frame_id)
+    """
+    frame_id = observation.get("frame_id")
+    if frame_id is None:
+        frame_id = observation.get("frame_number")
+    if frame_id is None:
+        raise ValueError("Observation missing frame_id")
+    fid = int(frame_id)
+
+    raw_bbox = observation.get("bbox_2d") or observation.get("bbox")
+    if raw_bbox is None:
+        raise ValueError("Observation missing bbox")
+    if isinstance(raw_bbox, dict):
+        raw_bbox = [raw_bbox.get("x1"), raw_bbox.get("y1"), raw_bbox.get("x2"), raw_bbox.get("y2")]
+    if not isinstance(raw_bbox, (list, tuple)) or len(raw_bbox) != 4:
+        raise ValueError("Observation bbox must be length-4")
+    raw_bbox_list = [float(v) for v in raw_bbox]
+
+    frames = _read_frames_for_ids(video_path, [fid])
+    frame = frames.get(fid)
+    if frame is None:
+        raise RuntimeError(f"Failed to decode frame {fid} from {video_path}")
+
+    H, W = frame.shape[:2]
+    raw_bbox_list = _maybe_unrotate_bbox_for_portrait(raw_bbox_list, frame_w=W, frame_h=H)
+    x1, y1, x2, y2 = _ensure_int_bbox(raw_bbox_list, W, H)
+    crop = frame[y1:y2, x1:x2]
+    if crop.size == 0:
+        raise RuntimeError(f"Empty crop for bbox {raw_bbox_list} @ frame {fid}")
+    return crop, (x1, y1, x2, y2), fid
+
+
 def compute_track_embeddings(
     video_path: Path,
     tracks: List[Dict[str, Any]],

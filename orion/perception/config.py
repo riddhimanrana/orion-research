@@ -245,6 +245,9 @@ class DescriptionConfig:
 
     prompt_template: str = "Describe this object in detail."
     """Prompt template for VLM description generation."""
+
+    sentence_model_name: str = "all-MiniLM-L6-v2"
+    """Sentence-transformer model for semantic class correction (e.g., 'sentence-transformers/all-mpnet-base-v2')."""
     
     # Optimization
     describe_once: bool = True
@@ -297,6 +300,9 @@ class DescriptionConfig:
 
         if self.min_crop_std < 0:
             raise ValueError(f"min_crop_std must be >= 0, got {self.min_crop_std}")
+
+        if not isinstance(self.sentence_model_name, str) or not self.sentence_model_name.strip():
+            raise ValueError("sentence_model_name must be a non-empty string")
         
         logger.debug(
             f"DescriptionConfig validated: max_tokens={self.max_tokens}, "

@@ -19,26 +19,11 @@ try:
 except PackageNotFoundError:  # pragma: no cover
     __version__ = "0.0.0"
 
-# Perception module exports
-from orion.perception import (
-    PerceptionConfig,
-    ObjectClass,
-    BoundingBox,
-    Observation,
-    PerceptionEntity,
-    PerceptionResult,
-)
-
-from orion.perception.engine import PerceptionEngine
-
-# Pipeline exports
-# Note: Old pipeline.py archived. Use core_pipeline for new code.
-# from orion.pipeline import VideoPipeline
+# IMPORTANT: keep package import lightweight.
+# Avoid importing heavy dependencies (torch, large model wrappers) at import time.
 
 __all__ = [
-    # Version
     "__version__",
-    # Perception
     "PerceptionConfig",
     "ObjectClass",
     "BoundingBox",
@@ -47,3 +32,28 @@ __all__ = [
     "PerceptionResult",
     "PerceptionEngine",
 ]
+
+
+def __getattr__(name: str):
+    if name in {
+        "PerceptionConfig",
+        "ObjectClass",
+        "BoundingBox",
+        "Observation",
+        "PerceptionEntity",
+        "PerceptionResult",
+    }:
+        from orion import perception as _perception
+
+        return getattr(_perception, name)
+
+    if name == "PerceptionEngine":
+        from orion.perception.engine import PerceptionEngine as _PerceptionEngine
+
+        return _PerceptionEngine
+
+    raise AttributeError(f"module 'orion' has no attribute {name!r}")
+
+
+def __dir__():
+    return sorted(list(globals().keys()) + __all__)
