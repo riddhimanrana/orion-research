@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +11,8 @@ import cv2
 import numpy as np
 
 from orion.perception.spatial_zones import ZoneManager
+
+logger = logging.getLogger(__name__)
 
 
 def get_perception_run_dims(results_dir: Path) -> Optional[Tuple[int, int]]:
@@ -335,9 +338,19 @@ class InsightOverlayRenderer:
         render_w, render_h, total_frames, fps = self._prepare_renderer(cap)
         overlay_ttl = max(1, int(self.options.message_linger_seconds * fps))
 
-        fourcc = cv2.VideoWriter_fourcc(*"avc1")
-        writer = cv2.VideoWriter(str(self.output_path), fourcc, fps, (render_w, render_h))
-        if not writer.isOpened():
+        # Try multiple codecs for cross-platform compatibility
+        codecs = ["avc1", "mp4v", "XVID", "MJPG"]
+        writer = None
+        for codec in codecs:
+            fourcc = cv2.VideoWriter_fourcc(*codec)
+            writer = cv2.VideoWriter(str(self.output_path), fourcc, fps, (render_w, render_h))
+            if writer.isOpened():
+                logger.info(f"Using video codec: {codec}")
+                break
+            writer.release()
+            writer = None
+        
+        if writer is None or not writer.isOpened():
             logger.error(f"Unable to open writer for {self.output_path}")
             raise RuntimeError(f"Unable to open writer for {self.output_path}")
 
