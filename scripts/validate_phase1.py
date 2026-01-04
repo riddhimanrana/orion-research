@@ -126,11 +126,12 @@ def get_frame_detections(tracks, frame_id, window=2):
     return frame_tracks
 
 
-def validate_frame_with_gemini(genai, frame_path, frame_id, frame_detections):
+def validate_frame_with_gemini(genai, frame_path, frame_id, frame_detections, max_retries=3):
     """Validate frame detections using Gemini Vision."""
     import PIL.Image
+    import time as _time
     
-    model = genai.GenerativeModel("gemini-2.0-flash-exp")
+    model = genai.GenerativeModel("gemini-2.5-flash")
     image = PIL.Image.open(frame_path)
     
     labels = [t['label'] for t in frame_detections]
@@ -152,23 +153,33 @@ Please respond with JSON in this exact format:
 }}
 """
     
-    try:
-        response = model.generate_content([prompt, image])
-        text = response.text.strip()
+    for attempt in range(max_retries):
+        try:
+            response = model.generate_content([prompt, image])
+            text = response.text.strip()
+            
+            # Clean up markdown formatting if present
+            if text.startswith("```"):
+                lines = text.split("\n")
+                text = "\n".join(lines[1:-1] if lines[-1].startswith("```") else lines[1:])
+            
+            result = json.loads(text)
+            result["frame_id"] = frame_id
+            result["yolo_detections"] = label_counts
+            return result
         
-        # Clean up markdown formatting if present
-        if text.startswith("```"):
-            lines = text.split("\n")
-            text = "\n".join(lines[1:-1] if lines[-1].startswith("```") else lines[1:])
-        
-        result = json.loads(text)
-        result["frame_id"] = frame_id
-        result["yolo_detections"] = label_counts
-        return result
+        except Exception as e:
+            error_str = str(e)
+            if "429" in error_str or "quota" in error_str.lower():
+                wait_time = (attempt + 1) * 10  # 10s, 20s, 30s
+                print(f"  Rate limit hit, waiting {wait_time}s (attempt {attempt+1}/{max_retries})")
+                _time.sleep(wait_time)
+                continue
+            print(f"  ERROR validating frame {frame_id}: {e}")
+            return None
     
-    except Exception as e:
-        print(f"  ERROR validating frame {frame_id}: {e}")
-        return None
+    print(f"  ERROR validating frame {frame_id}: Max retries exceeded")
+    return None
 
 
 def main():
