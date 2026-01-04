@@ -180,8 +180,8 @@ def process_video_to_tracks(
         "statistics": {
             "total_detections": len(detections),
             "total_track_observations": len(all_tracks),
-            "unique_tracks": tracker_stats["total_tracks"],
-            "frames_processed": tracker_stats["frame_count"],
+            "unique_tracks": tracker_stats.get("total_tracks", 0),
+            "frames_processed": tracker_stats.get("frame_count", len(detections_by_frame)),
         }
     }
     
@@ -193,14 +193,15 @@ def process_video_to_tracks(
     
     # Print summary
     elapsed = time.time() - start_time
+    frames_processed = tracker_stats.get('frame_count', len(detections_by_frame))
     logger.info("\n" + "="*80)
     logger.info("TRACKING COMPLETE")
     logger.info("="*80)
-    logger.info(f"  Frames processed: {tracker_stats['frame_count']}")
+    logger.info(f"  Frames processed: {frames_processed}")
     logger.info(f"  Total detections: {len(detections)}")
     logger.info(f"  Track observations: {len(all_tracks)}")
-    logger.info(f"  Unique tracks: {tracker_stats['total_tracks']}")
-    logger.info(f"  Active tracks: {tracker_stats['active_tracks']}")
+    logger.info(f"  Unique tracks: {tracker_stats.get('total_tracks', 0)}")
+    logger.info(f"  Active tracks: {tracker_stats.get('active_tracks', 0)}")
     logger.info(f"  Processing time: {elapsed:.2f}s")
     logger.info(f"  Results: results/{episode_id}/")
     logger.info("="*80 + "\n")
