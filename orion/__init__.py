@@ -1,9 +1,16 @@
 """Orion research toolkit package."""
 
 import os
+import warnings
 
 # Suppress fork-related warnings from HuggingFace tokenizers.
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+# Suppress sklearn FutureWarnings about force_all_finite (from HDBSCAN dependency)
+warnings.filterwarnings("ignore", message=".*force_all_finite.*", category=FutureWarning)
+
+# Suppress Google API Python version warning (we're aware and will upgrade later)
+warnings.filterwarnings("ignore", message=".*Python version.*stop supporting.*", category=FutureWarning)
 
 from importlib.metadata import PackageNotFoundError, version
 

@@ -24,7 +24,7 @@ from orion.config import (
     get_episode_video_path,
     ensure_results_dir,
 )
-from orion.perception.reid_matcher import build_memory_from_tracks
+from orion.perception.reid.matcher import build_memory_from_tracks
 
 logging.basicConfig(
     level=logging.INFO,

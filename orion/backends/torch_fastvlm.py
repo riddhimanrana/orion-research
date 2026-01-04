@@ -9,7 +9,6 @@ Author: Orion Research Team
 from __future__ import annotations
 
 import logging
-import platform
 from typing import Iterable, List, Optional, Sequence, Union
 from pathlib import Path
 
@@ -21,7 +20,7 @@ logger = logging.getLogger(__name__)
 ImageInput = Union[str, Path, Image.Image]
 
 try:
-    from transformers import AutoModelForCausalLM, AutoProcessor
+    from transformers import AutoModelForCausalLM, AutoTokenizer
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
@@ -54,23 +53,28 @@ class FastVLMTorchWrapper:
                 self.model_source = str(local_path)
                 logger.info(f"Using local FastVLM model at {self.model_source}")
             else:
-                self.model_source = "apple/fastvlm-0.5b"
+                self.model_source = "apple/FastVLM-0.5B"
                 logger.info("Using HuggingFace FastVLM model")
         else:
             self.model_source = model_source
         
         self.device = device or self._detect_device()
         self.conv_mode = conv_mode
+        self.image_token_index = -200 # Specific to FastVLM
 
         logger.info(f"Initializing FastVLM with torch backend on device: {self.device}")
 
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_source, trust_remote_code=True)
         self.model = AutoModelForCausalLM.from_pretrained(
             self.model_source,
             trust_remote_code=True,
             torch_dtype=torch.float16 if self.device != "cpu" else torch.float32,
-        ).to(self.device)
+            device_map="auto" if self.device == "cuda" else None,
+        )
         
-        self.processor = AutoProcessor.from_pretrained(self.model_source, trust_remote_code=True)
+        if self.device != "cuda":
+            self.model = self.model.to(self.device)
+            
         self.model.eval()
         logger.info(f"✓ FastVLM model loaded on {self.device}")
 
@@ -95,27 +99,53 @@ class FastVLMTorchWrapper:
         """Generate description for a single image."""
         if isinstance(image, (str, Path)):
             image = Image.open(image).convert("RGB")
+        elif isinstance(image, Image.Image):
+            image = image.convert("RGB")
 
-        # Format prompt manually since FastVLM doesn't have a chat template
-        prompt_text = f"USER: <image>\n{prompt}\nASSISTANT:"
-        
-        inputs = self.processor(text=prompt_text, images=image, return_tensors="pt").to(self.device)
-
-        generation_output = self.model.generate(
-            **inputs,
-            max_new_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            num_beams=num_beams,
-            do_sample=temperature > 0,
+        # Build chat -> render to string (not tokens) so we can place <image> exactly
+        messages = [
+            {"role": "user", "content": f"<image>\n{prompt}"}
+        ]
+        rendered = self.tokenizer.apply_chat_template(
+            messages, add_generation_prompt=True, tokenize=False
         )
 
-        generated_text = self.processor.batch_decode(generation_output, skip_special_tokens=True)[0]
-        
-        # The output includes the prompt, so we need to remove it.
-        # This is a common pattern with vision-language models.
-        cleaned_text = generated_text.split("ASSISTANT:")[-1].strip()
-        return cleaned_text
+        pre, post = rendered.split("<image>", 1)
+
+        # Tokenize the text *around* the image token (no extra specials!)
+        pre_ids  = self.tokenizer(pre,  return_tensors="pt", add_special_tokens=False).input_ids
+        post_ids = self.tokenizer(post, return_tensors="pt", add_special_tokens=False).input_ids
+
+        # Splice in the IMAGE token id (-200) at the placeholder position
+        img_tok = torch.tensor([[self.image_token_index]], dtype=pre_ids.dtype)
+        input_ids = torch.cat([pre_ids, img_tok, post_ids], dim=1).to(self.model.device)
+        attention_mask = torch.ones_like(input_ids, device=self.model.device)
+
+        # Preprocess image via the model's own processor
+        try:
+            vision_tower = self.model.get_vision_tower()
+            image_processor = vision_tower.image_processor
+        except AttributeError:
+            logger.warning("Could not access get_vision_tower(), attempting fallback...")
+            raise RuntimeError("Model does not support get_vision_tower(). Check model architecture.")
+
+        px = image_processor(images=image, return_tensors="pt")["pixel_values"]
+        px = px.to(self.model.device, dtype=self.model.dtype)
+
+        # Generate
+        with torch.no_grad():
+            out = self.model.generate(
+                inputs=input_ids,
+                attention_mask=attention_mask,
+                images=px,
+                max_new_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                num_beams=num_beams,
+                do_sample=temperature > 0,
+            )
+
+        return self.tokenizer.decode(out[0], skip_special_tokens=True)
 
     def batch_generate(
         self,

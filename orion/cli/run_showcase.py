@@ -24,9 +24,9 @@ from orion.graph import (
     save_graph_summary,
     save_scene_graphs,
 )
-from orion.graph.memgraph_exporter import MemgraphExportResult, export_results_to_memgraph
-from orion.perception.reid.reid import build_memory_from_tracks
-from orion.perception.visualization import OverlayOptions, render_insight_overlay
+from orion.graph.backends.exporter import MemgraphExportResult, export_results_to_memgraph
+from orion.perception.reid.matcher import build_memory_from_tracks
+from orion.perception.viz_overlay import OverlayOptions, render_insight_overlay
 
 logger = logging.getLogger("orion.showcase")
 

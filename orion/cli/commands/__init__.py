@@ -5,7 +5,7 @@ from .config import handle_config
 from .init import handle_init
 from .qa import handle_qa
 from .research import handle_research
-from .services import handle_neo4j, handle_ollama
+from .services import handle_memgraph, handle_ollama
 
 # Stub for unified_pipeline to avoid breaking CLI
 def handle_unified_pipeline(args, settings):
@@ -19,7 +19,7 @@ __all__ = [
     "handle_init",
     "handle_qa",
     "handle_research",
-    "handle_neo4j",
+    "handle_memgraph",
     "handle_ollama",
     "handle_unified_pipeline",
 ]

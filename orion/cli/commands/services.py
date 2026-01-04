@@ -13,11 +13,11 @@ from rich.table import Table
 console = Console()
 
 
-def handle_neo4j(args: argparse.Namespace) -> None:
-    """Handle Neo4j service management commands."""
-    action = getattr(args, "neo4j_action", None)
+def handle_memgraph(args: argparse.Namespace) -> None:
+    """Handle Memgraph service management commands."""
+    action = getattr(args, "memgraph_action", None)
     if action is None:
-        console.print("[red]No Neo4j action provided. Use 'orion services neo4j --help'.[/red]")
+        console.print("[red]No Memgraph action provided. Use 'orion services memgraph --help'.[/red]")
         return
 
     try:
@@ -28,48 +28,48 @@ def handle_neo4j(args: argparse.Namespace) -> None:
             transient=True,
         ) as progress:
             if action == "start":
-                task = progress.add_task("[cyan]Checking Neo4j container...", total=None)
+                task = progress.add_task("[cyan]Checking Memgraph container...", total=None)
 
                 check_result = subprocess.run(
-                    ["docker", "ps", "-a", "--filter", "name=orion-neo4j"],
+                    ["docker", "ps", "-a", "--filter", "name=orion-memgraph"],
                     capture_output=True,
                     text=True,
                 )
 
-                if "orion-neo4j" in check_result.stdout:
+                if "orion-memgraph" in check_result.stdout:
                     status_result = subprocess.run(
-                        ["docker", "ps", "--filter", "name=orion-neo4j"],
+                        ["docker", "ps", "--filter", "name=orion-memgraph"],
                         capture_output=True,
                         text=True,
                     )
 
-                    if "orion-neo4j" in status_result.stdout:
-                        progress.update(task, description="[yellow]Neo4j already running")
+                    if "orion-memgraph" in status_result.stdout:
+                        progress.update(task, description="[yellow]Memgraph already running")
                         progress.stop()
-                        console.print("[green]✓ Neo4j container already running[/green]")
+                        console.print("[green]✓ Memgraph container already running[/green]")
                     else:
-                        progress.update(task, description="[cyan]Starting Neo4j...")
+                        progress.update(task, description="[cyan]Starting Memgraph...")
                         subprocess.run(
-                            ["docker", "start", "orion-neo4j"], check=True, capture_output=True, text=True
+                            ["docker", "start", "orion-memgraph"], check=True, capture_output=True, text=True
                         )
                         progress.stop()
-                        console.print("[green]✓ Neo4j container started successfully[/green]")
-                        console.print("[dim]   Access at: http://localhost:7474[/dim]")
+                        console.print("[green]✓ Memgraph container started successfully[/green]")
+                        console.print("[dim]   Access at: http://localhost:3000[/dim]")
                 else:
                     progress.stop()
-                    console.print("[red]✗ Neo4j container not found[/red]")
+                    console.print("[red]✗ Memgraph container not found[/red]")
                     console.print("[yellow]   Run 'orion init' first to create the container[/yellow]")
 
             elif action == "stop":
-                task = progress.add_task("[cyan]Stopping Neo4j...", total=None)
-                subprocess.run(["docker", "stop", "orion-neo4j"], check=True, capture_output=True, text=True)
+                task = progress.add_task("[cyan]Stopping Memgraph...", total=None)
+                subprocess.run(["docker", "stop", "orion-memgraph"], check=True, capture_output=True, text=True)
                 progress.stop()
-                console.print("[green]✓ Neo4j container stopped[/green]")
+                console.print("[green]✓ Memgraph container stopped[/green]")
 
             elif action == "status":
                 task = progress.add_task("[cyan]Checking status...", total=None)
                 result = subprocess.run(
-                    ["docker", "ps", "--filter", "name=orion-neo4j"], capture_output=True, text=True
+                    ["docker", "ps", "--filter", "name=orion-memgraph"], capture_output=True, text=True
                 )
                 progress.stop()
 
@@ -77,23 +77,23 @@ def handle_neo4j(args: argparse.Namespace) -> None:
                 status_table.add_column("Item", style="cyan", width=20)
                 status_table.add_column("Value", style="green", width=50)
 
-                if "orion-neo4j" in result.stdout:
+                if "orion-memgraph" in result.stdout:
                     status_table.add_row("Status", "[green]● Running[/green]")
-                    status_table.add_row("Browser UI", "http://localhost:7474")
-                    status_table.add_row("Neo4j URI", "neo4j://localhost:7687")
+                    status_table.add_row("Lab UI", "http://localhost:3000")
+                    status_table.add_row("Bolt URI", "bolt://localhost:7687")
                     console.print(status_table)
                 else:
                     status_table.add_row("Status", "[red]○ Stopped[/red]")
                     console.print(status_table)
-                    console.print("[yellow]Run 'orion services neo4j start' to start[/yellow]")
+                    console.print("[yellow]Run 'orion services memgraph start' to start[/yellow]")
 
             elif action == "restart":
-                task = progress.add_task("[cyan]Restarting Neo4j...", total=None)
+                task = progress.add_task("[cyan]Restarting Memgraph...", total=None)
                 subprocess.run(
-                    ["docker", "restart", "orion-neo4j"], check=True, capture_output=True, text=True
+                    ["docker", "restart", "orion-memgraph"], check=True, capture_output=True, text=True
                 )
                 progress.stop()
-                console.print("[green]✓ Neo4j container restarted[/green]")
+                console.print("[green]✓ Memgraph container restarted[/green]")
 
     except subprocess.CalledProcessError as e:
         console.print(f"[red]✗ Docker command failed: {e.stderr}[/red]")

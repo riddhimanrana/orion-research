@@ -27,7 +27,7 @@ from orion.graph import (
     save_scene_graphs,
     validate_graph_samples,
 )
-from orion.perception.reid.reid import build_memory_from_tracks
+from orion.perception.reid.matcher import build_memory_from_tracks
 
 logger = logging.getLogger("orion.quality")
 

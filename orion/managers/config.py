@@ -19,10 +19,15 @@ Date: October 2025
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, Any
 
 from orion.perception.config import PerceptionConfig, get_fast_config as get_fast_perception_config
-from orion.semantic.config import SemanticConfig, get_fast_semantic_config
+
+# Placeholder for SemanticConfig (module doesn't exist yet)
+@dataclass
+class SemanticConfig:
+    """Placeholder for semantic stage configuration."""
+    pass
 
 
 @dataclass

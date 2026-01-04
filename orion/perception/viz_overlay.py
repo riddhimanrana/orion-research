@@ -10,7 +10,19 @@ import cv2
 import numpy as np
 
 from orion.perception.spatial_zones import ZoneManager
-from orion.utils.file_io import get_perception_run_dims
+
+
+def get_perception_run_dims(results_dir: Path) -> Optional[Tuple[int, int]]:
+    """Get processing dimensions from run metadata."""
+    meta_path = results_dir / "run_metadata.json"
+    if meta_path.exists():
+        try:
+            with open(meta_path) as f:
+                meta = json.load(f)
+            return (meta.get("width", 1920), meta.get("height", 1080))
+        except Exception:
+            pass
+    return None
 
 
 @dataclass

@@ -48,9 +48,10 @@ def generate_secure_password(length: int = 16) -> str:
 class OrionSettings:
     """Persisted Orion configuration loaded from ``config.json``."""
 
-    neo4j_uri: str = "neo4j://127.0.0.1:7687"
-    neo4j_user: str = "neo4j"
-    neo4j_password_encoded: str = ""  # Base64 encoded password
+    memgraph_host: str = "127.0.0.1"
+    memgraph_port: int = 7687
+    memgraph_user: str = "memgraph"  # Default Memgraph user
+    memgraph_password_encoded: str = ""  # Base64 encoded password
     runtime_backend: str = "auto"
     qa_model: str = "gemma3:4b"
     embedding_backend: str = "auto"
@@ -58,9 +59,10 @@ class OrionSettings:
     config_version: int = CURRENT_VERSION
 
     _KEY_ALIASES: ClassVar[Dict[str, str]] = {
-        "neo4j.uri": "neo4j_uri",
-        "neo4j.user": "neo4j_user",
-        "neo4j.password": "neo4j_password_encoded",
+        "memgraph.host": "memgraph_host",
+        "memgraph.port": "memgraph_port",
+        "memgraph.user": "memgraph_user",
+        "memgraph.password": "memgraph_password_encoded",
         "runtime.backend": "runtime_backend",
         "runtime": "runtime_backend",
         "qa.model": "qa_model",
@@ -68,7 +70,7 @@ class OrionSettings:
         "embedding.model": "embedding_model",
     }
 
-    _SECRET_KEYS: ClassVar[Tuple[str, ...]] = ("neo4j.password",)
+    _SECRET_KEYS: ClassVar[Tuple[str, ...]] = ("memgraph.password",)
     _VALID_RUNTIMES: ClassVar[Tuple[str, ...]] = ("auto", "torch")
     _VALID_EMBEDDING_BACKENDS: ClassVar[Tuple[str, ...]] = (
         "auto",
@@ -76,15 +78,15 @@ class OrionSettings:
         "sentence-transformer",
     )
     
-    def set_neo4j_password(self, password: str) -> None:
-        """Set Neo4j password (will be encoded for storage)."""
-        self.neo4j_password_encoded = _encode_password(password)
+    def set_memgraph_password(self, password: str) -> None:
+        """Set Memgraph password (will be encoded for storage)."""
+        self.memgraph_password_encoded = _encode_password(password)
     
-    def get_neo4j_password(self) -> str:
-        """Get the actual Neo4j password (decoded)."""
-        if not self.neo4j_password_encoded:
-            raise SettingsError("Neo4j password not configured.")
-        return _decode_password(self.neo4j_password_encoded)
+    def get_memgraph_password(self) -> str:
+        """Get the actual Memgraph password (decoded)."""
+        if not self.memgraph_password_encoded:
+            return "" # Return empty if not set, Memgraph might not need it
+        return _decode_password(self.memgraph_password_encoded)
 
     # ------------------------------------------------------------------
     # Lifecycle helpers
@@ -157,9 +159,10 @@ class OrionSettings:
     def iter_display_items(self) -> Iterable[Tuple[str, str]]:
         """Yield human-friendly key/value pairs for CLI display."""
         ordering = (
-            "neo4j.uri",
-            "neo4j.user",
-            "neo4j.password",
+            "memgraph.host",
+            "memgraph.port",
+            "memgraph.user",
+            "memgraph.password",
             "runtime.backend",
             "qa.model",
             "embedding.backend",
@@ -173,21 +176,22 @@ class OrionSettings:
             if key in self._SECRET_KEYS:
                 yield key, self._mask_secret(value)
             else:
-                yield key, value
+                yield key, str(value)
 
-    def _flatten(self) -> Dict[str, str]:
+    def _flatten(self) -> Dict[str, Any]:
         # Show decoded password (masked) for display
         password_display = ""
-        if self.neo4j_password_encoded:
+        if self.memgraph_password_encoded:
             try:
-                password_display = self.get_neo4j_password()
+                password_display = self.get_memgraph_password()
             except Exception:
                 password_display = ""
         
         return {
-            "neo4j.uri": self.neo4j_uri,
-            "neo4j.user": self.neo4j_user,
-            "neo4j.password": password_display,
+            "memgraph.host": self.memgraph_host,
+            "memgraph.port": self.memgraph_port,
+            "memgraph.user": self.memgraph_user,
+            "memgraph.password": password_display,
             "runtime.backend": self.runtime_backend,
             "qa.model": self.qa_model,
             "embedding.backend": self.embedding_backend,
@@ -226,14 +230,19 @@ class OrionSettings:
                     f"Embedding backend must be one of {self._VALID_EMBEDDING_BACKENDS}."
                 )
             value = normalized
-        elif field_name == "neo4j_uri":
-            value = value or self.neo4j_uri
-        elif field_name == "neo4j_password_encoded":
+        elif field_name == "memgraph_host":
+            value = value or self.memgraph_host
+        elif field_name == "memgraph_port":
+            try:
+                value = int(value)
+            except ValueError:
+                raise SettingsError("Memgraph port must be an integer.")
+        elif field_name == "memgraph_password_encoded":
             # User provides plain password, we encode it
-            self.set_neo4j_password(value)
+            self.set_memgraph_password(value)
             return
         elif field_name in {
-            "neo4j_user",
+            "memgraph_user",
             "qa_model",
             "embedding_model",
         }:
@@ -267,15 +276,15 @@ class OrionSettings:
             raise SettingsError(
                 f"Embedding backend must be one of {self._VALID_EMBEDDING_BACKENDS}."
             )
-        if not self.neo4j_uri:
-            raise SettingsError("Neo4j URI cannot be empty.")
-        if not self.neo4j_user:
-            raise SettingsError("Neo4j user cannot be empty.")
+        if not self.memgraph_host:
+            raise SettingsError("Memgraph host cannot be empty.")
+        if not self.memgraph_user:
+            raise SettingsError("Memgraph user cannot be empty.")
 
         # Check for password
-        if not self.neo4j_password_encoded:
+        if not self.memgraph_password_encoded:
             raise SettingsError(
-                "Neo4j password not configured. Run 'orion init' to set up."
+                "Memgraph password not configured. Run 'orion init' to set up."
             )
 
         if not self.qa_model:

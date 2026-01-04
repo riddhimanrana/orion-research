@@ -36,24 +36,26 @@ class ServiceDetector:
         try:
             from orion.settings import OrionSettings
             settings = OrionSettings.load()
-            self.neo4j_uri = settings.neo4j_uri  # Keep neo4j:// protocol
-            self.neo4j_user = settings.neo4j_user
+            self.memgraph_host = settings.memgraph_host
+            self.memgraph_port = settings.memgraph_port
+            self.memgraph_user = settings.memgraph_user
             try:
-                self.neo4j_password = settings.get_neo4j_password()
+                self.memgraph_password = settings.get_memgraph_password()
             except Exception:
-                self.neo4j_password = ""
+                self.memgraph_password = ""
         except Exception:
             # Fallback to environment variables if settings not available
-            self.neo4j_uri = os.getenv("ORION_NEO4J_URI", "neo4j://localhost:7687")
-            self.neo4j_user = os.getenv("ORION_NEO4J_USER", "neo4j")
-            self.neo4j_password = os.getenv("ORION_NEO4J_PASSWORD", "")
+            self.memgraph_host = os.getenv("ORION_MEMGRAPH_HOST", "127.0.0.1")
+            self.memgraph_port = int(os.getenv("ORION_MEMGRAPH_PORT", "7687"))
+            self.memgraph_user = os.getenv("ORION_MEMGRAPH_USER", "memgraph")
+            self.memgraph_password = os.getenv("ORION_MEMGRAPH_PASSWORD", "")
         
         self.ollama_url = os.getenv("ORION_OLLAMA_BASE_URL", "http://localhost:11434")
         self.timeout = 5
 
-    def detect_neo4j(self) -> Tuple[bool, str]:
+    def detect_memgraph(self) -> Tuple[bool, str]:
         """
-        Detect Neo4j availability
+        Detect Memgraph availability
         
         Returns:
             (is_available, status_message)
@@ -61,14 +63,15 @@ class ServiceDetector:
         try:
             from neo4j import GraphDatabase
             
+            uri = f"bolt://{self.memgraph_host}:{self.memgraph_port}"
             driver = GraphDatabase.driver(
-                self.neo4j_uri,
-                auth=(self.neo4j_user, self.neo4j_password),
+                uri,
+                auth=(self.memgraph_user, self.memgraph_password),
                 connection_timeout=self.timeout
             )
             driver.verify_connectivity()
             driver.close()
-            return True, f"Connected at {self.neo4j_uri}"
+            return True, f"Connected at {uri}"
         except Exception as e:
             return False, f"Failed: {str(e)}"
 
@@ -147,7 +150,7 @@ class AutoConfiguration:
         """Detect all external services"""
         with console.status("[dim]Detecting services...[/dim]", spinner="dots"):
             results = {
-                "neo4j": self.detector.detect_neo4j(),
+                "memgraph": self.detector.detect_memgraph(),
                 "ollama": self.detector.detect_ollama(),
                 "docker": self.detector.detect_docker(),
             }

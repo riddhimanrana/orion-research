@@ -20,9 +20,9 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from orion.perception.yolo_detector import YOLODetector
+from orion.perception.detectors.yolo import YOLODetector
 from orion.perception.hand_classifier import HandClassifier
-from orion.perception.byte_tracker import ObjectTracker
+from orion.perception.trackers.enhanced import EnhancedTracker as ObjectTracker
 from orion.config import (
     get_episode_dir,
     get_episode_video_path,

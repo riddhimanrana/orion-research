@@ -18,9 +18,22 @@ from rich.progress import (
 )
 
 from ..managers import AssetManager
-from ..managers.runtime import select_backend, set_active_backend
 
 console = Console()
+
+
+def select_backend(requested: Optional[str] = None) -> str:
+    """Select the best available backend (torch or mlx)."""
+    import platform
+    try:
+        import torch
+        if platform.system() == "Darwin" and platform.processor() == "arm":
+            return "mps"
+        elif torch.cuda.is_available():
+            return "cuda"
+        return "cpu"
+    except ImportError:
+        return "cpu"
 
 
 def prepare_runtime(requested: Optional[str]) -> Tuple[str, AssetManager]:
@@ -37,7 +50,6 @@ def prepare_runtime(requested: Optional[str]) -> Tuple[str, AssetManager]:
         task = progress.add_task("[cyan]Selecting runtime backend...", total=3)
 
         backend = select_backend(requested)
-        set_active_backend(backend)
         progress.update(task, advance=1, description=f"[cyan]Selected: {backend}")
 
         manager = AssetManager()

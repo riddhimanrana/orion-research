@@ -109,32 +109,8 @@ def handle_analyze(args: argparse.Namespace, settings: OrionSettings) -> None:
         
         console.print(f"\n[green]✓ Results saved to: {output_dir}[/green]")
         
-        # Export to graph if requested
-        if not getattr(args, "skip_graph", False):
-            try:
-                from ...graph.builder import GraphBuilder
-                
-                neo4j_uri = args.neo4j_uri or settings.neo4j_uri
-                neo4j_user = args.neo4j_user or settings.neo4j_user
-                neo4j_password = args.neo4j_password or settings.get_neo4j_password()
-                
-                console.print("\n[cyan]Building knowledge graph...[/cyan]")
-                builder = GraphBuilder(
-                    neo4j_uri=neo4j_uri,
-                    neo4j_user=neo4j_user,
-                    neo4j_password=neo4j_password
-                )
-                
-                if not getattr(args, "keep_db", False):
-                    builder.clear_database()
-                
-                builder.build_from_perception(result)
-                console.print("[green]✓ Graph built successfully[/green]\n")
-                
-            except ImportError as e:
-                console.print(f"[yellow]⚠ Graph export skipped: {e}[/yellow]\n")
-            except Exception as e:
-                console.print(f"[red]✗ Graph export failed: {e}[/red]\n")
+        # Graph export disabled (Neo4j deprecated, use Memgraph via 'orion services memgraph' + showcase pipeline)
+        # To export to Memgraph, use: python -m orion.cli.pipelines.showcase --episode <id> --memgraph
 
     except FileNotFoundError as e:
         console.print(f"[red]✗ Video file not found: {e}[/red]")

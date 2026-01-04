@@ -11,7 +11,7 @@ from .commands import (
     handle_analyze,
     handle_config,
     handle_init,
-    handle_neo4j,
+    handle_memgraph,
     handle_ollama,
     handle_qa,
     handle_research,
@@ -38,7 +38,7 @@ Examples:
   orion analyze video.mp4 --inspect=perception  # Inspect after perception stage
   orion qa                                    # Q&A only mode
   orion models                                # Show model info
-  orion services neo4j start                  # Start Neo4j
+  orion services memgraph start               # Start Memgraph
 
 For more help: orion <command> --help
         """,
@@ -68,13 +68,14 @@ For more help: orion <command> --help
     )
 
     # Database and output
-    analyze_parser.add_argument("--keep-db", action="store_true", help="Keep existing Neo4j data")
+    analyze_parser.add_argument("--keep-db", action="store_true", help="Keep existing Memgraph data")
     analyze_parser.add_argument("-o", "--output", default="data/testing", help="Output directory")
 
-    # Neo4j configuration
-    analyze_parser.add_argument("--neo4j-uri", help="Neo4j connection URI (defaults to config)")
-    analyze_parser.add_argument("--neo4j-user", help="Neo4j username (defaults to config)")
-    analyze_parser.add_argument("--neo4j-password", help="Neo4j password (defaults to config)")
+    # Memgraph configuration
+    analyze_parser.add_argument("--memgraph-host", help="Memgraph host (defaults to config)")
+    analyze_parser.add_argument("--memgraph-port", help="Memgraph port (defaults to config)")
+    analyze_parser.add_argument("--memgraph-user", help="Memgraph username (defaults to config)")
+    analyze_parser.add_argument("--memgraph-password", help="Memgraph password (defaults to config)")
 
     # Models and runtime
     analyze_parser.add_argument("--qa-model", help="Ollama model for interactive Q&A (defaults to config)")
@@ -106,9 +107,10 @@ For more help: orion <command> --help
     # ═══════════════════════════════════════════════════════════
     qa_parser = subparsers.add_parser("qa", help="Q&A mode only")
     qa_parser.add_argument("--model", help="Ollama model to use (defaults to config)")
-    qa_parser.add_argument("--neo4j-uri", help="Neo4j connection URI (defaults to config)")
-    qa_parser.add_argument("--neo4j-user", help="Neo4j username (defaults to config)")
-    qa_parser.add_argument("--neo4j-password", help="Neo4j password (defaults to config)")
+    qa_parser.add_argument("--memgraph-host", help="Memgraph host (defaults to config)")
+    qa_parser.add_argument("--memgraph-port", help="Memgraph port (defaults to config)")
+    qa_parser.add_argument("--memgraph-user", help="Memgraph username (defaults to config)")
+    qa_parser.add_argument("--memgraph-password", help="Memgraph password (defaults to config)")
     qa_parser.add_argument("--runtime", help="Select runtime backend (auto or torch; defaults to config)")
 
     # ═══════════════════════════════════════════════════════════
@@ -154,16 +156,16 @@ For more help: orion <command> --help
     # ═══════════════════════════════════════════════════════════
     # SERVICE COMMANDS
     # ═══════════════════════════════════════════════════════════
-    services_parser = subparsers.add_parser("services", help="Manage Orion services (Neo4j, Ollama)")
+    services_parser = subparsers.add_parser("services", help="Manage Orion services (Memgraph, Ollama)")
     services_subparsers = services_parser.add_subparsers(dest="service_command", help="Service actions")
 
-    # Neo4j management
-    neo4j_parser = services_subparsers.add_parser("neo4j", help="Manage Neo4j service")
-    neo4j_subparsers = neo4j_parser.add_subparsers(dest="neo4j_action", help="Neo4j actions")
-    neo4j_subparsers.add_parser("start", help="Start Neo4j container")
-    neo4j_subparsers.add_parser("stop", help="Stop Neo4j container")
-    neo4j_subparsers.add_parser("status", help="Check Neo4j container status")
-    neo4j_subparsers.add_parser("restart", help="Restart Neo4j container")
+    # Memgraph management
+    memgraph_parser = services_subparsers.add_parser("memgraph", help="Manage Memgraph service")
+    memgraph_subparsers = memgraph_parser.add_subparsers(dest="memgraph_action", help="Memgraph actions")
+    memgraph_subparsers.add_parser("start", help="Start Memgraph container")
+    memgraph_subparsers.add_parser("stop", help="Stop Memgraph container")
+    memgraph_subparsers.add_parser("status", help="Check Memgraph container status")
+    memgraph_subparsers.add_parser("restart", help="Restart Memgraph container")
 
     # Ollama management
     ollama_parser = services_subparsers.add_parser("ollama", help="Manage Ollama service")
@@ -307,11 +309,11 @@ For more help: orion <command> --help
     config_subparsers.add_parser("show", help="Display the current configuration values")
     config_subparsers.add_parser("path", help="Print the configuration file path")
     config_subparsers.add_parser("reset", help="Reset configuration to defaults")
-    config_subparsers.add_parser("credentials", help="Show Neo4j credentials")
-    config_subparsers.add_parser("reset-password", help="Reset Neo4j password (interactive)")
+    config_subparsers.add_parser("credentials", help="Show Memgraph credentials")
+    config_subparsers.add_parser("reset-password", help="Reset Memgraph password (interactive)")
 
     config_set_parser = config_subparsers.add_parser("set", help="Update a configuration value")
-    config_set_parser.add_argument("key", help="Configuration key (e.g., neo4j.uri)")
+    config_set_parser.add_argument("key", help="Configuration key (e.g., memgraph.host)")
     config_set_parser.add_argument("value", help="New value")
 
     return parser
@@ -361,8 +363,8 @@ def main() -> None:
         handle_unified_pipeline(args, settings)
 
     elif args.command == "services":
-        if args.service_command == "neo4j":
-            handle_neo4j(args)
+        if args.service_command == "memgraph":
+            handle_memgraph(args)
         elif args.service_command == "ollama":
             handle_ollama(args)
         else:

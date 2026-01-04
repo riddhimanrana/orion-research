@@ -32,6 +32,8 @@ __pycache__/
 /tests/results/
 
 
+results/
+
 # Distribution / packaging
 .Python
 build/
@@ -231,3 +233,4 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+orion/models/external/groundingdino/groundingdino_swint_ogc.pth

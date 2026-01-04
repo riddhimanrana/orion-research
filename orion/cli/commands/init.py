@@ -15,30 +15,29 @@ from ..utils import is_docker_daemon_running, prompt_user, run_command
 console = Console()
 
 
-def setup_neo4j(password: str) -> None:
-    """Set up the Neo4j container with the provided password."""
-    NEO4J_CONTAINER_NAME = "orion-neo4j"
-    NEO4J_IMAGE = "neo4j:5"
+def setup_memgraph() -> None:
+    """Set up the Memgraph container."""
+    MEMGRAPH_CONTAINER_NAME = "orion-memgraph"
+    MEMGRAPH_IMAGE = "memgraph/memgraph-platform" # Includes Lab
 
     # Check if running
     output = run_command(
-        f"docker ps -q -f name={NEO4J_CONTAINER_NAME}",
-        f"Checking for container: {NEO4J_CONTAINER_NAME}",
+        f"docker ps -q -f name={MEMGRAPH_CONTAINER_NAME}",
+        f"Checking for container: {MEMGRAPH_CONTAINER_NAME}",
     )
     if output and output != "":
-        console.print(f"[green]✓ Neo4j container '{NEO4J_CONTAINER_NAME}' is already running.[/green]")
+        console.print(f"[green]✓ Memgraph container '{MEMGRAPH_CONTAINER_NAME}' is already running.[/green]")
         return
 
-    if prompt_user(f"Neo4j container '{NEO4J_CONTAINER_NAME}' not found. Would you like to create and start it?"):
-        run_command(f"docker pull {NEO4J_IMAGE}", f"Pulling Neo4j image: {NEO4J_IMAGE}")
+    if prompt_user(f"Memgraph container '{MEMGRAPH_CONTAINER_NAME}' not found. Would you like to create and start it?"):
+        run_command(f"docker pull {MEMGRAPH_IMAGE}", f"Pulling Memgraph image: {MEMGRAPH_IMAGE}")
         run_command(
-            f"docker run -d --name {NEO4J_CONTAINER_NAME} "
-            f"-p 7474:7474 -p 7687:7687 "
-            f"-e NEO4J_AUTH=neo4j/{password} "
-            f"{NEO4J_IMAGE}",
-            "Starting Neo4j container",
+            f"docker run -d --name {MEMGRAPH_CONTAINER_NAME} "
+            f"-p 7687:7687 -p 7444:7444 -p 3000:3000 "
+            f"{MEMGRAPH_IMAGE}",
+            "Starting Memgraph container",
         )
-        console.print("[green]✓ Neo4j container started.[/green]")
+        console.print("[green]✓ Memgraph container started.[/green]")
 
 
 def setup_ollama() -> None:
@@ -78,7 +77,7 @@ def handle_init(args: argparse.Namespace) -> None:
     
     # Determine if we need a new password or use existing
     settings = None
-    neo4j_password = None
+    memgraph_password = None
     password_was_generated = False
     password_is_new = False
     
@@ -89,22 +88,22 @@ def handle_init(args: argparse.Namespace) -> None:
         
         # Check if password exists
         try:
-            neo4j_password = settings.get_neo4j_password()
+            memgraph_password = settings.get_memgraph_password()
             
             # If reset flag OR user wants to reconfigure
             if force_reset:
                 console.print("[yellow]⚠ Reset flag detected - reconfiguring password[/yellow]\n")
                 password_is_new = True
             else:
-                console.print("[dim]Existing Neo4j password found in configuration[/dim]")
-                if prompt_user("Would you like to reconfigure the Neo4j password?", default=False):
+                console.print("[dim]Existing Memgraph password found in configuration[/dim]")
+                if prompt_user("Would you like to reconfigure the Memgraph password?", default=False):
                     console.print()
                     password_is_new = True
                 else:
-                    console.print("[yellow]Using existing Neo4j password[/yellow]\n")
+                    console.print("[yellow]Using existing Memgraph password[/yellow]\n")
         except Exception:
             # Config exists but no password set, ask user
-            console.print("[yellow]⚠ No Neo4j password found in configuration[/yellow]\n")
+            console.print("[yellow]⚠ No Memgraph password found in configuration[/yellow]\n")
             password_is_new = True
     except Exception as e:
         console.print(f"[dim]Creating new configuration...[/dim]")
@@ -113,25 +112,25 @@ def handle_init(args: argparse.Namespace) -> None:
     
     # If we need a new password, ask the user
     if password_is_new:
-        console.print("[bold cyan]Neo4j Password Setup[/bold cyan]\n")
+        console.print("[bold cyan]Memgraph Password Setup[/bold cyan]\n")
         choice = prompt_user("Would you like to generate a random password?", default=True)
         
         if choice:
-            neo4j_password = generate_secure_password(16)
+            memgraph_password = generate_secure_password(16)
             password_was_generated = True
             console.print(f"[green]✓ Generated secure password[/green]")
-            console.print(f"[dim]Password: {neo4j_password}[/dim]\n")
+            console.print(f"[dim]Password: {memgraph_password}[/dim]\n")
         else:
             # Custom password
-            console.print("\n[cyan]Enter your Neo4j password (min 8 characters):[/cyan]")
+            console.print("\n[cyan]Enter your Memgraph password (min 8 characters):[/cyan]")
             import getpass
             while True:
-                neo4j_password = getpass.getpass("Password: ")
-                if len(neo4j_password) < 8:
+                memgraph_password = getpass.getpass("Password: ")
+                if len(memgraph_password) < 8:
                     console.print("[yellow]⚠ Password must be at least 8 characters[/yellow]")
                     continue
                 password_confirm = getpass.getpass("Confirm: ")
-                if neo4j_password != password_confirm:
+                if memgraph_password != password_confirm:
                     console.print("[yellow]⚠ Passwords don't match, try again[/yellow]")
                     continue
                 break
@@ -140,14 +139,15 @@ def handle_init(args: argparse.Namespace) -> None:
     # Create or update settings with password
     if settings is None:
         settings = OrionSettings()
-    settings.set_neo4j_password(neo4j_password)
+    settings.set_memgraph_password(memgraph_password)
     settings.save()
     
     if password_is_new:
         console.print(f"[green]✓ Configuration saved to {settings.config_path()}[/green]\n")
     
-    console.print(f"  • Neo4j URI: {settings.neo4j_uri}")
-    console.print(f"  • Neo4j User: {settings.neo4j_user}")
+    console.print(f"  • Memgraph Host: {settings.memgraph_host}")
+    console.print(f"  • Memgraph Port: {settings.memgraph_port}")
+    console.print(f"  • Memgraph User: {settings.memgraph_user}")
     console.print(f"  • Runtime Backend: {settings.runtime_backend}")
     console.print(f"  • Q&A Model: {settings.qa_model}")
     console.print(f"  • Embedding Model: {settings.embedding_model}\n")
@@ -161,7 +161,7 @@ def handle_init(args: argparse.Namespace) -> None:
     auto_config = AutoConfiguration()
     results = auto_config.detect_all_services()
 
-    neo4j_ok, neo4j_msg = results["neo4j"]
+    memgraph_ok, memgraph_msg = results.get("memgraph", (False, "Not checked"))
     ollama_ok, ollama_msg, _ = results["ollama"]
     docker_ok, docker_msg = results["docker"]
 
@@ -171,9 +171,9 @@ def handle_init(args: argparse.Namespace) -> None:
     status_table.add_column("Details", style="yellow")
 
     status_table.add_row(
-        "Neo4j",
-        "[green]✓ Running[/green]" if neo4j_ok else "[red]✗ Not available[/red]",
-        neo4j_msg,
+        "Memgraph",
+        "[green]✓ Running[/green]" if memgraph_ok else "[red]✗ Not available[/red]",
+        memgraph_msg,
     )
     status_table.add_row(
         "Ollama",
@@ -241,11 +241,11 @@ def handle_init(args: argparse.Namespace) -> None:
     # ═══════════════════════════════════════════════════════════
     console.print("[bold]Step 3: Setting Up Services[/bold]\n")
     
-    console.print("--- Setting up Neo4j ---")
-    setup_neo4j(neo4j_password)
+    console.print("--- Setting up Memgraph ---")
+    setup_memgraph()
     
-    # Verify Neo4j connection with the password
-    console.print("\n[dim]Verifying Neo4j connection (this may take a moment)...[/dim]")
+    # Verify Memgraph connection with the password
+    console.print("\n[dim]Verifying Memgraph connection (this may take a moment)...[/dim]")
     import time
     import logging
     
@@ -256,41 +256,42 @@ def handle_init(args: argparse.Namespace) -> None:
     
     max_retries = 30
     retry_count = 0
-    neo4j_verified = False
+    memgraph_verified = False
     
-    while retry_count < max_retries and not neo4j_verified:
+    while retry_count < max_retries and not memgraph_verified:
         try:
             from neo4j import GraphDatabase
             
+            uri = f"bolt://{settings.memgraph_host}:{settings.memgraph_port}"
             driver = GraphDatabase.driver(
-                settings.neo4j_uri,
-                auth=(settings.neo4j_user, neo4j_password),
+                uri,
+                auth=(settings.memgraph_user, memgraph_password),
                 connection_timeout=5
             )
             driver.verify_connectivity()
             driver.close()
-            neo4j_verified = True
+            memgraph_verified = True
             # Restore logging level
             neo4j_logger.setLevel(original_level)
-            console.print("[green]✓ Neo4j authentication successful[/green]")
+            console.print("[green]✓ Memgraph authentication successful[/green]")
         except Exception as e:
             retry_count += 1
             if retry_count < max_retries:
                 # Show a simple progress indicator instead of error messages
                 dots = "." * (retry_count % 4)
-                console.print(f"\r[dim]  Waiting for Neo4j to start{dots:4s}[/dim]", end="")
+                console.print(f"\r[dim]  Waiting for Memgraph to start{dots:4s}[/dim]", end="")
                 time.sleep(1)
             else:
                 # Restore logging level
                 neo4j_logger.setLevel(original_level)
-                console.print(f"\n[red]✗ Neo4j connection failed after {max_retries} attempts[/red]")
+                console.print(f"\n[red]✗ Memgraph connection failed after {max_retries} attempts[/red]")
                 console.print(f"[yellow]Error: {str(e)}[/yellow]")
                 if prompt_user("\n[yellow]Continue anyway?[/yellow]", default=False):
-                    neo4j_verified = True
+                    memgraph_verified = True
                 else:
                     sys.exit(1)
     
-    if neo4j_verified and retry_count > 0:
+    if memgraph_verified and retry_count > 0:
         console.print()  # New line after progress dots
 
     console.print("\n--- Setting up Ollama ---")
@@ -303,7 +304,7 @@ def handle_init(args: argparse.Namespace) -> None:
 
     # Auto-detect the best runtime
     try:
-        from ...managers.runtime import select_backend
+        from ..utils import select_backend
 
         backend: str = select_backend(None)  # Force auto-detection
         console.print(f"[green]✓ Selected runtime: {backend}[/green]")
@@ -355,13 +356,13 @@ def handle_init(args: argparse.Namespace) -> None:
     
     # Re-check services
     results = auto_config.detect_all_services()
-    neo4j_ok, neo4j_msg = results["neo4j"]
+    memgraph_ok, memgraph_msg = results["memgraph"]
     ollama_ok, ollama_msg, ollama_model = results["ollama"]
     
-    if neo4j_ok:
-        console.print(f"[green]✓ Neo4j: {neo4j_msg}[/green]")
+    if memgraph_ok:
+        console.print(f"[green]✓ Memgraph: {memgraph_msg}[/green]")
     else:
-        console.print(f"[yellow]⚠ Neo4j: {neo4j_msg}[/yellow]")
+        console.print(f"[yellow]⚠ Memgraph: {memgraph_msg}[/yellow]")
     
     if ollama_ok:
         console.print(f"[green]✓ Ollama: {ollama_msg}[/green]")
@@ -400,17 +401,19 @@ def handle_init(args: argparse.Namespace) -> None:
 
     console.print("\n[bold green]✅ Orion initialization complete![/bold green]")
     
-    # Show Neo4j credentials and configuration info
-    console.print("\n[bold cyan]📝 Neo4j Configuration[/bold cyan]")
-    console.print(f"[bold]Browser URL:[/bold] http://localhost:7474")
-    console.print(f"[bold]Connection URI:[/bold] neo4j://localhost:7687")
-    console.print(f"[bold]Username:[/bold] neo4j")
+    # Show Memgraph credentials and configuration info
+    console.print("\n[bold cyan]📝 Memgraph Configuration[/bold cyan]")
+    console.print(f"[bold]Lab URL:[/bold] http://localhost:3000")
+    console.print(f"[bold]Connection URI:[/bold] bolt://localhost:7687")
+    console.print(f"[bold]Username:[/bold] {settings.memgraph_user or '(none)'}")
     if password_was_generated:
-        console.print(f"[bold]Password:[/bold] {neo4j_password} [yellow](auto-generated)[/yellow]")
-    else:
+        console.print(f"[bold]Password:[/bold] {memgraph_password} [yellow](auto-generated)[/yellow]")
+    elif memgraph_password:
         console.print(f"[dim]Password:[/dim] [green]✓ Set (stored in ~/.orion/config.json)[/green]")
+    else:
+        console.print(f"[dim]Password:[/dim] (none)")
     console.print("[dim]  • Credentials are encrypted and stored in ~/.orion/config.json[/dim]")
-    console.print("[dim]  • Log in to Neo4j Browser to manage the database[/dim]")
+    console.print("[dim]  • Log in to Memgraph Lab (http://localhost:3000) to manage the database[/dim]")
     
     console.print("\n[bold cyan]Next steps:[/bold cyan]")
     console.print("  1. Check system status: [bold]orion status[/bold]")

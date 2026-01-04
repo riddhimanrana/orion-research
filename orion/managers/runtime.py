@@ -1,102 +1,55 @@
-"""Runtime backend selection utilities."""
+"""
+Runtime Backend Management
+==========================
 
-from __future__ import annotations
+Handles selection of compute backends (Torch vs MLX) based on
+hardware availability and user configuration.
 
-import importlib.util
+Author: Orion Research Team
+"""
+
 import logging
-import os
 import platform
-from typing import Literal, Optional
+import importlib.util
+from typing import Optional, Literal
 
-BackendName = Literal["torch", "mlx"]
-_AUTO = "auto"
-_SUPPORTED: set[str] = {"torch", "mlx"}
+from orion.settings import OrionSettings
 
 logger = logging.getLogger(__name__)
 
+BackendType = Literal["torch", "mlx"]
 
-def _module_exists(module_name: str) -> bool:
-    return importlib.util.find_spec(module_name) is not None
-
-
-def _is_apple_silicon() -> bool:
-    """Check if running on Apple Silicon (M1/M2/M3/etc)."""
-    return platform.system() == "Darwin" and platform.processor() == "arm"
-
-
-def _has_cuda() -> bool:
-    """Check if CUDA is available."""
-    try:
-        import torch
-        return torch.cuda.is_available()
-    except ImportError:
+def is_mlx_available() -> bool:
+    """Check if MLX is available and we are on Apple Silicon."""
+    if platform.system() != "Darwin" or platform.machine() != "arm64":
         return False
+    return importlib.util.find_spec("mlx") is not None
 
+_ACTIVE_BACKEND: Optional[BackendType] = None
 
-def _normalize_backend_name(name: str) -> str:
-    lowered = name.lower()
-    if lowered in _SUPPORTED:
-        return lowered
-    raise ValueError(f"Unsupported backend preference '{name}'.")
+def get_active_backend() -> Optional[BackendType]:
+    """
+    Get the explicitly configured backend from settings.
+    Returns None if set to 'auto'.
+    """
+    return _ACTIVE_BACKEND
 
+def set_active_backend(backend: BackendType) -> None:
+    """Set the active backend."""
+    global _ACTIVE_BACKEND
+    _ACTIVE_BACKEND = backend
 
-def is_backend_available(backend: str) -> bool:
-    """Check whether the given backend can be imported on this machine."""
-    normalized = _normalize_backend_name(backend)
-    if normalized == "torch":
-        return _module_exists("torch")
-    if normalized == "mlx":
-        return _is_apple_silicon() and _module_exists("mlx_vlm")
-    return False
-
-
-def select_backend(preferred: Optional[str] = None) -> BackendName:
-    """Resolve the backend to use based on user preference and environment."""
-    raw_preference = (
-        preferred if preferred is not None else os.getenv("ORION_RUNTIME", _AUTO)
-    )
-    choice = raw_preference.lower()
-
-    if choice not in {_AUTO, "auto"}:
-        normalized = _normalize_backend_name(choice)
-        if normalized == "torch" and not is_backend_available("torch"):
-            raise RuntimeError(
-                "Requested backend 'torch' is not available. Install PyTorch to continue."
-            )
-        if normalized == "mlx":
-            if not is_backend_available("mlx"):
-                raise RuntimeError(
-                    "MLX backend requires Apple Silicon (M1/M2/M3) and mlx-vlm package. Install with: pip install mlx-vlm"
-                )
-            logger.info("Using MLX backend for Apple Silicon optimization.")
-            return "mlx"
-        return normalized  # type: ignore[return-value]
-
-    # Auto-select: prefer MLX on Apple Silicon if available
-    if is_backend_available("mlx"):
-        logger.info("Auto-selected MLX backend for Apple Silicon.")
+def select_backend() -> BackendType:
+    """
+    Select the best available backend.
+    
+    Logic:
+    1. If on Apple Silicon AND MLX is installed -> 'mlx'
+    2. Otherwise -> 'torch'
+    """
+    if is_mlx_available():
+        logger.info("Apple Silicon detected with MLX installed. Using MLX backend.")
         return "mlx"
     
-    if is_backend_available("torch"):
-        return "torch"
-
-    raise RuntimeError(
-        "No supported backend found. Install PyTorch or MLX to run Orion's perception pipeline."
-    )
-
-
-def set_active_backend(backend: BackendName) -> None:
-    """Record the active backend for other components to read."""
-    os.environ["ORION_RUNTIME_BACKEND"] = backend
-
-
-def get_active_backend(default: Optional[BackendName] = None) -> Optional[BackendName]:
-    """Retrieve the backend chosen for the current session."""
-    value = os.getenv("ORION_RUNTIME_BACKEND")
-    if value is None:
-        return default
-    try:
-        normalized = _normalize_backend_name(value)
-    except ValueError:
-        return default
-    return normalized  # type: ignore[return-value]
+    logger.info("Using PyTorch backend (CUDA/CPU/MPS).")
+    return "torch"

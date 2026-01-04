@@ -12,7 +12,7 @@ from .events import (
     save_events_jsonl,
     save_merge_suggestions,
 )
-from .gemini_validator import GeminiValidationError, validate_directory as validate_graph_samples
+from .validation.gemini import GeminiValidationError, validate_directory as validate_graph_samples
 from .sampling import GraphSample, draw_graph_on_frame, export_graph_samples
 from .scene_graph import (
     build_graph_summary,

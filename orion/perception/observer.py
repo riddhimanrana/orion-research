@@ -70,6 +70,9 @@ class FrameObserver:
             depth_model: Depth model to use ("zoe" or "midas")
             enable_occlusion: Enable occlusion detection (requires enable_3d=True)
         """
+        self.config = config
+        self.target_fps = target_fps
+        self.show_progress = show_progress
         self.detector_backend = detector_backend
         self.yolo = yolo_model if detector_backend == "yolo" else None
         self.grounding_dino = grounding_dino if detector_backend == "groundingdino" else None
@@ -86,14 +89,16 @@ class FrameObserver:
         else:
             self.detector_classes = list(self.config.grounding_categories())
             if self.detector_backend == "yoloworld" and self.yoloworld is None:
-                from orion.perception.yoloworld_detector import YOLOWorldDetector
-                self.yoloworld = YOLOWorldDetector(
-                    model_path=None,
-                    confidence_threshold=self.config.confidence_threshold,
-                    device="mps",
-                    batch_size=8,
-                    categories=None,
-                )
+                # from orion.perception.yoloworld_detector import YOLOWorldDetector
+                # self.yoloworld = YOLOWorldDetector(
+                #     model_path=None,
+                #     confidence_threshold=self.config.confidence_threshold,
+                #     device="mps",
+                #     batch_size=8,
+                #     categories=None,
+                # )
+                logger.error("YOLOWorld backend not available (module missing)")
+                raise NotImplementedError("YOLOWorld backend not available")
         self._grounding_label_map = {
             label.lower(): idx for idx, label in enumerate(self.detector_classes)
         }

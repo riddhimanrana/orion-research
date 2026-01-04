@@ -1,5 +1,5 @@
 """Orion visualization module"""
 
-from orion.visualization.rerun_logger import RerunLogger, RerunConfig
+from .cli_diagnostics import DiagnosticInfo, CLIDiagnostics
 
-__all__ = ['RerunLogger', 'RerunConfig']
+__all__ = ['DiagnosticInfo', 'CLIDiagnostics']

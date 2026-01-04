@@ -280,7 +280,7 @@ class ModelManager:
     def _load_groundingdino(self) -> Any:
         """Load GroundingDINO detector via Hugging Face."""
         try:
-            from orion.perception.groundingdino_wrapper import GroundingDINOWrapper
+            from orion.perception.detectors.grounding_dino import GroundingDINOWrapper
 
             logger.info(
                 "Loading GroundingDINO wrapper (%s)…",

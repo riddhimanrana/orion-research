@@ -15,44 +15,47 @@ import torch.nn.functional as F
 from PIL import Image
 import cv2
 import sys
+import os
 from pathlib import Path
 
-# Add Depth-Anything-V2 to path
-WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
-DA_V2_PATH = WORKSPACE_ROOT / "Depth-Anything-V2-temp"
-if DA_V2_PATH.exists() and str(DA_V2_PATH) not in sys.path:
-    sys.path.append(str(DA_V2_PATH))
+# Enable MPS fallback for operations not yet implemented in MPS (e.g. upsample_bicubic2d)
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
+WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+
+# Try to import DepthAnythingV2 from local copy
 try:
-    from depth_anything_v2.dpt import DepthAnythingV2
+    from orion.perception.depth_anything_v2.dpt import DepthAnythingV2
     DA2_AVAILABLE = True
-except ImportError as e:
+except ImportError:
     DA2_AVAILABLE = False
-    print(f"[DepthEstimator] DepthAnythingV2 module not found. V2 local loading will fail. Error: {e}")
+
+# Try to import DepthAnything3
+DA3_AVAILABLE = True # We assume it's available if installed, but we'll check inside the class
+
 
 
 class DepthEstimator:
-    """Monocular depth estimation using Depth Anything V2."""
+    """Monocular depth estimation using Depth Anything V3 (default) or V2."""
     
     def __init__(
         self,
-        model_name: str = "depth_anything_v2",
-        model_size: str = "small",
+        model_name: str = "depth_anything_3",
+        model_size: str = "large",
         device: Optional[str] = None,
         half_precision: bool = False,
     ):
         """
-        Initialize depth estimator with Depth Anything V2.
+        Initialize depth estimator.
         
         Args:
-            model_name: Must be "depth_anything_v2"
-            model_size: "small", "base", or "large"
+            model_name: "depth_anything_3" (default) or "depth_anything_v2"
+            model_size: 
+                For V3: "small", "large" (maps to da3-small, da3-large)
+                For V2: "small", "base", "large"
             device: Device to run on ("cuda", "mps", "cpu", or None for auto-detect)
             half_precision: Use FP16 for faster inference (GPU only)
         """
-        if model_name != "depth_anything_v2":
-            raise ValueError(f"DepthEstimator now ONLY supports Depth Anything V2. Got: {model_name}")
-        
         self.model_name = model_name
         self.model_size = model_size
         self.half_precision = half_precision
@@ -67,23 +70,58 @@ class DepthEstimator:
                 self.device = torch.device("cpu")
         else:
             self.device = torch.device(device)
-        
-        print(f"[DepthEstimator] Using Depth Anything V2 ({model_size}) on {self.device}")
-        
-        # Load model
-        self.model = self._load_depth_anything_v2()
+            
+        print(f"[DepthEstimator] Initializing {model_name} ({model_size}) on {self.device}")
+
+        if model_name == "depth_anything_3":
+            self.model = self._load_depth_anything_3()
+        elif model_name == "depth_anything_v2":
+            if not DA2_AVAILABLE:
+                raise ImportError("DepthAnythingV2 module is not available.")
+            self.model = self._load_depth_anything_v2()
+        else:
+            raise ValueError(f"Unsupported model_name: {model_name}")
+
         self.model.eval()
+        self.model.to(self.device)
         
         if self.half_precision and self.device.type in ["cuda", "mps"]:
-            self.model.half()
-            print(f"[DepthEstimator] Using FP16 precision")
-    
+            # DA3 API wrapper enforces float32 inputs, so we skip half precision for now to avoid mixed type errors
+            if self.model_name == "depth_anything_3":
+                print(f"[DepthEstimator] Skipping FP16 for Depth Anything 3 (requires float32 inputs)")
+            else:
+                self.model.half()
+                print(f"[DepthEstimator] Using FP16 precision")
+
+    def _load_depth_anything_3(self) -> torch.nn.Module:
+        """Load Depth Anything V3 model."""
+        try:
+            from depth_anything_3.api import DepthAnything3
+        except ImportError:
+            raise ImportError("DepthAnything3 not installed. Please install it to use V3.")
+
+        # Map generic sizes to DA3 preset names
+        # DA3 presets: da3-small, da3-base, da3-large, da3-giant
+        # We'll map 'small' -> 'da3-small', 'base' -> 'da3-base', 'large' -> 'da3-large'
+        preset_map = {
+            "small": "da3-small",
+            "base": "da3-base",
+            "large": "da3-large",
+            "giant": "da3-giant"
+        }
+        
+        preset = preset_map.get(self.model_size, self.model_size) # Fallback to raw string if not found
+        
+        print(f"[DepthEstimator] Loading Depth Anything 3 (preset: {preset})...")
+        try:
+            model = DepthAnything3(model_name=preset)
+            return model
+        except Exception as e:
+            print(f"[DepthEstimator] Failed to load Depth Anything 3: {e}")
+            raise
+
     def _load_depth_anything_v2(self) -> torch.nn.Module:
         """Load Depth Anything V2 model directly from local files."""
-        if not DA2_AVAILABLE:
-            raise ImportError("DepthAnythingV2 module is not available. Check the path and installation.")
-
-        print("[DepthEstimator] Loading Depth Anything V2 from local repository...")
         
         # Define model configurations
         model_configs = {
@@ -136,7 +174,7 @@ class DepthEstimator:
         input_size: int = 518,
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
-        Estimate depth for a frame using Depth Anything V2.
+        Estimate depth for a frame.
         
         Args:
             frame: RGB frame (H, W, 3) as uint8 numpy array
@@ -149,21 +187,37 @@ class DepthEstimator:
             confidence_map: Always None (Depth Anything models don't expose confidence)
         """
         start_time = time.time()
-        
         h, w = frame.shape[:2]
-        
-        # Preprocess (V2)
-        input_tensor = self._preprocess(frame, input_size)
-        
-        # Inference
-        if self.half_precision and self.device.type in ["cuda", "mps"]:
-            input_tensor = input_tensor.half()
-        
-        depth_tensor = self.model(input_tensor)
-        
-        # Postprocess
-        depth_map = self._postprocess(depth_tensor, (h, w))
-        
+
+        if self.model_name == "depth_anything_3":
+            # DA3 Inference
+            # inference() handles preprocessing and returns a Prediction object
+            # It expects a list of images
+            # process_res defaults to 504 in DA3, we can use input_size
+            prediction = self.model.inference([frame], process_res=input_size)
+            depth_map = prediction.depth[0] # (H, W) or (H', W')
+            
+            # Resize if necessary
+            if depth_map.shape[:2] != (h, w):
+                depth_map = cv2.resize(depth_map, (w, h), interpolation=cv2.INTER_LINEAR)
+            
+            # Convert meters to millimeters
+            depth_map = depth_map * 1000.0
+            
+        else:
+            # V2 Inference
+            # Preprocess (V2)
+            input_tensor = self._preprocess(frame, input_size)
+            
+            # Inference
+            if self.half_precision and self.device.type in ["cuda", "mps"]:
+                input_tensor = input_tensor.half()
+            
+            depth_tensor = self.model(input_tensor)
+            
+            # Postprocess
+            depth_map = self._postprocess(depth_tensor, (h, w))
+
         elapsed_ms = (time.time() - start_time) * 1000
         
         # Confidence not provided by Depth Anything models

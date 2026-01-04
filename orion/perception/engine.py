@@ -40,19 +40,19 @@ from orion.perception.types import (
     HandPose,
 )
 from orion.perception.config import PerceptionConfig
-from orion.perception.camera_intrinsics import backproject_point
+from orion.perception.perception_3d import backproject_point
 from orion.perception.observer import FrameObserver
 from orion.perception.embedder import VisualEmbedder
-from orion.perception.tracker import EntityTracker
+from orion.perception.trackers.hdbscan import EntityTracker
 from orion.perception.describer import EntityDescriber
 # from orion.perception.reid import ReidModel
 from orion.perception.depth import DepthEstimator
 # from orion.utils.file_utils import find_latest_file
 from orion.settings import OrionSettings
-from orion.perception.groundingdino_wrapper import GroundingDINOWrapper
+from orion.perception.detectors.grounding_dino import GroundingDINOWrapper
 
 # Add this import
-from orion.perception.enhanced_tracker import Track
+from orion.perception.trackers.enhanced import Track
 
 
 @dataclass
@@ -97,11 +97,11 @@ class PerceptionResult:
 TRACKING_AVAILABLE = False
 
 from orion.managers.model_manager import ModelManager
-from orion.perception.tracker import TrackerProtocol
+from orion.perception.trackers.base import TrackerProtocol
 
 # Optional enhanced tracker (appearance Re-ID + 3D KF)
 try:
-    from orion.perception.enhanced_tracker import EnhancedTracker
+    from orion.perception.trackers.enhanced import EnhancedTracker
     ENHANCED_TRACKER_AVAILABLE = True
 except Exception as e:
     logging.warning(f"EnhancedTracker import failed: {e}")
@@ -115,17 +115,9 @@ except Exception as e:
     logging.warning(f"SLAMEngine import failed: {e}")
     SLAM_AVAILABLE = False
 
-# Optional TapNet point tracker (BootsTAPIR / TAPIR)
-try:
-    from orion.perception.tapnet_tracker import TapNetTracker
-    TAPNET_AVAILABLE = True
-except Exception as e:
-    logging.warning(f"TapNetTracker import failed: {e}")
-    TAPNET_AVAILABLE = False
-
 # Memgraph Backend
 try:
-    from orion.graph.memgraph_backend import MemgraphBackend
+    from orion.graph.backends.memgraph import MemgraphBackend
     MEMGRAPH_AVAILABLE = True
 except ImportError as e:
     logging.warning(f"MemgraphBackend import failed: {e}")
@@ -152,6 +144,8 @@ class PerceptionEngine:
         
         # Model manager (lazy loading)
         self.model_manager = ModelManager.get_instance()
+        # Update YOLO model from config before it's loaded
+        self.model_manager.yolo_model_name = self.config.detection.model
         
         # Pipeline components (initialized lazily)
         self.observer: Optional[FrameObserver] = None
@@ -162,7 +156,6 @@ class PerceptionEngine:
         self.depth_estimator: Optional[DepthEstimator] = None
         self.enhanced_tracker: Optional[TrackerProtocol] = None
         self.slam_engine: Optional[SLAMEngine] = None
-        self.tapnet_tracker: Optional['TapNetTracker'] = None
 
         # Tracking history
         self.tracking_history: Dict[int, List[Track]] = {}  # To store track history
@@ -174,10 +167,13 @@ class PerceptionEngine:
         # GroundingDINO detector
         if self.config.detection.backend == "groundingdino":
             logger.info("Initializing GroundingDINO detector...")
-            # self.grounding_dino = GroundingDino(self.model_manager)
+            # GroundingDINO has MPS compatibility issues on macOS - force CPU
+            import torch
+            gdino_device = "cpu" if torch.backends.mps.is_available() else self.config.embedding.device
+            logger.info(f"  GroundingDINO will use device: {gdino_device}")
             self.grounding_dino = GroundingDINOWrapper(
                 model_id=self.config.detection.groundingdino_model_id,
-                device=self.config.embedding.device,
+                device=gdino_device,
                 use_half_precision=False
             )
         else:
@@ -214,24 +210,6 @@ class PerceptionEngine:
         )
 
         logger.info("✓ All components initialized\n")
-
-        # Initialize TapNet tracker (after other components)
-        if self.config.tracker_backend == "tapnet":
-            if not TAPNET_AVAILABLE:
-                logger.warning("TapNet backend requested but module unavailable.")
-            else:
-                try:
-                    self.tapnet_tracker = TapNetTracker(
-                        checkpoint_path=self.config.tapnet_checkpoint_path or "",
-                        max_points=self.config.tapnet_max_points,
-                        resolution=self.config.tapnet_resolution,
-                        device=self.config.embedding.device,
-                        online_mode=self.config.tapnet_online_mode,
-                        min_track_length=self.config.tapnet_min_track_length,
-                    )
-                    logger.info("  ✓ TapNetTracker initialized (point trajectories)")
-                except Exception as e:
-                    logger.warning(f"  ✗ TapNetTracker failed to initialize: {e}")
 
     @profile("engine_process_video")
     def process_video(self, video_path: str, save_visualizations: bool = False, output_dir: str = "results") -> PerceptionResult:
@@ -302,16 +280,6 @@ class PerceptionEngine:
         t0 = time.time()
         detections = self.embedder.embed_detections(detections)
         metrics_timings["embedding_seconds"] = time.time() - t0
-
-        # Optional TapNet point tracking (prototype: metrics only)
-        if self.config.tracker_backend == "tapnet" and TAPNET_AVAILABLE and self.tapnet_tracker is not None:
-            t0 = time.time()
-            try:
-                self._run_tapnet_tracking(detections)
-            except Exception as e:
-                logger.warning(f"TapNet tracking failed: {e}")
-            finally:
-                metrics_timings["tapnet_tracking_seconds"] = time.time() - t0
 
         # Optional: run enhanced 3D+appearance tracker for per-frame identities
         if self.config.enable_tracking and self.enhanced_tracker is not None:
@@ -389,8 +357,6 @@ class PerceptionEngine:
                 if self.config.detection.backend == "yolo"
                 else self.config.detection.groundingdino_model_id
             ),
-            "tracker_backend": self.config.tracker_backend,
-            "tapnet_tracks": len(self.tapnet_tracker.get_active_tracks()) if self.tapnet_tracker else 0,
             "cluster_embeddings": int(sum(1 for d in detections if 'cluster_rep_id' in d and d.get('cluster_size'))),
             "avg_cluster_size": float(np.mean([d.get('cluster_size',1) for d in detections if d.get('cluster_size')])) if any(d.get('cluster_size') for d in detections) else 1.0,
         })
@@ -425,28 +391,6 @@ class PerceptionEngine:
             
         return result
 
-    def _run_tapnet_tracking(self, detections: List[Dict]):
-        """
-        Run TapNet point tracking on the video frames.
-        - Seed tracks from first frame centroids
-        - Advance identity motion per frame (no model inference yet)
-        - Metrics only (does not modify entity clustering path yet)
-        """
-        if self.tapnet_tracker is None:
-            return
-        # Group detections by frame
-        by_frame: dict[int, List[dict]] = {}
-        for det in detections:
-            by_frame.setdefault(int(det.get("frame_number", 0)), []).append(det)
-        if not by_frame:
-            return
-        # Initialize with first frame detections
-        first_frame = min(by_frame.keys())
-        self.tapnet_tracker.initialize(by_frame[first_frame], frame=np.zeros((self.tapnet_tracker.resolution, self.tapnet_tracker.resolution, 3), dtype=np.uint8))
-        # Advance for remaining frames
-        for fidx in sorted(k for k in by_frame.keys() if k != first_frame):
-            self.tapnet_tracker.update(fidx, frame=np.zeros((self.tapnet_tracker.resolution, self.tapnet_tracker.resolution, 3), dtype=np.uint8))
-    
     def _export_visualization_data(self, result: PerceptionResult, output_dir: str):
         """Export SLAM trajectory, camera intrinsics, and tracking data for visualization."""
         from pathlib import Path

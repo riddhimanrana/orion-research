@@ -16,7 +16,7 @@ from typing import Literal, Optional
 
 import logging
 
-from .intrinsics_presets import DEFAULT_INTRINSICS_PRESET, INTRINSICS_PRESETS
+from .types import DEFAULT_INTRINSICS_PRESET, INTRINSICS_PRESETS
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +69,14 @@ class DetectionConfig:
 
     def __post_init__(self):
         """Validate detection config."""
-        if self.backend not in {"yolo", "groundingdino"}:
-            raise ValueError(f"backend must be 'yolo' or 'groundingdino', got {self.backend}")
+        # Note: yoloworld is defined in type hint but not yet implemented
+        # For now, only yolo and groundingdino are supported
+        if self.backend not in {"yolo", "groundingdino", "yoloworld"}:
+            raise ValueError(f"backend must be 'yolo', 'groundingdino', or 'yoloworld', got {self.backend}")
+        
+        if self.backend == "yoloworld":
+            logger.warning("YOLOWorld backend selected but not yet implemented, falling back to groundingdino")
+            self.backend = "groundingdino"
 
         # Model validation
         valid_models = {"yolo11n", "yolo11s", "yolo11m", "yolo11x"}
@@ -437,17 +443,6 @@ class PerceptionConfig:
     enable_tracking: bool = False
     """Enable temporal entity tracking with Bayesian beliefs"""
 
-    # Tracker backend selection (prototype: 'simple' existing logic or 'tapnet')
-    tracker_backend: Literal["simple", "tapnet"] = "simple"
-    """Select tracking backend: 'simple' (current centroid/HDBSCAN) or 'tapnet' (point trajectory model)"""
-
-    # TapNet configuration (only used when tracker_backend='tapnet')
-    tapnet_checkpoint_path: Optional[str] = None
-    """Path to TapNet checkpoint (e.g. 'models/tapnet/tapir_checkpoint_panning.npy')"""
-    
-    tapnet_resolution: int = 256
-    """Resolution for TapNet tracking (256 or 512)"""
-
     # Clustering / HDBSCAN tuning
     clustering_min_cluster_size: int = 4
     """Minimum cluster size for HDBSCAN entity grouping (>=2)."""
@@ -491,20 +486,6 @@ class PerceptionConfig:
             f"scene_detection={self.use_scene_detection}, "
             f"3d_enabled={self.enable_3d}"
         )
-
-        # TapNet validation
-        if self.tracker_backend == "tapnet":
-            if not self.tapnet_checkpoint_path:
-                logger.warning(
-                    "tracker_backend='tapnet' but tapnet_checkpoint_path not set. "
-                    "Tracking will fall back to 'simple'. Set tapnet_checkpoint_path to enable TapNet."
-                )
-                self.tracker_backend = "simple"
-            if self.tapnet_resolution not in (256, 512):
-                logger.warning(
-                    f"tapnet_resolution={self.tapnet_resolution} unsupported; forcing 256"
-                )
-                self.tapnet_resolution = 256
 
         # Clustering parameter validation
         if self.clustering_min_cluster_size < 2:
@@ -561,6 +542,7 @@ def get_fast_config() -> PerceptionConfig:
     """
     return PerceptionConfig(
         detection=DetectionConfig(
+            backend="yolo",
             model="yolo11n",
             confidence_threshold=0.4,
         ),
@@ -573,6 +555,9 @@ def get_fast_config() -> PerceptionConfig:
             temperature=0.5,
         ),
         target_fps=2.0,
+        enable_3d=False,
+        enable_depth=False,
+        enable_occlusion=False,
     )
 
 
@@ -580,13 +565,14 @@ def get_balanced_config() -> PerceptionConfig:
     """
     Balanced mode: good accuracy with reasonable speed
     
-    Recommended for production use
+    Uses YOLO11m for reliable detection on Apple Silicon.
+    Recommended for production use.
     """
     return PerceptionConfig(
         detection=DetectionConfig(
-            backend="yoloworld",
-            model="yolo11m",
-            confidence_threshold=0.25,
+            backend="yolo",  # Use YOLO for MPS compatibility
+            model="yolo11m",  # Medium model for balanced quality/speed
+            confidence_threshold=0.35,
         ),
         embedding=EmbeddingConfig(
             embedding_dim=512,
@@ -597,6 +583,7 @@ def get_balanced_config() -> PerceptionConfig:
             temperature=0.3,
         ),
         target_fps=4.0,
+        enable_tracking=True,
     )
 
 
@@ -604,22 +591,21 @@ def get_accurate_config() -> PerceptionConfig:
     """
     Accurate mode: maximum quality (slowest)
     
-    For research and evaluation
-    Enables: DINO embeddings, SLAM, 3D perception, tracking
+    Uses YOLO11x for best detection quality.
+    Note: GroundingDINO has MPS compatibility issues on macOS and is very slow on CPU.
+    For open-vocabulary detection, use --groundingdino flag explicitly.
     """
     return PerceptionConfig(
         detection=DetectionConfig(
-            backend="groundingdino",
-            model="yolo11x",
-            confidence_threshold=0.1,  # Lowered for more recall
-            groundingdino_box_threshold=0.1,  # Lowered for more recall
-            groundingdino_text_threshold=0.1,  # Lowered for more recall
+            backend="yolo",  # Use YOLO11x for best quality (GroundingDINO has MPS issues)
+            model="yolo11x",  # Largest YOLO model
+            confidence_threshold=0.2,  # Lower threshold for more recall
         ),
         embedding=EmbeddingConfig(
             embedding_dim=768,
             backend="dino",
             batch_size=16,
-            device="auto",  # Use GPU if available
+            device="auto",
         ),
         description=DescriptionConfig(
             max_tokens=300,

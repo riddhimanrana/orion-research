@@ -33,9 +33,10 @@ def handle_qa(args: argparse.Namespace, settings: OrionSettings) -> None:
     console.print(f"[dim]Using runtime backend: {backend}[/dim]\n")
 
     qa = VideoQASystem(
-        neo4j_uri=args.neo4j_uri or settings.neo4j_uri,
-        neo4j_user=args.neo4j_user or settings.neo4j_user,
-        neo4j_password=args.neo4j_password or settings.get_neo4j_password(),
+        memgraph_host=args.memgraph_host or settings.memgraph_host,
+        memgraph_port=args.memgraph_port or settings.memgraph_port,
+        memgraph_user=args.memgraph_user or settings.memgraph_user,
+        memgraph_password=args.memgraph_password or settings.get_memgraph_password(),
         llm_model=getattr(args, "model", None) or settings.qa_model,
     )
     qa.start_interactive_session()
