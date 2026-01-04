@@ -130,7 +130,8 @@ class Perception3DEngine:
         self.depth_estimator = None
         if enable_depth:
             try:
-                self.depth_estimator = DepthEstimator(model_name="depth_anything_v3", model_size="small")
+                # Use "depth_anything_3" as per depth.py implementation
+                self.depth_estimator = DepthEstimator(model_name="depth_anything_3", model_size="small")
                 logger.info("Perception3DEngine: DepthEstimator initialized")
             except Exception as e:
                 logger.error(f"Failed to initialize DepthEstimator: {e}")

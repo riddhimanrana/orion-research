@@ -99,6 +99,23 @@ def run_orion_fast(video_path: str, output_dir: Path):
     
     return result
 
+def load_orion_results(results_dir: Path):
+    """Load existing Orion results."""
+    tracks_path = results_dir / "tracks.jsonl"
+    if not tracks_path.exists():
+        print(f"WARNING: No tracks found at {tracks_path}")
+        return None
+        
+    import json
+    from collections import Counter
+    
+    tracks = []
+    with open(tracks_path) as f:
+        for line in f:
+            tracks.append(json.loads(line))
+            
+    return tracks
+
 
 def ask_gemini_about_frame(genai, frame_path: Path, question: str) -> str:
     """Ask Gemini a question about a frame."""
@@ -114,35 +131,54 @@ def ask_gemini_about_frame(genai, frame_path: Path, question: str) -> str:
 def compare_with_gemini(genai, orion_result, sample_frames, output_dir: Path):
     """Compare Orion results with Gemini Vision analysis."""
     import PIL.Image
+    from collections import Counter
     
     print("\n=== Comparing with Gemini Vision ===")
     
     model = genai.GenerativeModel("gemini-2.0-flash")
     comparisons = []
     
-    # Build entity summary for context
-    entity_summary = {}
-    for entity in orion_result.entities:
-        cls = entity.object_class.value if hasattr(entity.object_class, 'value') else str(entity.object_class)
-        entity_summary[cls] = entity_summary.get(cls, 0) + 1
-    
-    orion_summary = f"Orion detected: {dict(entity_summary)}"
+    # Build global summary for context
+    all_classes = []
+    if isinstance(orion_result, list):
+        # Loaded from file (list of track dicts)
+        all_classes = [t.get('class_name', 'unknown') for t in orion_result]
+    elif hasattr(orion_result, 'entities'):
+        # Live result (PerceptionResult)
+        all_classes = [
+            e.object_class.value if hasattr(e.object_class, 'value') else str(e.object_class)
+            for e in orion_result.entities
+        ]
+        
+    global_summary = f"Orion detected (total): {dict(Counter(all_classes))}"
     
     for frame_idx, frame_path in sample_frames:
         print(f"\n  Analyzing frame {frame_idx}...")
         image = PIL.Image.open(frame_path)
         
+        # Get frame-specific detections
+        frame_detections = []
+        if isinstance(orion_result, list):
+            # Filter tracks for this frame (+/- 2 frames window)
+            frame_detections = [
+                t.get('class_name', 'unknown') 
+                for t in orion_result 
+                if abs(t.get('frame_id', -1) - frame_idx) <= 2
+            ]
+        
+        frame_summary = f"Orion detected in this frame: {dict(Counter(frame_detections))}"
+        
         # Ask Gemini what it sees
         prompt = f"""Analyze this video frame and list all visible objects.
         
-For context, a perception system detected these objects across the video: {orion_summary}
+For context, a perception system detected these objects in this specific frame: {frame_summary}
 
 Please respond with JSON in this exact format:
 {{
     "objects_visible": ["list", "of", "visible", "objects"],
     "object_counts": {{"object_type": count}},
     "scene_description": "brief description",
-    "comparison_with_orion": "comment on whether the Orion detections seem accurate"
+    "comparison_with_orion": "comment on whether the Orion detections seem accurate for this frame"
 }}
 """
         
@@ -157,7 +193,7 @@ Please respond with JSON in this exact format:
             
             result = json.loads(text)
             result["frame_idx"] = frame_idx
-            result["orion_context"] = orion_summary
+            result["orion_context"] = frame_summary
             comparisons.append(result)
             
             print(f"    Gemini found: {result.get('objects_visible', [])}")
@@ -176,8 +212,8 @@ Please respond with JSON in this exact format:
     comparison_file = output_dir / "gemini_comparison.json"
     with open(comparison_file, "w") as f:
         json.dump({
-            "orion_summary": orion_summary,
-            "entity_counts": entity_summary,
+            "orion_summary": global_summary,
+            "entity_counts": dict(Counter(all_classes)),
             "frame_comparisons": comparisons,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
         }, f, indent=2)
@@ -241,6 +277,8 @@ def main():
     orion_result = None
     if not args.skip_orion:
         orion_result = run_orion_fast(str(video_path), output_dir)
+    else:
+        orion_result = load_orion_results(output_dir)
     
     # Compare with Gemini
     if orion_result:

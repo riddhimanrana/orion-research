@@ -164,6 +164,7 @@ class PerceptionEngine:
     def _initialize_components(self):
         """Initializes all perception components based on the config."""
         settings = OrionSettings.load()
+        
         # GroundingDINO detector
         if self.config.detection.backend == "groundingdino":
             logger.info("Initializing GroundingDINO detector...")
@@ -179,13 +180,29 @@ class PerceptionEngine:
         else:
             self.grounding_dino = None
 
+        # YOLO-World detector
+        yoloworld_model = None
+        if self.config.detection.backend == "yoloworld":
+            logger.info("Initializing YOLO-World detector...")
+            # Set model name and classes before loading
+            self.model_manager.yoloworld_model_name = self.config.detection.yoloworld_model
+            self.model_manager.yoloworld_classes = (
+                self.config.detection.yoloworld_categories()
+                if getattr(self.config.detection, "yoloworld_use_custom_classes", True)
+                else None
+            )
+            yoloworld_model = self.model_manager.yoloworld
+
         # Frame observer
         self.observer = FrameObserver(
             config=self.config.detection,
             detector_backend=self.config.detection.backend,
             yolo_model=self.model_manager.yolo if self.config.detection.backend == "yolo" else None,
             grounding_dino=self.grounding_dino,
-            target_fps=self.config.target_fps
+            yoloworld_model=yoloworld_model,
+            target_fps=self.config.target_fps,
+            enable_3d=self.config.enable_3d,
+            enable_occlusion=self.config.enable_occlusion,
         )
         # Visual embedder
         self.embedder = VisualEmbedder(self.model_manager.clip, self.config.embedding)

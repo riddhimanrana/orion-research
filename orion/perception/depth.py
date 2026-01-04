@@ -98,7 +98,16 @@ class DepthEstimator:
         try:
             from depth_anything_3.api import DepthAnything3
         except ImportError:
-            raise ImportError("DepthAnything3 not installed. Please install it to use V3.")
+            # Try adding local path
+            da3_path = WORKSPACE_ROOT / "Depth-Anything-3" / "src"
+            if da3_path.exists() and str(da3_path) not in sys.path:
+                sys.path.insert(0, str(da3_path))
+                print(f"[DepthEstimator] Added {da3_path} to sys.path")
+            
+            try:
+                from depth_anything_3.api import DepthAnything3
+            except ImportError as e:
+                raise ImportError(f"DepthAnything3 not installed. Please install it to use V3. Error: {e}")
 
         # Map generic sizes to DA3 preset names
         # DA3 presets: da3-small, da3-base, da3-large, da3-giant
@@ -118,6 +127,7 @@ class DepthEstimator:
             return model
         except Exception as e:
             print(f"[DepthEstimator] Failed to load Depth Anything 3: {e}")
+            raise
             raise
 
     def _load_depth_anything_v2(self) -> torch.nn.Module:

@@ -45,6 +45,38 @@ def _ensure_int_bbox(b: List[float], w: int, h: int) -> Tuple[int, int, int, int
     return x1, y1, x2, y2
 
 
+def _maybe_unrotate_bbox_for_portrait(b: List[float], frame_w: int, frame_h: int) -> List[float]:
+    """Undo FrameObserver's 90° CCW rotation for portrait videos.
+
+    FrameObserver rotates portrait frames 90° CCW for detection. That means stored
+    bboxes may be in the rotated (landscape) coordinate system, but Phase-2 Re-ID
+    crops from the *original* frames. This helper detects that mismatch and maps
+    bbox coordinates back into the original portrait frame.
+    """
+    if not b or len(b) != 4:
+        return b
+
+    x1, y1, x2, y2 = map(float, b)
+    is_portrait = frame_h > frame_w
+    looks_rotated = is_portrait and (max(x1, x2) > frame_w + 2 or max(y1, y2) > frame_h + 2)
+    if not looks_rotated:
+        return [x1, y1, x2, y2]
+
+    # Inverse mapping of 90° CCW rotation:
+    # original -> rotated: x' = y, y' = (W-1) - x
+    # rotated  -> original: x = (W-1) - y', y = x'
+    orig_w = frame_w
+    corners = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
+    unrot = []
+    for xr, yr in corners:
+        xo = (orig_w - 1) - yr
+        yo = xr
+        unrot.append((xo, yo))
+    xs = [p[0] for p in unrot]
+    ys = [p[1] for p in unrot]
+    return [min(xs), min(ys), max(xs), max(ys)]
+
+
 def _read_frames_for_ids(video_path: Path, frame_ids: List[int]) -> Dict[int, np.ndarray]:
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -108,7 +140,11 @@ def compute_track_embeddings(
             # Limit samples per track
             if len(per_track_embs.get(tid, [])) >= max_crops_per_track:
                 continue
-            x1, y1, x2, y2 = _ensure_int_bbox(det.get("bbox_2d") or det.get("bbox"), W, H)
+            raw_bbox = det.get("bbox_2d") or det.get("bbox")
+            if not raw_bbox or len(raw_bbox) != 4:
+                continue
+            raw_bbox = _maybe_unrotate_bbox_for_portrait(list(raw_bbox), frame_w=W, frame_h=H)
+            x1, y1, x2, y2 = _ensure_int_bbox(raw_bbox, W, H)
             crop = frame[y1:y2, x1:x2]
             if crop.size == 0:
                 continue
