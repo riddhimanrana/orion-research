@@ -7,20 +7,23 @@
 ### Architecture Layers (understand dependencies)
 
 1. **Perception Engine** (`orion/perception/engine.py`): Frame-level detection, embedding, tracking
-   - Detectors: YOLO11, GroundingDINO, Grounded SAM2
-   - Embedders: CLIP, DINO, DINOv3 (for Re-ID)
-   - Trackers: EnhancedTracker with adaptive Re-ID thresholds
+   - Detectors: YOLO11, GroundingDINO, YOLO-World (configurable via `DetectionConfig.backend`)
+   - Embedders: CLIP, DINO, DINOv3 (for Re-ID) in `orion/backends/`
+   - Trackers: EnhancedTracker with adaptive Re-ID thresholds (`orion/perception/trackers/enhanced.py`)
    - Depth: DepthAnythingV3 for spatial mapping
+   - VLM: MLX-VLM (local FastVLM) for visual descriptions on Apple Silicon
 
 2. **Scene Graph** (`orion/graph/`): Temporal object relationships
    - Per-frame: `SGNode` (objects) + `SGEdge` (relations: on, near, held_by)
    - Temporal: `VideoSceneGraph` aggregates frame graphs
    - Data flow: perception observations → scene graph → Memgraph export
+   - Builder: `build_research_scene_graph()` in `orion/graph/scene_graph.py`
 
-3. **Memory/Query** (Phase 3-4 roadmap):
-   - Re-ID Index: DINOv3 embeddings + cosine similarity
-   - Vector Search: semantic object queries
-   - Memgraph: persistent graph backend (`orion/graph/memgraph_backend.py`)
+3. **Memory/Query** (Phase 3-4):
+   - Re-ID Index: DINOv3 embeddings + cosine similarity matching
+   - Vector Search: semantic object queries (planned)
+   - Memgraph: persistent graph backend (`orion/graph/backends/memgraph.py`)
+   - Spatial Memory: Zone-based object tracking (`orion/graph/spatial_memory.py`)
 
 ## Critical Data Structures
 
@@ -33,9 +36,14 @@ Frame → Observation (detections)
 
 **Key Types:**
 - `PerceptionConfig`: Detection, embedding, depth, tracking settings (presets: fast/balanced/accurate)
-- `DetectionConfig`: Backend (yolo/groundingdino/grounded_sam2), thresholds, model size
+- `DetectionConfig`: Backend (yolo/groundingdino/yoloworld), thresholds, model size
 - `EmbeddingConfig`: Backend (clip/dino/dinov3), dimension, model name
 - `SceneGraph`: nodes (SGNode: id, label, bbox, attributes) + edges (SGEdge: subject→predicate→object)
+
+**Backend Architecture:**
+- Detection backends in `orion/perception/detectors/`: YOLO, GroundingDINO, YOLO-World
+- Embedding backends in `orion/backends/`: CLIP, DINO, DINOv3 (separate from detectors)
+- Each backend implements factory pattern with `validate()` called in config `__post_init__`
 
 See [orion/perception/types.py](orion/perception/types.py) and [orion/graph/types.py](orion/graph/types.py).
 
@@ -44,13 +52,18 @@ See [orion/perception/types.py](orion/perception/types.py) and [orion/graph/type
 **Input:** `data/examples/episodes/<episode_id>/meta.json` + `video.mp4`
 **Output:** `results/<episode_id>/tracks.jsonl` + `scene_graph.jsonl` + `memory.json` (Phase 3+)
 
+**Critical: JSONL Streaming Pattern**
+- Results are **JSONL** (JSON Lines): one object per line, NOT a JSON array
+- Load with: `for line in f: obj = json.loads(line)`
+- Write with: `f.write(json.dumps(obj) + "\n")`
+- Files: `tracks.jsonl`, `scene_graph.jsonl`, `events.jsonl`
+- Never use `json.load()` on JSONL files (will fail on multi-line files)
+
 Example:
 ```bash
 python -c "from orion.config import list_episodes; print(list_episodes())"
 python -m orion.cli.run_showcase --episode test_demo --video data/examples/test.mp4
 ```
-
-Results are JSONL (1 object per line) for streaming. Load with `json.loads(line)` in loops.
 
 ## Developer Workflows
 
@@ -62,25 +75,40 @@ python -m orion.cli.run_showcase --episode test_demo --video data/examples/test.
 # Reuse tracks, rebuild only scene graph & overlay
 python -m orion.cli.run_showcase --episode test_demo --skip-phase1
 
-# Export to Memgraph (requires docker run -p 7687:7687 memgraph/memgraph)
+# Export to Memgraph (requires docker-compose up -d memgraph)
 python -m orion.cli.run_showcase --episode test_demo --memgraph --memgraph-host 127.0.0.1
 
 # Quality sweep (perception → graph → optional Gemini validation)
 python -m orion.cli.run_quality_sweep --episode test_demo
 
 # Standalone overlay regeneration
-python scripts/render_video_overlay.py --video data/examples/test.mp4 --results results/test_demo
+python -m orion.perception.viz_overlay_v2 --video data/examples/test.mp4 --results results/test_demo
 ```
 
 ### Testing & Validation
-- `scripts/run_dataset.py`: Batch process videos (json or ActionGenome format)
-- `scripts/eval_perception_run.py`: Per-detection metrics (conf, bbox accuracy)
-- `scripts/eval_reid.py`: Re-ID consistency across tracks
-- `scripts/analyze_scene_graph.py`: Graph structure analysis (nodes, edges, attributes)
+- `scripts/validate_setup.py`: Environment validation (PyTorch, MPS, model weights)
+- `scripts/test_gemini_comparison.py`: VLM-based relation validation
+- Re-ID metrics: Embedded in `PerceptionResult.metrics['reid']` (access via `scripts/print_reid_metrics.py`)
+- Scene graph analysis: `scripts/analyze_scene_graph.py` (node/edge distributions)
+
+### Memgraph Integration
+```bash
+# Start Memgraph with docker-compose
+docker-compose up -d
+
+# Verify Memgraph running (ports 7687 Bolt, 7444/3000 Lab UI)
+docker ps | grep memgraph
+
+# Run showcase with Memgraph ingest
+python -m orion.cli.run_showcase --episode test_demo --video data/examples/test.mp4 --memgraph
+
+# Query via mgconsole (in container)
+docker exec -it orion-memgraph mgconsole
+```
 
 ### Configuration Patterns
-- **Presets**: PerceptionConfig(mode="fast"|"balanced"|"accurate") sets all thresholds automatically
-- **Override**: Create PerceptionConfig(mode="balanced"), then `.detection.model = "yolo11x"`
+- **Presets**: `PerceptionConfig(mode="fast"|"balanced"|"accurate")` sets all thresholds automatically
+- **Override**: Create `PerceptionConfig(mode="balanced")`, then `.detection.model = "yolo11x"`
 - **Validation**: All `@dataclass` configs have `__post_init__` validation with clear error messages
 - **Device**: Auto-detects MPS (Apple Silicon), CUDA, else CPU. Override with `detection.device = "mps"`
 
@@ -88,7 +116,7 @@ python scripts/render_video_overlay.py --video data/examples/test.mp4 --results 
 
 ### Detection & Embedding Backend Abstraction
 ```python
-# DetectionConfig.backend ∈ {yolo, groundingdino, grounded_sam2}
+# DetectionConfig.backend ∈ {yolo, groundingdino, yoloworld}
 # EmbeddingConfig.backend ∈ {clip, dino, dinov3}
 # Instantiation happens in PerceptionEngine.__init__() via factory pattern
 # Each backend has validate() method called in config __post_init__
@@ -138,7 +166,9 @@ python scripts/render_video_overlay.py --video data/examples/test.mp4 --results 
 3. **JSON JSONL confusion**: Results are JSONL (one JSON object per line), not single array.
 4. **Threshold tuning**: Don't hardcode values in code. Always use `PerceptionConfig` + `reid_thresholds.py`.
 5. **Scene graph edges missing**: Ensure `build_research_scene_graph()` is called with valid tracks + depth. Check spatial zone config.
-6. **Memgraph ingest fails**: Verify `orion/graph/memgraph_backend.py` matches schema (Entity, Frame, NEAR edge, etc.).
+6. **Memgraph ingest fails**: Verify `orion/graph/backends/memgraph.py` matches schema (Entity, Frame, NEAR edge, etc.).
+7. **MPS out of memory**: Apple Silicon GPUs have limited memory. Use smaller models (`yolo11n`, `clip-vit-base-patch32`) or reduce batch sizes.
+8. **Import errors**: Memgraph imports are optional. Wrap in try/except and check `MemgraphBackend is not None` before use.
 
 ## Getting Started on New Features
 
