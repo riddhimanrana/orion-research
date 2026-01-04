@@ -50,6 +50,24 @@ class Track:
         if self.state is not None and len(self.state) >= 6:
             return self.state[3:5]  # [vx, vy] in pixels/frame
         return None
+    
+    def to_dict(self) -> Dict:
+        """Convert track to JSON-serializable dictionary."""
+        return {
+            'id': int(self.id),
+            'track_id': int(self.id),  # Alias for compatibility
+            'class_name': str(self.class_name),
+            'category': str(self.class_name),  # Alias for compatibility
+            'bbox_3d': self.bbox_3d.tolist() if isinstance(self.bbox_3d, np.ndarray) else self.bbox_3d,
+            'bbox_2d': self.bbox_2d.tolist() if isinstance(self.bbox_2d, np.ndarray) else self.bbox_2d,
+            'bbox': self.bbox_2d.tolist() if isinstance(self.bbox_2d, np.ndarray) else self.bbox_2d,  # Alias
+            'confidence': float(self.confidence),
+            'depth_mm': float(self.depth_mm) if self.depth_mm is not None else None,
+            'zone_id': self.zone_id,
+            'age': int(self.age),
+            'hits': int(self.hits),
+            'time_since_update': int(self.time_since_update),
+        }
 
 
 class KalmanFilter3D:

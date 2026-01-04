@@ -195,7 +195,7 @@ def save_results_jsonl(episode_id: str, filename: str, data: list) -> Path:
     Args:
         episode_id: Episode identifier
         filename: Output filename (should end in .jsonl)
-        data: List of objects to save
+        data: List of objects to save (can be dicts or objects with to_dict())
         
     Returns:
         Path to saved file
@@ -205,6 +205,9 @@ def save_results_jsonl(episode_id: str, filename: str, data: list) -> Path:
     
     with open(output_path, 'w') as f:
         for item in data:
+            # Handle objects with to_dict() method (e.g., Track dataclass)
+            if hasattr(item, 'to_dict'):
+                item = item.to_dict()
             f.write(json.dumps(item) + '\n')
     
     return output_path
