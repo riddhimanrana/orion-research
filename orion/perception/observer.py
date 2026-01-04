@@ -55,7 +55,9 @@ class FrameObserver:
         show_progress: bool = True,
         enable_3d: bool = False,
         depth_model: str = "midas",
+        depth_model_size: str = "small",
         enable_occlusion: bool = False,
+        enable_slam: bool = True,
     ):
         """
         Initialize observer.
@@ -113,7 +115,8 @@ class FrameObserver:
                     enable_depth=True,
                     enable_hands=False,  # Hand tracking disabled (future work with HOT3D)
                     enable_occlusion=enable_occlusion,
-                    enable_slam=True, # Enable SLAM by default if 3D is enabled
+                    enable_slam=enable_slam,
+                    depth_model_size=depth_model_size,
                 )
                 logger.info("  ✓ Perception3DEngine initialized")
             except Exception as e:

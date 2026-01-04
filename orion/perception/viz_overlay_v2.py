@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import colorsys
+import hashlib
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -201,6 +202,16 @@ class SimpleOverlayRenderer:
         if self.config.show_memory_id and track_id in self.track_to_memory:
             mem_id = self.track_to_memory[track_id]
             label_parts.append(f"M{mem_id[-4:]}")
+
+        # DepthAnythingV3 depth stats (if present in tracks)
+        depth_mm = det.get("depth_mm")
+        if depth_mm is not None:
+            try:
+                depth_m = float(depth_mm) / 1000.0
+                if np.isfinite(depth_m) and depth_m > 0:
+                    label_parts.append(f"Z{depth_m:.2f}m")
+            except Exception:
+                pass
         
         label = " | ".join(label_parts)
         
@@ -343,6 +354,9 @@ class SimpleOverlayRenderer:
             sampled_count = len(sampled_frame_ids)
             frame_idx = 0
 
+            debug_max_abs_delta_ms = 0.0
+            debug_delta_ms_values: List[float] = []
+
             # Sequential decode to avoid codec seek drift from cap.set().
             while True:
                 ret, frame = cap.read()
@@ -359,6 +373,13 @@ class SimpleOverlayRenderer:
                     computed_ts = frame_idx / source_fps
                     timestamp = track_ts if track_ts is not None else computed_ts
 
+                    # Cheap frame fingerprint to validate decode determinism (iterative debug)
+                    try:
+                        small = cv2.resize(frame, (64, 64), interpolation=cv2.INTER_AREA)
+                        frame_md5 = hashlib.md5(small.tobytes()).hexdigest()
+                    except Exception:
+                        frame_md5 = None
+
                     # Draw all detections
                     for det in detections:
                         self._draw_detection(frame, det, frame_h, frame_w)
@@ -372,18 +393,24 @@ class SimpleOverlayRenderer:
 
                     if debug_f is not None:
                         pos_msec = cap.get(cv2.CAP_PROP_POS_MSEC)
+                        pos_frames = cap.get(cv2.CAP_PROP_POS_FRAMES)
                         delta_ms = (track_ts - computed_ts) * 1000.0 if track_ts is not None else None
+                        if delta_ms is not None and np.isfinite(delta_ms):
+                            debug_delta_ms_values.append(float(delta_ms))
+                            debug_max_abs_delta_ms = max(debug_max_abs_delta_ms, abs(float(delta_ms)))
                         debug_f.write(
                             json.dumps(
                                 {
                                     "requested_frame_id": int(frame_idx),
                                     "decoded_frame_idx": int(frame_idx),
+                                    "decoded_pos_frames_next": float(pos_frames) if pos_frames is not None else None,
                                     "decoded_pos_msec": float(pos_msec) if pos_msec is not None else None,
                                     "source_fps": float(source_fps),
                                     "computed_timestamp_sec": float(computed_ts),
                                     "track_timestamp_sec": float(track_ts) if track_ts is not None else None,
                                     "delta_ms": float(delta_ms) if delta_ms is not None else None,
                                     "num_detections": int(len(detections)),
+                                    "frame_md5_64x64": frame_md5,
                                 }
                             )
                             + "\n"
@@ -407,6 +434,15 @@ class SimpleOverlayRenderer:
         duration = frames_written / output_fps
         logger.info(f"✓ Wrote {frames_written} frames to {output_path}")
         logger.info(f"  Output: {frame_w}x{frame_h} @ {output_fps} FPS, {duration:.1f}s duration")
+
+        if self.config.debug_jsonl_filename and debug_delta_ms_values:
+            arr = np.array(debug_delta_ms_values, dtype=np.float32)
+            logger.info(
+                "Overlay debug timing: max_abs_delta_ms=%.1f, p50=%.1f, p95=%.1f",
+                float(debug_max_abs_delta_ms),
+                float(np.percentile(arr, 50)),
+                float(np.percentile(arr, 95)),
+            )
         
         return output_path
 

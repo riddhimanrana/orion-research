@@ -119,19 +119,24 @@ class Perception3DEngine:
         enable_hands: bool = False,
         enable_occlusion: bool = False,
         enable_slam: bool = True,
+        depth_model_size: str = "small",
         camera_intrinsics: Optional[CameraIntrinsics] = None,
     ):
         self.enable_depth = enable_depth
         self.enable_hands = enable_hands
         self.enable_occlusion = enable_occlusion
         self.enable_slam = enable_slam
+        self.depth_model_size = depth_model_size
         self.camera_intrinsics = camera_intrinsics
         
         self.depth_estimator = None
         if enable_depth:
             try:
                 # Use "depth_anything_3" as per depth.py implementation
-                self.depth_estimator = DepthEstimator(model_name="depth_anything_3", model_size="small")
+                self.depth_estimator = DepthEstimator(
+                    model_name="depth_anything_3",
+                    model_size=self.depth_model_size,
+                )
                 logger.info("Perception3DEngine: DepthEstimator initialized")
             except Exception as e:
                 logger.error(f"Failed to initialize DepthEstimator: {e}")

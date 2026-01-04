@@ -69,6 +69,8 @@ def process_video_to_tracks(
     hand_detection_confidence: float = 0.5,
     hand_tracking_confidence: float = 0.3,
     enable_3d: bool = False,
+    depth_model_size: str = "small",
+    disable_slam: bool = False,
 ) -> dict:
     """
     Process video through detection + tracking pipeline.
@@ -170,6 +172,8 @@ def process_video_to_tracks(
         yoloworld_model=yoloworld,
         target_fps=target_fps,
         enable_3d=enable_3d,
+        depth_model_size=depth_model_size,
+        enable_slam=(not disable_slam),
         show_progress=True,
     )
     current_step += 1
@@ -408,6 +412,24 @@ def main():
         action="store_true",
         help="Save visualization outputs"
     )
+
+    parser.add_argument(
+        "--enable-3d",
+        action="store_true",
+        help="Enable DepthAnythingV3 depth stats (and optional SLAM) during detection",
+    )
+    parser.add_argument(
+        "--depth-model-size",
+        type=str,
+        default="small",
+        choices=["small", "base", "large", "giant"],
+        help="DepthAnythingV3 model size/preset (default: small)",
+    )
+    parser.add_argument(
+        "--disable-slam",
+        action="store_true",
+        help="If --enable-3d is set, disable SLAM (keeps depth only; faster)",
+    )
     
     args = parser.parse_args()
     
@@ -448,6 +470,9 @@ def main():
             max_age=args.max_age,
             device=args.device,
             save_viz=args.save_viz,
+            enable_3d=args.enable_3d,
+            depth_model_size=args.depth_model_size,
+            disable_slam=args.disable_slam,
         )
     except Exception as e:
         logger.error(f"Pipeline failed: {e}", exc_info=True)
