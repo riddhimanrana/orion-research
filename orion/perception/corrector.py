@@ -104,6 +104,7 @@ class ClassCorrector:
         confidence_threshold: float = 0.70,
         semantic_threshold: float = 0.40,
         use_clip_verification: bool = False,
+        sentence_model_name: str = "all-MiniLM-L6-v2",
     ):
         """
         Initialize class corrector.
@@ -116,6 +117,7 @@ class ClassCorrector:
         self.confidence_threshold = confidence_threshold
         self.semantic_threshold = semantic_threshold
         self.use_clip_verification = use_clip_verification
+        self.sentence_model_name = sentence_model_name
         
         self._sentence_model = None  # Lazy load
         self._class_embeddings_cache = None
@@ -130,8 +132,8 @@ class ClassCorrector:
         if self._sentence_model is None:
             try:
                 from sentence_transformers import SentenceTransformer
-                self._sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
-                logger.info("Loaded sentence transformer (all-MiniLM-L6-v2) for class correction")
+                self._sentence_model = SentenceTransformer(self.sentence_model_name)
+                logger.info("Loaded sentence transformer (%s) for class correction", self.sentence_model_name)
             except Exception as e:
                 logger.warning(f"Failed to load sentence transformer: {e}")
                 self._sentence_model = False

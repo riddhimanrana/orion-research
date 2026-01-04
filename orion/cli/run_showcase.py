@@ -73,6 +73,7 @@ def _phase1(args: argparse.Namespace, video_path: Path, results_dir: Path) -> Di
         hand_max_hands=args.hand_max,
         hand_detection_confidence=args.hand_det_conf,
         hand_tracking_confidence=args.hand_track_conf,
+        enable_3d=args.enable_3d,
     )
 
 
@@ -193,6 +194,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hand-max", type=int, default=2)
     parser.add_argument("--hand-det-conf", type=float, default=0.5)
     parser.add_argument("--hand-track-conf", type=float, default=0.3)
+    parser.add_argument("--enable-3d", action="store_true", help="Enable 3D perception (Depth/SLAM)")
     parser.add_argument("--reid-threshold", type=float, default=0.75)
     parser.add_argument("--max-crops-per-track", type=int, default=5)
 

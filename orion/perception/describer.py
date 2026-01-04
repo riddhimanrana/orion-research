@@ -80,7 +80,11 @@ class EntityDescriber:
         self.enable_spatial_analysis = enable_spatial_analysis
         
         # Initialize quality improvement modules
-        self.class_corrector = ClassCorrector() if enable_class_correction else None
+        self.class_corrector = (
+            ClassCorrector(sentence_model_name=self.config.sentence_model_name)
+            if enable_class_correction
+            else None
+        )
         
         logger.debug(
             f"EntityDescriber initialized: max_tokens={config.max_tokens}, "

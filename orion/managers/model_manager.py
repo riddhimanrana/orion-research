@@ -87,6 +87,7 @@ class ModelManager:
         
         # Model instances (lazy loaded)
         self._yolo: Optional[Any] = None
+        self._yoloworld: Optional[Any] = None
         self._clip: Optional[Any] = None
         self._fastvlm: Optional[Any] = None
         self._dino: Optional[Any] = None
@@ -94,6 +95,8 @@ class ModelManager:
         
         # Model configuration
         self.yolo_model_name = "yolo11m"  # Default to medium (balanced)
+        self.yoloworld_model_name = "yolov8m-worldv2.pt"  # YOLO-World model
+        self.yoloworld_classes: Optional[list] = None  # Classes to set for YOLO-World
         self.groundingdino_model_id = "IDEA-Research/grounding-dino-base"
         
         # LLM for contextual understanding
@@ -181,6 +184,47 @@ class ModelManager:
             
         except Exception as e:
             logger.error(f"Failed to load YOLO11: {e}")
+            raise
+
+    # ========================================================================
+    # YOLO-World Detector (Open Vocabulary)
+    # ========================================================================
+    
+    @property
+    def yoloworld(self) -> Any:
+        """
+        Get YOLO-World detector (lazy loaded).
+        
+        Returns:
+            YOLO-World model instance with custom classes set
+        """
+        if self._yoloworld is None:
+            self._yoloworld = self._load_yoloworld()
+        return self._yoloworld
+    
+    def _load_yoloworld(self) -> Any:
+        """Load YOLO-World model with open-vocabulary support"""
+        try:
+            from ultralytics import YOLO
+            
+            model_name = self.yoloworld_model_name
+            logger.info(f"Loading YOLO-World ({model_name})...")
+            
+            # YOLO-World models auto-download from Ultralytics
+            model = YOLO(model_name)
+            
+            # Set custom classes if provided
+            if self.yoloworld_classes:
+                logger.info(f"  Setting {len(self.yoloworld_classes)} custom classes for open-vocab detection")
+                model.set_classes(self.yoloworld_classes)
+                logger.info(f"  Classes: {self.yoloworld_classes[:5]}..." if len(self.yoloworld_classes) > 5 else f"  Classes: {self.yoloworld_classes}")
+            
+            logger.info(f"✓ YOLO-World loaded (open-vocabulary object detection)")
+            
+            return model
+            
+        except Exception as e:
+            logger.error(f"Failed to load YOLO-World: {e}")
             raise
     
     # ========================================================================

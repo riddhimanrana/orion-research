@@ -371,7 +371,12 @@ class InsightOverlayRenderer:
 
         # --- END DEBUG ---
 
-        use_timestamp_matching = getattr(self.options, 'use_timestamp_matching', False)
+        use_timestamp_matching = getattr(self.options, 'use_timestamp_matching', True)
+        
+        # Use interpolated tracks if available for smoother visualization
+        use_interpolation = len(self.interpolated_tracks) > 0
+        if use_interpolation:
+            logger.info("Using interpolated tracks for smooth visualization")
 
         frame_idx = 0
         try:
@@ -380,29 +385,61 @@ class InsightOverlayRenderer:
                 if not ret:
                     break
 
+                curr_time = frame_idx / fps
+                detections_to_render = []
 
-                if use_timestamp_matching:
-                    # Calculate current frame timestamp
-                    curr_time = frame_idx / fps
+                if use_interpolation:
+                    # Interpolate tracks at current timestamp
+                    for track_id, segments in self.interpolated_tracks.items():
+                        for seg_name, data in segments.items():
+                            timestamps = data["timestamps"]
+                            bboxes = data["bboxes"]
+                            
+                            # Check if current time is within segment range (with small buffer)
+                            if timestamps[0] <= curr_time <= timestamps[-1]:
+                                # Interpolate bbox
+                                # Find indices
+                                idx = np.searchsorted(timestamps, curr_time)
+                                if idx == 0:
+                                    bbox = bboxes[0]
+                                    meta = data["metadata"][0]
+                                elif idx >= len(timestamps):
+                                    bbox = bboxes[-1]
+                                    meta = data["metadata"][-1]
+                                else:
+                                    t0, t1 = timestamps[idx-1], timestamps[idx]
+                                    ratio = (curr_time - t0) / (t1 - t0) if t1 > t0 else 0
+                                    bbox = bboxes[idx-1] * (1 - ratio) + bboxes[idx] * ratio
+                                    meta = data["metadata"][idx] # Use nearest metadata
+                                
+                                # Create synthetic detection for rendering
+                                det = meta.copy()
+                                det["bbox_2d"] = bbox.tolist()
+                                det["timestamp"] = curr_time
+                                detections_to_render.append(det)
+                                break # Only one segment per track should match
+                
+                elif use_timestamp_matching:
+                    # Fallback to raw timestamp matching
                     detection_time = curr_time
                     if hasattr(self.options, 'timestamp_offset'):
                         detection_time += getattr(self.options, 'timestamp_offset', 0.0)
-                    detections_to_render = []
+                    
                     for track_id, detections in self.tracks_by_id.items():
                         for det in detections:
-                            # Allow small tolerance for float comparison
-                            if abs(det.get("timestamp", -9999) - detection_time) < (1.0 / fps) / 2:
+                            # Allow wider tolerance (1.5 frames) to prevent flashing
+                            if abs(det.get("timestamp", -9999) - detection_time) < (1.5 / fps):
                                 detections_to_render.append(det)
-                    print(f"[Overlay] Frame {frame_idx} (detection time {detection_time:.3f}): drawing {len(detections_to_render)} detections: {[d.get('class_name') for d in detections_to_render]}")
                 else:
-                    # Apply frame_offset: overlays appear earlier/later as requested
+                    # Fallback to frame ID matching
                     detection_frame_idx = frame_idx + (self.options.frame_offset or 0)
-                    detections_to_render = []
                     for track_id, detections in self.tracks_by_id.items():
                         for det in detections:
                             if det.get("frame_id") == detection_frame_idx:
                                 detections_to_render.append(det)
-                    print(f"[Overlay] Frame {frame_idx} (detection frame {detection_frame_idx}): drawing {len(detections_to_render)} detections: {[d.get('class_name') for d in detections_to_render]}")
+
+                if frame_idx % 30 == 0:
+                    print(f"[Overlay] Frame {frame_idx} ({curr_time:.2f}s): drawing {len(detections_to_render)} detections")
 
                 # Annotate frame and get active memories
                 active_memories = self._annotate_detections(

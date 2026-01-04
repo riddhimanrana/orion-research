@@ -67,16 +67,27 @@ class DetectionConfig:
     groundingdino_max_detections: int = 100
     """Upper bound on detections returned per frame when using GroundingDINO."""
 
+    # YOLO-World specific options
+    yoloworld_model: str = "yolov8m-worldv2.pt"
+    """YOLO-World model weights file (auto-downloads if not found)."""
+
+    yoloworld_prompt: str = (
+        "couch . chair . table . dining table . coffee table . tv . monitor . laptop . "
+        "book . bookshelf . picture frame . painting . clock . vase . potted plant . "
+        "lamp . chandelier . ceiling fan . rug . curtain . window . door . "
+        "refrigerator . microwave . oven . sink . cabinet . counter . bed . pillow . "
+        "blanket . dresser . mirror . fireplace . piano . staircase . banister . "
+        "vacuum cleaner . soccer ball . backpack . suitcase . bottle . cup . bowl"
+    )
+    """Dot-separated open-vocabulary prompt used by YOLO-World. Excludes 'person' for object-focused detection."""
+
+    yoloworld_use_custom_classes: bool = True
+    """If True, constrain YOLO-World via `set_classes(yoloworld_categories())`. If False, run YOLO-World with its default/open vocabulary."""
+
     def __post_init__(self):
         """Validate detection config."""
-        # Note: yoloworld is defined in type hint but not yet implemented
-        # For now, only yolo and groundingdino are supported
         if self.backend not in {"yolo", "groundingdino", "yoloworld"}:
             raise ValueError(f"backend must be 'yolo', 'groundingdino', or 'yoloworld', got {self.backend}")
-        
-        if self.backend == "yoloworld":
-            logger.warning("YOLOWorld backend selected but not yet implemented, falling back to groundingdino")
-            self.backend = "groundingdino"
 
         # Model validation
         valid_models = {"yolo11n", "yolo11s", "yolo11m", "yolo11x"}
@@ -114,6 +125,12 @@ class DetectionConfig:
             if self.groundingdino_max_detections < 1:
                 raise ValueError("groundingdino_max_detections must be >= 1")
 
+        if self.backend == "yoloworld":
+            if self.yoloworld_use_custom_classes and not self.yoloworld_prompt.strip():
+                raise ValueError(
+                    "yoloworld_prompt cannot be empty when yoloworld_use_custom_classes=True and backend='yoloworld'"
+                )
+
         logger.debug(
             f"DetectionConfig validated: backend={self.backend}, model={self.model}, "
             f"conf_thresh={self.confidence_threshold}, iou_thresh={self.iou_threshold}"
@@ -122,6 +139,10 @@ class DetectionConfig:
     def grounding_categories(self) -> list[str]:
         """Return normalized category list for GroundingDINO prompts."""
         return [token.strip() for token in self.groundingdino_prompt.split('.') if token.strip()]
+
+    def yoloworld_categories(self) -> list[str]:
+        """Return normalized category list for YOLO-World prompts."""
+        return [token.strip() for token in self.yoloworld_prompt.split('.') if token.strip()]
 
 
 @dataclass
@@ -224,6 +245,9 @@ class DescriptionConfig:
 
     prompt_template: str = "Describe this object in detail."
     """Prompt template for VLM description generation."""
+
+    sentence_model_name: str = "all-MiniLM-L6-v2"
+    """Sentence-transformer model for semantic class correction (e.g., 'sentence-transformers/all-mpnet-base-v2')."""
     
     # Optimization
     describe_once: bool = True
@@ -276,6 +300,9 @@ class DescriptionConfig:
 
         if self.min_crop_std < 0:
             raise ValueError(f"min_crop_std must be >= 0, got {self.min_crop_std}")
+
+        if not isinstance(self.sentence_model_name, str) or not self.sentence_model_name.strip():
+            raise ValueError("sentence_model_name must be a non-empty string")
         
         logger.debug(
             f"DescriptionConfig validated: max_tokens={self.max_tokens}, "

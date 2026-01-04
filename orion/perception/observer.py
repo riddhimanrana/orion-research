@@ -47,22 +47,26 @@ class FrameObserver:
     def __init__(
         self,
         config: DetectionConfig,
-        detector_backend: Literal["yolo", "groundingdino"] = "yolo",
+        detector_backend: Literal["yolo", "groundingdino", "yoloworld"] = "yolo",
         yolo_model: Optional[Any] = None,
         grounding_dino: Optional[Any] = None,
+        yoloworld_model: Optional[Any] = None,
         target_fps: float = 2.0,
         show_progress: bool = True,
         enable_3d: bool = False,
         depth_model: str = "midas",
+        depth_model_size: str = "small",
         enable_occlusion: bool = False,
+        enable_slam: bool = True,
     ):
         """
         Initialize observer.
         
         Args:
-            detector_backend: Detection backend identifier
+            detector_backend: Detection backend identifier ('yolo', 'groundingdino', 'yoloworld')
             yolo_model: YOLO model instance from ModelManager
             grounding_dino: GroundingDINO wrapper when backend='groundingdino'
+            yoloworld_model: YOLO-World model instance when backend='yoloworld'
             config: Detection configuration
             target_fps: Target frames per second for processing
             show_progress: Show progress bar
@@ -76,29 +80,29 @@ class FrameObserver:
         self.detector_backend = detector_backend
         self.yolo = yolo_model if detector_backend == "yolo" else None
         self.grounding_dino = grounding_dino if detector_backend == "groundingdino" else None
-        self.yoloworld = None if detector_backend != "yoloworld" else None
+        self.yoloworld = yoloworld_model if detector_backend == "yoloworld" else None
 
         if self.detector_backend == "yolo" and self.yolo is None:
             raise ValueError("YOLO backend selected but yolo_model was not provided")
         if self.detector_backend == "groundingdino" and self.grounding_dino is None:
             raise ValueError("GroundingDINO backend selected but wrapper was not provided")
+        if self.detector_backend == "yoloworld" and self.yoloworld is None:
+            raise ValueError("YOLO-World backend selected but yoloworld_model was not provided")
 
         # Detector class registry (used by downstream trackers)
         if self.detector_backend == "yolo" and hasattr(self.yolo, "names"):
-            self.detector_classes: List[str] = list(self.yolo.names.values())
+            self.detector_classes = list(self.yolo.names.values())
+        elif self.detector_backend == "yoloworld":
+            use_custom = getattr(self.config, "yoloworld_use_custom_classes", True)
+            if (not use_custom) and self.yoloworld is not None and hasattr(self.yoloworld, "names"):
+                # Prefer the model's native/open-vocab label set
+                self.detector_classes = list(getattr(self.yoloworld, "names").values())
+            else:
+                # Use the custom classes set via prompt/categories
+                self.detector_classes = list(self.config.yoloworld_categories())
         else:
             self.detector_classes = list(self.config.grounding_categories())
-            if self.detector_backend == "yoloworld" and self.yoloworld is None:
-                # from orion.perception.yoloworld_detector import YOLOWorldDetector
-                # self.yoloworld = YOLOWorldDetector(
-                #     model_path=None,
-                #     confidence_threshold=self.config.confidence_threshold,
-                #     device="mps",
-                #     batch_size=8,
-                #     categories=None,
-                # )
-                logger.error("YOLOWorld backend not available (module missing)")
-                raise NotImplementedError("YOLOWorld backend not available")
+            
         self._grounding_label_map = {
             label.lower(): idx for idx, label in enumerate(self.detector_classes)
         }
@@ -111,7 +115,8 @@ class FrameObserver:
                     enable_depth=True,
                     enable_hands=False,  # Hand tracking disabled (future work with HOT3D)
                     enable_occlusion=enable_occlusion,
-                    enable_slam=True, # Enable SLAM by default if 3D is enabled
+                    enable_slam=enable_slam,
+                    depth_model_size=depth_model_size,
                 )
                 logger.info("  ✓ Perception3DEngine initialized")
             except Exception as e:
@@ -240,10 +245,35 @@ class FrameObserver:
             return self._detect_with_yolo(frame)
 
     def _detect_with_yoloworld(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+        """Run YOLO-World inference and normalize outputs."""
         if self.yoloworld is None:
             return []
-        # Optionally pass categories for open-vocab detection
-        return self.yoloworld.detect_frame(frame)
+
+        # YOLO-World uses the same inference API as standard YOLO
+        results = self.yoloworld(
+            frame,
+            conf=self.config.confidence_threshold,
+            iou=self.config.iou_threshold,
+            verbose=False,
+        )
+
+        detections: List[Dict[str, Any]] = []
+        for result in results:
+            boxes = result.boxes
+            for i in range(len(boxes)):
+                bbox_xyxy = boxes.xyxy[i].cpu().numpy().astype(float).tolist()
+                class_id = int(boxes.cls[i])
+                # YOLO-World uses the custom class names we set
+                class_name = result.names.get(class_id, f"class_{class_id}")
+                detections.append(
+                    {
+                        "bbox": bbox_xyxy,
+                        "confidence": float(boxes.conf[i]),
+                        "class_id": class_id,
+                        "class_name": class_name,
+                    }
+                )
+        return detections
 
     @profile("observer_detect_with_yolo")
     def _detect_with_yolo(self, frame: np.ndarray) -> List[Dict[str, Any]]:
@@ -361,7 +391,13 @@ class FrameObserver:
         
         detections = []
         
-        for detection_source in detection_candidates:
+        # Create a map of 3D entities by entity_id
+        entities_3d_map = {}
+        if perception_3d and perception_3d.entities:
+            for ent in perception_3d.entities:
+                entities_3d_map[ent.entity_id] = ent
+        
+        for idx, detection_source in enumerate(detection_candidates):
             x1, y1, x2, y2 = [int(v) for v in detection_source["bbox"]]
 
             width = x2 - x1
@@ -379,11 +415,14 @@ class FrameObserver:
             spatial_zone = self._compute_spatial_zone(centroid, frame_width, frame_height)
 
             detection = {
+                "frame_id": frame_number, # Add frame_id for compatibility
                 "frame_number": frame_number,
                 "timestamp": timestamp,
                 "bounding_box": bbox,
+                "bbox": [float(x1), float(y1), float(x2), float(y2)], # Add bbox for compatibility
                 "centroid": centroid,
                 "object_class": class_name,
+                "class_name": class_name, # Add class_name for compatibility
                 "class_id": class_id,
                 "confidence": confidence,
                 "crop": crop,
@@ -397,17 +436,18 @@ class FrameObserver:
                 detection["description"] = class_name
                 detection["object_class"] = class_name
 
-            if perception_3d is not None and perception_3d.entities:
-                for entity_3d in perception_3d.entities:
-                    if entity_3d.class_label == class_name:
-                        e_x1, e_y1, e_x2, e_y2 = entity_3d.bbox_2d_px
-                        if abs(e_x1 - x1) < 20 and abs(e_y1 - y1) < 20:
-                            detection["depth_mm"] = entity_3d.depth_mean_mm
-                            detection["centroid_3d_mm"] = entity_3d.centroid_3d_mm
-                            detection["visibility_state"] = entity_3d.visibility_state.value
-                            detection["occlusion_ratio"] = entity_3d.occlusion_ratio
-                            detection["occluded_by"] = entity_3d.occluded_by
-                            break
+            # Merge 3D info using entity_id
+            entity_id = f'det_{frame_number}_{idx}'
+            if entity_id in entities_3d_map:
+                ent_3d = entities_3d_map[entity_id]
+                detection["depth_mm"] = ent_3d.depth_mean_mm
+                detection["centroid_3d_mm"] = ent_3d.centroid_3d_mm
+                if ent_3d.centroid_3d_mm:
+                    cx, cy, cz = ent_3d.centroid_3d_mm
+                    detection["bbox_3d"] = [cx, cy, cz, 0, 0, 0]
+                detection["visibility_state"] = ent_3d.visibility_state.value
+                detection["occlusion_ratio"] = ent_3d.occlusion_ratio
+                detection["occluded_by"] = ent_3d.occluded_by
 
             if perception_3d is not None and perception_3d.hands:
                 detection["hands_detected"] = len(perception_3d.hands)

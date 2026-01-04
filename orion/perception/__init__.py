@@ -47,16 +47,8 @@ from .config import (
     get_accurate_config,
 )
 
-from .depth import DepthEstimator
-from .engine import PerceptionEngine
-
-# Try to import 3D perception components
-try:
-    from .perception_3d import Perception3DEngine
-    PERCEPTION_3D_AVAILABLE = True
-except ImportError:
-    Perception3DEngine = None
-    PERCEPTION_3D_AVAILABLE = False
+# IMPORTANT: keep module import lightweight.
+# Avoid importing heavy dependencies (torch, transformers, tensorflow) at import time.
 
 __all__ = [
     # Types
@@ -86,3 +78,33 @@ __all__ = [
     "get_balanced_config",
     "get_accurate_config",
 ]
+
+
+def __getattr__(name: str):
+    if name == "DepthEstimator":
+        from .depth import DepthEstimator as _DepthEstimator
+
+        return _DepthEstimator
+
+    if name == "PerceptionEngine":
+        from .engine import PerceptionEngine as _PerceptionEngine
+
+        return _PerceptionEngine
+
+    if name in {"Perception3DEngine", "PERCEPTION_3D_AVAILABLE"}:
+        try:
+            from .perception_3d import Perception3DEngine as _Perception3DEngine
+
+            globals()["Perception3DEngine"] = _Perception3DEngine
+            globals()["PERCEPTION_3D_AVAILABLE"] = True
+        except Exception:
+            globals()["Perception3DEngine"] = None
+            globals()["PERCEPTION_3D_AVAILABLE"] = False
+
+        return globals()[name]
+
+    raise AttributeError(f"module 'orion.perception' has no attribute {name!r}")
+
+
+def __dir__():
+    return sorted(list(globals().keys()) + __all__)
