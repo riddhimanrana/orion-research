@@ -150,7 +150,11 @@ def process_video_to_tracks(
     for frame_id in sorted(detections_by_frame.keys()):
         frame_dets = detections_by_frame[frame_id]
         tracked_dets = tracker.update(frame_dets)
-        all_tracks.extend(tracked_dets)
+        # Annotate each track with frame_id before saving
+        for track in tracked_dets:
+            track_dict = track.to_dict() if hasattr(track, 'to_dict') else track
+            track_dict['frame_id'] = frame_id
+            all_tracks.append(track_dict)
     current_step += 1
     
     # Save tracks
