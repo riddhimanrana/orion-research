@@ -124,7 +124,7 @@ def run_detection_realtime(video_path: str, episode: str, device: str, fps: floa
     det_config = DetectionConfig()
     yolo_config = YOLOWorldConfig(
         model=det_config.yoloworld_model,
-        confidence_threshold=confidence,
+        confidence=confidence,
         device=device
     )
     detector = YOLOWorldDetector(yolo_config)
