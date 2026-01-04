@@ -98,8 +98,11 @@ class YOLOWorldDetector:
                 logger.info(f"Loading cached custom model: {self.config.custom_model_path}")
                 self._model = YOLOWorld(self.config.custom_model_path)
             else:
-                # Load base model
-                self._model = YOLOWorld(f"{self.config.model}.pt")
+                # Load base model - handle .pt extension
+                model_name = self.config.model
+                if not model_name.endswith('.pt'):
+                    model_name = f"{model_name}.pt"
+                self._model = YOLOWorld(model_name)
                 
                 # Set custom classes
                 logger.info(f"Setting {len(self.config.classes)} custom classes")
