@@ -59,15 +59,31 @@ def get_video_path(episode: str) -> Path:
 
 
 def load_tracks(results_dir: Path) -> list[dict]:
-    """Load tracks.jsonl from Phase 1."""
+    """Load detections from Phase 1 (tracks.jsonl or detections.json)."""
     tracks_path = results_dir / "tracks.jsonl"
-    if not tracks_path.exists():
-        raise FileNotFoundError(f"No tracks.jsonl found at {tracks_path}")
+    detections_path = results_dir / "detections.json"
     
-    tracks = []
-    with open(tracks_path) as f:
-        for line in f:
-            tracks.append(json.loads(line))
+    # Try tracks.jsonl first (old format)
+    if tracks_path.exists():
+        tracks = []
+        with open(tracks_path) as f:
+            for line in f:
+                tracks.append(json.loads(line))
+        return tracks
+    
+    # Try detections.json (new format)
+    if detections_path.exists():
+        with open(detections_path) as f:
+            data = json.load(f)
+        # Convert to expected format
+        detections = data.get('detections', data)
+        # Add frame_id alias
+        for det in detections:
+            if 'frame' in det and 'frame_id' not in det:
+                det['frame_id'] = det['frame']
+        return detections
+    
+    raise FileNotFoundError(f"No tracks.jsonl or detections.json found at {results_dir}")
     return tracks
 
 
