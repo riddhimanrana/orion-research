@@ -64,6 +64,75 @@ SUPPRESS_CLASSES = {
     "doorknob", "light switch", "outlet"
 }
 
+# Label normalization map - group semantic duplicates
+LABEL_NORMALIZATION = {
+    # Screen/display devices
+    "computer screen": "monitor",
+    "computer monitor": "monitor",
+    "television": "monitor",
+    "tv": "monitor",
+    "screen": "monitor",
+    "display": "monitor",
+    
+    # Seating
+    "office chair": "chair",
+    "armchair": "chair",
+    "stool": "chair",
+    "seat": "chair",
+    
+    # Bottles
+    "water bottle": "bottle",
+    "plastic bottle": "bottle",
+    
+    # Couches
+    "sofa": "couch",
+    "loveseat": "couch",
+    "settee": "couch",
+    
+    # Plants
+    "houseplant": "plant",
+    "potted plant": "plant",
+    
+    # Tables/surfaces
+    "counter": "table",
+    "countertop": "table",
+    "desk": "table",
+    "dining table": "table",
+    "coffee table": "table",
+    
+    # Lighting
+    "floor lamp": "lamp",
+    "table lamp": "lamp",
+    "desk lamp": "lamp",
+    
+    # Wall art
+    "artwork": "picture",
+    "painting": "picture",
+    "picture frame": "picture",
+    "frame": "picture",
+    "poster": "picture",
+    
+    # Floor coverings
+    "carpet": "rug",
+    "mat": "rug",
+    "floor mat": "rug",
+    
+    # Pillows
+    "cushion": "pillow",
+    "throw pillow": "pillow",
+    
+    # Computers
+    "computer": "monitor",  # Often just shows screen
+    "desktop": "monitor",
+}
+
+
+def normalize_label(label: str) -> str:
+    """Normalize label to canonical form for better Re-ID clustering."""
+    label_lower = label.lower().strip()
+    return LABEL_NORMALIZATION.get(label_lower, label_lower)
+
+
 # Per-class similarity thresholds (more strict for people, looser for objects)
 CLASS_THRESHOLDS = {
     # People/body - need strict matching to avoid ID confusion
@@ -393,15 +462,18 @@ def embed_tracks_vjepa2(crops_by_track: dict, device: str, console: Console):
 
 def cluster_tracks_by_similarity(track_embeddings: dict, tracks_by_id: dict, 
                                   similarity_threshold: float = 0.75,
-                                  use_per_class_thresholds: bool = True):
-    """Cluster tracks by cosine similarity within same class."""
+                                  use_per_class_thresholds: bool = True,
+                                  use_label_normalization: bool = True):
+    """Cluster tracks by cosine similarity within same normalized class."""
     import numpy as np
     
-    # Group tracks by class
+    # Group tracks by normalized class (semantic duplicates grouped together)
     tracks_by_class = defaultdict(list)
     for track_id in track_embeddings.keys():
         if track_id in tracks_by_id:
-            label = tracks_by_id[track_id][0]['label']
+            raw_label = tracks_by_id[track_id][0]['label']
+            # Apply label normalization if enabled
+            label = normalize_label(raw_label) if use_label_normalization else raw_label
             tracks_by_class[label].append(track_id)
     
     # Cluster within each class
@@ -481,7 +553,8 @@ def cluster_tracks_by_similarity(track_embeddings: dict, tracks_by_id: dict,
 
 
 def create_memory(unified_mapping: dict, track_embeddings: dict, 
-                  tracks_by_id: dict, tracks: list) -> dict:
+                  tracks_by_id: dict, tracks: list,
+                  use_label_normalization: bool = True) -> dict:
     """Create unified object memory."""
     import numpy as np
     
@@ -497,7 +570,8 @@ def create_memory(unified_mapping: dict, track_embeddings: dict,
             'total_tracks_before': len(tracks_by_id),
             'tracks_embedded': len(track_embeddings),
             'total_objects_after': len(by_unified),
-            'fragmentation_reduction': 0.0
+            'fragmentation_reduction': 0.0,
+            'label_normalization': use_label_normalization
         }
     }
     
@@ -511,9 +585,17 @@ def create_memory(unified_mapping: dict, track_embeddings: dict,
         if first_track_id in track_embeddings:
             embedding = track_embeddings[first_track_id]['embedding'].tolist()
         
+        # Use normalized label for canonical label, keep original for reference
+        raw_label = observations[0]['label']
+        canonical_label = normalize_label(raw_label) if use_label_normalization else raw_label
+        
+        # Collect all unique raw labels that were merged
+        raw_labels = list(set(obs['label'] for obs in observations))
+        
         obj = {
             'object_id': unified_id,
-            'label': observations[0]['label'],
+            'label': canonical_label,  # Normalized canonical label
+            'raw_labels': raw_labels,  # Original labels before normalization
             'first_seen_frame': min(obs['frame_id'] for obs in observations),
             'last_seen_frame': max(obs['frame_id'] for obs in observations),
             'total_observations': len(observations),
@@ -643,7 +725,8 @@ def handle_embed(args, settings) -> int:
     # Step 6: Create memory
     console.print("\n[bold]Step 6:[/bold] Creating unified memory...")
     memory = create_memory(
-        unified_mapping, track_embeddings, tracks_for_reid, tracks
+        unified_mapping, track_embeddings, tracks_for_reid, tracks,
+        use_label_normalization=True
     )
     
     # Add static objects with spatial clustering
