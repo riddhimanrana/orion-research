@@ -15,6 +15,12 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
+# Add orion to path
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from pathlib import Path
+
 import cv2
 import numpy as np
 from rich.console import Console
@@ -90,11 +96,8 @@ def main():
     console.print(f"  Duration: {duration:.1f}s ({total_frames} frames @ {video_fps:.1f} FPS)")
     console.print(f"  Sampling: every {frame_interval} frames → ~{expected_samples} samples")
 
-    # Initialize ByteTrack
+    # Initialize simple IoU tracker
     console.print("\n[bold]Initializing tracker...[/bold]")
-    from ultralytics import YOLO
-    # We'll use YOLO's built-in tracking with our detections
-    # Actually, let's use a simple IoU tracker instead
     
     class SimpleTracker:
         """Simple IoU-based tracker for object tracking."""
