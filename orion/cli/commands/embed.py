@@ -485,15 +485,15 @@ def handle_embed(args, settings) -> int:
     
     elapsed = time.time() - start_time
     
-    # Save stats
+    # Save stats (convert to native Python types for JSON serialization)
     stats = EmbedStats(
         tracks_before=len(tracks_by_id),
         tracks_embedded=len(track_embeddings),
         objects_after=len(memory['objects']),
-        fragmentation_reduction=memory['metadata']['fragmentation_reduction'],
-        elapsed_seconds=round(elapsed, 2),
-        avg_intra_similarity=round(avg_intra, 4),
-        avg_inter_similarity=round(avg_inter, 4)
+        fragmentation_reduction=float(memory['metadata']['fragmentation_reduction']),
+        elapsed_seconds=float(round(elapsed, 2)),
+        avg_intra_similarity=float(round(float(avg_intra), 4)),
+        avg_inter_similarity=float(round(float(avg_inter), 4))
     )
     
     with open(results_dir / "embed_stats.json", 'w') as f:
