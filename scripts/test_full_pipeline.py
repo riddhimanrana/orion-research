@@ -224,7 +224,7 @@ def run_pipeline(video_path: str, episode: str, vocab_type: str, fps: float = 5.
             video_path=Path(video_path),
             tracks_path=tracks_path,
             results_dir=results_dir,
-            cosine_threshold=0.75,
+            cosine_threshold=0.70,  # Optimized threshold
             max_crops_per_track=5,
         )
         
