@@ -12,7 +12,15 @@ from typing import List, Dict, Any, Optional, Tuple
 
 from orion.perception.types import Perception3DResult, EntityState3D, Hand, CameraIntrinsics, VisibilityState
 from orion.perception.depth import DepthEstimator
-from orion.slam.slam_engine import SLAMEngine, SLAMConfig
+
+# Optional SLAM import - may not be available
+try:
+    from orion.slam.slam_engine import SLAMEngine, SLAMConfig
+    SLAM_AVAILABLE = True
+except ImportError:
+    SLAMEngine = None
+    SLAMConfig = None
+    SLAM_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
