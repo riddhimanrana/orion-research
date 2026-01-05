@@ -60,6 +60,48 @@ SUPPRESS_CLASSES = {
     "doorknob", "light switch", "outlet"
 }
 
+# Per-class similarity thresholds (more strict for people, looser for objects)
+CLASS_THRESHOLDS = {
+    # People/body - need strict matching to avoid ID confusion
+    "person": 0.85,
+    "hand": 0.80,
+    "face": 0.85,
+    "arm": 0.75,
+    
+    # Small objects - moderate threshold
+    "book": 0.70,
+    "notebook": 0.70,
+    "laptop": 0.80,
+    "phone": 0.78,
+    "keyboard": 0.75,
+    "mouse": 0.75,
+    
+    # Furniture - can be more lenient  
+    "chair": 0.72,
+    "stool": 0.72,
+    "pillow": 0.65,
+    "blanket": 0.65,
+    
+    # Default for unlisted classes
+    "_default": 0.75
+}
+
+
+def get_class_threshold(label: str, base_threshold: float = 0.75) -> float:
+    """Get similarity threshold for a class, with fallback to base."""
+    label_lower = label.lower()
+    
+    # Check exact match first
+    if label_lower in CLASS_THRESHOLDS:
+        return CLASS_THRESHOLDS[label_lower]
+    
+    # Check partial match
+    for cls_name, threshold in CLASS_THRESHOLDS.items():
+        if cls_name != "_default" and (cls_name in label_lower or label_lower in cls_name):
+            return threshold
+    
+    return base_threshold
+
 
 @dataclass
 class EmbedStats:
@@ -112,6 +154,105 @@ def get_track_tier(label: str) -> int:
     
     # Default to tier 1 (Re-ID) for unknown classes
     return 1
+
+
+def compute_bbox_iou(bbox1: list, bbox2: list) -> float:
+    """Compute IoU between two bboxes [x1, y1, x2, y2]."""
+    x1 = max(bbox1[0], bbox2[0])
+    y1 = max(bbox1[1], bbox2[1])
+    x2 = min(bbox1[2], bbox2[2])
+    y2 = min(bbox1[3], bbox2[3])
+    
+    if x2 < x1 or y2 < y1:
+        return 0.0
+    
+    inter_area = (x2 - x1) * (y2 - y1)
+    area1 = (bbox1[2] - bbox1[0]) * (bbox1[3] - bbox1[1])
+    area2 = (bbox2[2] - bbox2[0]) * (bbox2[3] - bbox2[1])
+    union_area = area1 + area2 - inter_area
+    
+    if union_area == 0:
+        return 0.0
+    
+    return inter_area / union_area
+
+
+def cluster_static_tracks_by_spatial(tracks_by_id: dict, iou_threshold: float = 0.5) -> dict:
+    """
+    Cluster static class tracks by spatial overlap (IoU).
+    
+    For Tier 2 (static) objects like floor, wall, door - we cluster by 
+    whether their bounding boxes overlap significantly across frames.
+    The assumption is that the same floor/wall will have overlapping 
+    detections in nearby frames.
+    
+    Args:
+        tracks_by_id: Dict of track_id -> list of observations
+        iou_threshold: Minimum IoU for considering tracks as same object
+        
+    Returns:
+        unified_mapping: Dict of track_id -> unified_id
+    """
+    import numpy as np
+    
+    # Group by label first
+    tracks_by_class = defaultdict(list)
+    for track_id, observations in tracks_by_id.items():
+        label = observations[0]['label']
+        tracks_by_class[label].append(track_id)
+    
+    unified_mapping = {}
+    next_unified_id = 1
+    
+    for label, track_ids in tracks_by_class.items():
+        if len(track_ids) == 1:
+            unified_mapping[track_ids[0]] = next_unified_id
+            next_unified_id += 1
+            continue
+        
+        # Compute representative bbox for each track (mean of all observations)
+        track_bboxes = {}
+        for tid in track_ids:
+            obs = tracks_by_id[tid]
+            # Use centroid of all observations' bboxes
+            bboxes = [o['bbox'] for o in obs]
+            mean_bbox = [
+                np.mean([b[0] for b in bboxes]),
+                np.mean([b[1] for b in bboxes]),
+                np.mean([b[2] for b in bboxes]),
+                np.mean([b[3] for b in bboxes])
+            ]
+            track_bboxes[tid] = mean_bbox
+        
+        # Greedy clustering by IoU
+        assigned = set()
+        clusters = []
+        
+        for tid_i in track_ids:
+            if tid_i in assigned:
+                continue
+            
+            cluster = [tid_i]
+            assigned.add(tid_i)
+            
+            for tid_j in track_ids:
+                if tid_j in assigned:
+                    continue
+                
+                iou = compute_bbox_iou(track_bboxes[tid_i], track_bboxes[tid_j])
+                if iou >= iou_threshold:
+                    cluster.append(tid_j)
+                    assigned.add(tid_j)
+            
+            clusters.append(cluster)
+        
+        # Assign unified IDs
+        for cluster in clusters:
+            for tid in cluster:
+                unified_mapping[tid] = next_unified_id
+            next_unified_id += 1
+    
+    return unified_mapping
 
 
 def extract_track_crops(video_path: str, tracks_by_id: dict, output_dir: Path, 
@@ -224,7 +365,8 @@ def embed_tracks_vjepa2(crops_by_track: dict, device: str, console: Console):
 
 
 def cluster_tracks_by_similarity(track_embeddings: dict, tracks_by_id: dict, 
-                                  similarity_threshold: float = 0.75):
+                                  similarity_threshold: float = 0.75,
+                                  use_per_class_thresholds: bool = True):
     """Cluster tracks by cosine similarity within same class."""
     import numpy as np
     
@@ -243,6 +385,12 @@ def cluster_tracks_by_similarity(track_embeddings: dict, tracks_by_id: dict,
     all_inter_sims = []
     
     for label, track_ids in tracks_by_class.items():
+        # Get per-class threshold
+        if use_per_class_thresholds:
+            class_threshold = get_class_threshold(label, similarity_threshold)
+        else:
+            class_threshold = similarity_threshold
+        
         if len(track_ids) == 1:
             # Single track for this class
             unified_mapping[track_ids[0]] = next_unified_id
@@ -260,7 +408,7 @@ def cluster_tracks_by_similarity(track_embeddings: dict, tracks_by_id: dict,
         # Compute similarity matrix
         sim_matrix = embs_normalized @ embs_normalized.T
         
-        # Simple greedy clustering
+        # Simple greedy clustering with per-class threshold
         assigned = set()
         clusters = []
         
@@ -275,7 +423,7 @@ def cluster_tracks_by_similarity(track_embeddings: dict, tracks_by_id: dict,
                 if tid_j in assigned:
                     continue
                 
-                if sim_matrix[i, j] >= similarity_threshold:
+                if sim_matrix[i, j] >= class_threshold:
                     cluster.append(tid_j)
                     assigned.add(tid_j)
                     all_intra_sims.append(sim_matrix[i, j])
@@ -417,6 +565,7 @@ def handle_embed(args, settings) -> int:
     console.print("\n[bold]Step 2:[/bold] Filtering tracks by tier...")
     tier_counts = {1: 0, 2: 0, 3: 0}
     tracks_for_reid = {}
+    tracks_for_spatial = {}  # Static tracks for spatial clustering
     
     for track_id, observations in tracks_by_id.items():
         label = observations[0]['label']
@@ -425,9 +574,11 @@ def handle_embed(args, settings) -> int:
         
         if tier == 1:  # Dynamic - do Re-ID
             tracks_for_reid[track_id] = observations
+        elif tier == 2:  # Static - do spatial clustering
+            tracks_for_spatial[track_id] = observations
     
     console.print(f"  Tier 1 (Dynamic/Re-ID):  {tier_counts[1]} tracks")
-    console.print(f"  Tier 2 (Static):         {tier_counts[2]} tracks")
+    console.print(f"  Tier 2 (Static/Spatial): {tier_counts[2]} tracks")
     console.print(f"  Tier 3 (Suppressed):     {tier_counts[3]} tracks")
     
     # Step 3: Extract crops
@@ -443,15 +594,24 @@ def handle_embed(args, settings) -> int:
     track_embeddings = embed_tracks_vjepa2(crops_by_track, device, console)
     console.print(f"  Embedded {len(track_embeddings)} tracks")
     
-    # Step 5: Cluster
-    console.print("\n[bold]Step 5:[/bold] Clustering by similarity...")
+    # Step 5a: Cluster dynamic tracks by embedding similarity
+    console.print("\n[bold]Step 5a:[/bold] Clustering dynamic tracks by embedding similarity...")
     unified_mapping, avg_intra, avg_inter = cluster_tracks_by_similarity(
-        track_embeddings, tracks_for_reid, similarity
+        track_embeddings, tracks_for_reid, similarity, use_per_class_thresholds=True
     )
-    num_unified = len(set(unified_mapping.values()))
-    console.print(f"  Clustered {len(unified_mapping)} tracks into {num_unified} objects")
+    num_dynamic_unified = len(set(unified_mapping.values()))
+    console.print(f"  Clustered {len(unified_mapping)} dynamic tracks into {num_dynamic_unified} objects")
     console.print(f"  Avg intra-cluster similarity: {avg_intra:.3f}")
     console.print(f"  Avg inter-cluster similarity: {avg_inter:.3f}")
+    
+    # Step 5b: Cluster static tracks by spatial overlap (IoU)
+    console.print("\n[bold]Step 5b:[/bold] Clustering static tracks by spatial overlap...")
+    static_iou_threshold = 0.4  # IoU threshold for static objects
+    static_unified_mapping = cluster_static_tracks_by_spatial(
+        tracks_for_spatial, iou_threshold=static_iou_threshold
+    )
+    num_static_unified = len(set(static_unified_mapping.values()))
+    console.print(f"  Clustered {len(static_unified_mapping)} static tracks into {num_static_unified} objects")
     
     # Step 6: Create memory
     console.print("\n[bold]Step 6:[/bold] Creating unified memory...")
@@ -459,24 +619,33 @@ def handle_embed(args, settings) -> int:
         unified_mapping, track_embeddings, tracks_for_reid, tracks
     )
     
-    # Add static objects (tier 2) without Re-ID clustering
-    for track_id, observations in tracks_by_id.items():
+    # Add static objects with spatial clustering
+    # Renumber static unified IDs to not conflict with dynamic ones
+    max_dynamic_id = max(o['object_id'] for o in memory['objects']) if memory['objects'] else 0
+    
+    # Group static tracks by their unified ID
+    static_by_unified = defaultdict(list)
+    for track_id, unified_id in static_unified_mapping.items():
+        static_by_unified[unified_id].extend(tracks_for_spatial[track_id])
+    
+    # Add to memory
+    for idx, (unified_id, observations) in enumerate(static_by_unified.items(), start=1):
         label = observations[0]['label']
-        tier = get_track_tier(label)
-        
-        if tier == 2:
-            # Add as static object without embedding
-            obj = {
-                'object_id': max(o['object_id'] for o in memory['objects']) + 1 if memory['objects'] else 1,
-                'label': label,
-                'tier': 'static',
-                'first_seen_frame': min(obs['frame_id'] for obs in observations),
-                'last_seen_frame': max(obs['frame_id'] for obs in observations),
-                'total_observations': len(observations),
-                'original_track_ids': [track_id],
-                'avg_confidence': np.mean([obs['confidence'] for obs in observations])
-            }
-            memory['objects'].append(obj)
+        obj = {
+            'object_id': max_dynamic_id + idx,
+            'label': label,
+            'tier': 'static',
+            'first_seen_frame': min(obs['frame_id'] for obs in observations),
+            'last_seen_frame': max(obs['frame_id'] for obs in observations),
+            'total_observations': len(observations),
+            'original_track_ids': list(set(obs['track_id'] for obs in observations)),
+            'avg_confidence': float(np.mean([obs['confidence'] for obs in observations]))
+        }
+        memory['objects'].append(obj)
+    
+    # Update metadata
+    memory['metadata']['static_tracks_before'] = len(tracks_for_spatial)
+    memory['metadata']['static_objects_after'] = num_static_unified
     
     # Save memory
     memory_path = results_dir / "memory.json"

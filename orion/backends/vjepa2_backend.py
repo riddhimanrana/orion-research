@@ -83,7 +83,10 @@ class VJepa2Embedder:
     
     def embed_single_image(self, image: Union[np.ndarray, torch.Tensor]) -> torch.Tensor:
         """
-        Embed a single image as a 1-frame video.
+        Embed a single image as a repeated-frame video.
+        
+        Per official V-JEPA2 docs: "To load an image, simply copy the image 
+        to the desired number of frames."
         
         Args:
             image: Image as numpy array (H, W, C) or tensor (C, H, W)
@@ -108,19 +111,20 @@ class VJepa2Embedder:
         inputs = self._processor(image, return_tensors="pt")
         inputs = {k: v.to(self._model.device) for k, v in inputs.items()}
         
-        with torch.no_grad():
-            outputs = self._model(**inputs)
+        # Per docs: repeat image 16 times for single image embedding
+        if 'pixel_values_videos' in inputs:
+            inputs['pixel_values_videos'] = inputs['pixel_values_videos'].repeat(1, 16, 1, 1, 1)
         
-        # Pool over spatial patches and time
-        # last_hidden_state shape: (batch, num_patches, hidden_dim)
-        embedding = outputs.last_hidden_state.mean(dim=1)  # (batch, hidden_dim)
+        with torch.no_grad():
+            # Use get_vision_features() per official docs
+            embedding = self._model.get_vision_features(**inputs)
         
         return embedding.cpu()
     
     def embed_video_sequence(
         self, 
         frames: list[Union[np.ndarray, torch.Tensor]],
-        max_frames: int = 16
+        max_frames: int = 64  # V-JEPA2 uses 64 frames (fpc64 in model name)
     ) -> torch.Tensor:
         """
         Embed a sequence of frames as a video.
@@ -131,7 +135,7 @@ class VJepa2Embedder:
         
         Args:
             frames: List of frames as numpy arrays or tensors
-            max_frames: Maximum number of frames to use
+            max_frames: Maximum number of frames to use (V-JEPA2-vitl-fpc64 uses 64)
             
         Returns:
             Embedding tensor of shape (1, embedding_dim)
@@ -163,15 +167,8 @@ class VJepa2Embedder:
         inputs = {k: v.to(self._model.device) for k, v in inputs.items()}
         
         with torch.no_grad():
-            outputs = self._model(**inputs)
-        
-        # Use predictor output for better temporal understanding
-        if hasattr(outputs, 'predictor_output') and outputs.predictor_output is not None:
-            # Predictor gives better temporal features
-            embedding = outputs.predictor_output.last_hidden_state.mean(dim=(1, 2))
-        else:
-            # Fall back to encoder output
-            embedding = outputs.last_hidden_state.mean(dim=1)
+            # Use get_vision_features() per official V-JEPA2 docs
+            embedding = self._model.get_vision_features(**inputs)
         
         return embedding.cpu()
     
