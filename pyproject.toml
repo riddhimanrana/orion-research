@@ -35,7 +35,9 @@ dependencies = [
 
 [project.optional-dependencies]
 # Optional modules (install as needed)
-apple = ["mlx-vlm @ file:./mlx-vlm"]
+# NOTE: Keep this syntactically valid for older pip/packaging on Lambda.
+# Install the local Apple/MLX package separately if needed (e.g., `pip install -e ./mlx-vlm`).
+apple = ["mlx-vlm"]
 memgraph = ["pymgclient>=1.0.0"]  # Memgraph driver (Bolt protocol)
 dev = [
     "pytest>=7.0.0",
