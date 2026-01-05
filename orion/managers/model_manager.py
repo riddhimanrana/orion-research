@@ -90,7 +90,6 @@ class ModelManager:
         self._yoloworld: Optional[Any] = None
         self._clip: Optional[Any] = None
         self._fastvlm: Optional[Any] = None
-        self._dino: Optional[Any] = None
         self._vjepa2: Optional[Any] = None
         self._groundingdino: Optional[Any] = None
         
@@ -99,9 +98,6 @@ class ModelManager:
         self.yoloworld_model_name = "yolov8m-worldv2.pt"  # YOLO-World model
         self.yoloworld_classes: Optional[list] = None  # Classes to set for YOLO-World
         self.groundingdino_model_id = "IDEA-Research/grounding-dino-base"
-        
-        # Re-ID backend configuration - V-JEPA2 is default (3D-aware video encoder)
-        self.reid_backend = "vjepa2"  # Use V-JEPA2 for 3D-aware Re-ID (per v2 architecture)
         
         # LLM for contextual understanding
         self._ollama_client: Optional[Any] = None
@@ -269,53 +265,7 @@ class ModelManager:
             raise
 
     # ========================================================================
-    # DINO Embedder (v2/v3)
-    # ========================================================================
-
-    @property
-    def dino(self) -> Any:
-        """
-        Get DINO embedder (lazy loaded).
-
-        Returns:
-            DINOEmbedder instance
-        """
-        if self._dino is None:
-            self._dino = self._load_dino()
-        return self._dino
-
-    def _load_dino(self) -> Any:
-        """Load DINO(v2/v3) model for vision embeddings"""
-        try:
-            from orion.backends.dino_backend import DINOEmbedder
-
-            logger.info("Loading DINO embedder (vision-only)…")
-
-            # Try DINOv3 ViT-L/16 local weights first (300M params, 1024-dim embeddings)
-            dinov3_vitl = self.models_dir / "dinov3-vitl16"
-            if dinov3_vitl.exists():
-                logger.info(f"Found DINOv3 ViT-L/16 local weights at {dinov3_vitl}")
-                embedder = DINOEmbedder(
-                    model_name="facebook/dinov3-vitl16-pretrain-lvd1689m",
-                    local_weights_dir=dinov3_vitl,
-                    device=self.device,
-                )
-            else:
-                # Fallback to public DINOv2 (not gated)
-                logger.info("DINOv3 not found, using public DINOv2 (facebook/dinov2-base)")
-                embedder = DINOEmbedder(
-                    model_name="facebook/dinov2-base",
-                    device=self.device,
-                )
-
-            logger.info("✓ DINO loaded (viewpoint-robust embeddings)")
-            return embedder
-        except Exception as e:
-            logger.error(f"Failed to load DINO: {e}")
-            raise
-
-    # ========================================================================
-    # V-JEPA2 Video Embedder (3D-aware for better Re-ID)
+    # V-JEPA2 Video Embedder (3D-aware for Re-ID)
     # ========================================================================
 
     @property
@@ -354,14 +304,11 @@ class ModelManager:
     @property
     def reid_embedder(self) -> Any:
         """
-        Get the configured Re-ID embedder (DINO or V-JEPA2).
+        Get the Re-ID embedder (V-JEPA2).
 
-        The backend is controlled by `self.reid_backend`.
-        Defaults to DINO for backward compatibility.
+        V-JEPA2 is the only supported Re-ID backend (3D-aware video encoder).
         """
-        if self.reid_backend == "vjepa2":
-            return self.vjepa2
-        return self.dino
+        return self.vjepa2
 
     # ========================================================================
     # GroundingDINO Zero-Shot Detector

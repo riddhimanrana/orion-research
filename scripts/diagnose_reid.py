@@ -297,8 +297,8 @@ def main():
     parser.add_argument("--video", type=str, required=True, help="Path to source video")
     parser.add_argument("--track-id", type=int, help="Specific track ID to analyze")
     parser.add_argument("--class-name", type=str, help="Analyze all tracks of this class")
-    parser.add_argument("--compare-backends", action="store_true", help="Compare CLIP vs DINO vs V-JEPA2")
-    parser.add_argument("--backend", type=str, default="all", choices=["clip", "dino", "vjepa2", "all"],
+    parser.add_argument("--compare-backends", action="store_true", help="Compare CLIP vs V-JEPA2")
+    parser.add_argument("--backend", type=str, default="vjepa2", choices=["clip", "vjepa2", "all"],
                         help="Which backend(s) to use")
     parser.add_argument("--max-samples", type=int, default=10, help="Max samples per track")
     parser.add_argument("--device", type=str, default="cuda", help="Device (cuda/mps/cpu)")
@@ -338,14 +338,6 @@ def main():
             logger.info("✓ CLIP backend loaded")
         except Exception as e:
             logger.warning(f"Failed to load CLIP: {e}")
-    
-    if args.backend in ["dino", "all"]:
-        try:
-            from orion.backends.dino_backend import DINOEmbedder
-            backends["dino"] = DINOEmbedder(device=device)
-            logger.info("✓ DINO backend loaded")
-        except Exception as e:
-            logger.warning(f"Failed to load DINO: {e}")
     
     if args.backend in ["vjepa2", "all"]:
         try:

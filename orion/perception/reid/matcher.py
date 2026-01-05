@@ -145,16 +145,11 @@ def compute_observation_embedding(
         raise RuntimeError(f"Empty crop for bbox {raw_bbox_list} @ frame {fid}")
 
     mm = ModelManager.get_instance()
-    reid_model = mm.reid_embedder  # Uses dino or vjepa2 based on reid_backend
+    reid_model = mm.reid_embedder  # V-JEPA2 (3D-aware video encoder)
     
-    # Handle different embedding APIs (DINO vs V-JEPA2)
-    if hasattr(reid_model, 'embed_single_image'):
-        # V-JEPA2 backend
-        emb_tensor = reid_model.embed_single_image(crop)
-        emb = emb_tensor.numpy().flatten()
-    else:
-        # DINO backend
-        emb = reid_model.encode_image(crop, normalize=True)
+    # V-JEPA2 API
+    emb_tensor = reid_model.embed_single_image(crop)
+    emb = emb_tensor.numpy().flatten()
     
     return emb.astype(np.float32)
 
@@ -215,8 +210,7 @@ def compute_track_embeddings(
         Dict mapping track_id -> embedding vector (np.ndarray)
     """
     mm = ModelManager.get_instance()
-    reid_model = mm.reid_embedder  # Uses dino or vjepa2 based on reid_backend
-    use_vjepa2 = hasattr(reid_model, 'embed_single_image')
+    reid_model = mm.reid_embedder  # V-JEPA2 (3D-aware video encoder)
 
     by_frame = _group_by(tracks, "frame_id")
     needed_frames = sorted(by_frame.keys())
@@ -255,19 +249,11 @@ def compute_track_embeddings(
         if not crops:
             continue
 
-        # Encode: V-JEPA2 vs DINO have different APIs
-        if use_vjepa2:
-            # V-JEPA2: embed each crop as single-frame video
-            embs = []
-            for crop in crops:
-                emb_tensor = reid_model.embed_single_image(crop)
-                embs.append(emb_tensor.numpy().flatten())
-        else:
-            # DINO: use batch encoding if available
-            try:
-                embs = reid_model.encode_images_batch(crops)
-            except Exception:
-                embs = [reid_model.encode_image(c) for c in crops]
+        # V-JEPA2: embed each crop as single-frame video
+        embs = []
+        for crop in crops:
+            emb_tensor = reid_model.embed_single_image(crop)
+            embs.append(emb_tensor.numpy().flatten())
 
         for (tid, _), emb in zip(meta, embs):
             per_track_embs.setdefault(tid, []).append(emb.astype(np.float32))
@@ -435,7 +421,7 @@ def build_memory_from_tracks(
     # Compute per-track embeddings
     from orion.managers.model_manager import ModelManager
     mm = ModelManager.get_instance()
-    logger.info(f"Computing per-track embeddings ({mm.reid_backend.upper()} encoder)…")
+    logger.info("Computing per-track embeddings (V-JEPA2 encoder)…")
     track_embs = compute_track_embeddings(video_path, tracks, max_crops_per_track)
     logger.info(f"✓ Got embeddings for {len(track_embs)} tracks")
 

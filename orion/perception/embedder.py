@@ -45,7 +45,6 @@ class VisualEmbedder:
         self,
         clip_model,
         config: EmbeddingConfig,
-        dino_model: Optional[object] = None,
     ):
         self.clip = clip_model
         self.config = config
@@ -70,18 +69,8 @@ class VisualEmbedder:
         self._device = device
         
         # Backend-specific model instantiation
-        if backend in {"dino", "dinov3"}:
-            # If model supplied reuse, else create
-            if dino_model is not None:
-                self.dino = dino_model
-            else:
-                from orion.backends.dino_backend import DINOEmbedder
-                # Choose default model name
-                model_name = "facebook/dinov2-base" if backend == "dino" else "facebook/dinov2-base"  # placeholder for dinov3 local
-                self.dino = DINOEmbedder(model_name=model_name, device=device)
-        
-        elif backend == "vjepa2":
-            # V-JEPA2: 3D-aware video encoder for better Re-ID
+        if backend == "vjepa2":
+            # V-JEPA2: 3D-aware video encoder for Re-ID (the only supported backend)
             from orion.backends.vjepa2_backend import VJepa2Embedder
             self.vjepa2 = VJepa2Embedder(device=device)
             logger.info(f"Initialized V-JEPA2 embedder for Re-ID (device={device})")

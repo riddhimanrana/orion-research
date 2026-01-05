@@ -108,21 +108,19 @@ def run_phase1_detection(
 def run_phase2_reid(
     video_path: Path,
     results_dir: Path,
-    reid_backend: str = "vjepa2",
     cosine_threshold: float = 0.70,
     max_crops_per_track: int = 5,
 ) -> Dict:
-    """Run Phase 2: Re-ID with V-JEPA2 or DINO."""
+    """Run Phase 2: Re-ID with V-JEPA2."""
     from orion.managers.model_manager import ModelManager
     from orion.perception.reid.matcher import build_memory_from_tracks
     
     print("\n" + "="*80)
-    print(f"PHASE 2: RE-ID ({reid_backend.upper()})")
+    print("PHASE 2: RE-ID (V-JEPA2)")
     print("="*80)
     
-    # Configure Re-ID backend
+    # V-JEPA2 is the only Re-ID backend
     mm = ModelManager.get_instance()
-    mm.reid_backend = reid_backend
     
     tracks_path = results_dir / "tracks.jsonl"
     
@@ -391,7 +389,6 @@ def main():
     parser.add_argument("--episode", required=True, help="Episode ID for results")
     parser.add_argument("--fps", type=float, default=5.0, help="Processing FPS")
     parser.add_argument("--device", default="cuda", choices=["cuda", "mps", "cpu"])
-    parser.add_argument("--reid-backend", default="vjepa2", choices=["dino", "vjepa2"])
     parser.add_argument("--reid-threshold", type=float, default=0.70)
     parser.add_argument("--detector", default="yoloworld", choices=["yolo", "yoloworld", "groundingdino"])
     parser.add_argument("--skip-phase1", action="store_true", help="Skip detection (use existing tracks)")
@@ -433,7 +430,6 @@ def main():
         memory = run_phase2_reid(
             video_path=video_path,
             results_dir=results_dir,
-            reid_backend=args.reid_backend,
             cosine_threshold=args.reid_threshold,
         )
     else:
@@ -484,7 +480,7 @@ def main():
             "video": str(video_path),
             "episode": args.episode,
             "fps": args.fps,
-            "reid_backend": args.reid_backend,
+            "reid_backend": "vjepa2",
             "reid_threshold": args.reid_threshold,
             "detector": args.detector,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
