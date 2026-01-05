@@ -22,7 +22,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Rich for pretty output
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 from rich.panel import Panel
 
@@ -96,49 +95,42 @@ def run_detection(
     sampled = 0
     start_time = time.time()
     
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        TextColumn("•"),
-        TextColumn("{task.completed}/{task.total} frames"),
-        TimeElapsedColumn(),
-        console=console
-    ) as progress:
-        task = progress.add_task("Detecting...", total=expected_samples)
+    console.print("\n[cyan]Running detection...[/cyan]")
+    
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
         
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
+        if frame_idx % sample_interval == 0:
+            # Run detection
+            results = detector.detect(frame)
             
-            if frame_idx % sample_interval == 0:
-                # Run detection
-                results = detector.detect(frame)
-                
-                frame_detections = 0
-                for r in results:
-                    if hasattr(r, 'boxes') and r.boxes is not None:
-                        for i, box in enumerate(r.boxes):
-                            cls_id = int(box.cls[0])
-                            conf = float(box.conf[0])
-                            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                            label = r.names.get(cls_id, str(cls_id))
-                            
-                            all_detections.append({
-                                'frame': frame_idx,
-                                'label': label,
-                                'confidence': round(conf, 4),
-                                'bbox': [round(float(x1), 1), round(float(y1), 1), 
-                                        round(float(x2), 1), round(float(y2), 1)]
-                            })
-                            frame_detections += 1
-                
-                sampled += 1
-                progress.update(task, advance=1, description=f"Frame {frame_idx}: {frame_detections} dets")
+            frame_detections = 0
+            for r in results:
+                if hasattr(r, 'boxes') and r.boxes is not None:
+                    for i, box in enumerate(r.boxes):
+                        cls_id = int(box.cls[0])
+                        conf = float(box.conf[0])
+                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                        label = r.names.get(cls_id, str(cls_id))
+                        
+                        all_detections.append({
+                            'frame': frame_idx,
+                            'label': label,
+                            'confidence': round(conf, 4),
+                            'bbox': [round(float(x1), 1), round(float(y1), 1), 
+                                    round(float(x2), 1), round(float(y2), 1)]
+                        })
+                        frame_detections += 1
             
-            frame_idx += 1
+            sampled += 1
+            if sampled % 50 == 0 or sampled == 1:
+                elapsed_so_far = time.time() - start_time
+                fps_actual = sampled / elapsed_so_far if elapsed_so_far > 0 else 0
+                print(f"  Frame {sampled}/{expected_samples} ({100*sampled/expected_samples:.0f}%) - {len(all_detections)} total dets - {fps_actual:.1f} fps", flush=True)
+        
+        frame_idx += 1
     
     cap.release()
     elapsed = time.time() - start_time
