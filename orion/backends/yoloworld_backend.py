@@ -20,89 +20,64 @@ logger = logging.getLogger(__name__)
 
 
 # Default class vocabulary for indoor/activity tracking
-# Optimized based on Gemini validation: 53.7% precision → improved coverage
+# Optimized based on Gemini validation - streamlined to ~80 classes
 DEFAULT_CLASSES = [
-    # People - added feet for disambiguation from hands
+    # People
     "person", "face", "hand", "feet",
     
-    # Furniture - distinct definitions to reduce chair/ottoman/stool confusion
-    "chair", "armchair", "office chair",
-    "table", "coffee table", "dining table", "side table",
-    "desk",
-    "couch", "sofa", "loveseat",
+    # Furniture - streamlined to avoid redundancy
+    "chair", "armchair", "office chair", "stool", "ottoman",
+    "table", "coffee table", "dining table", "desk",
+    "couch", "sofa",
     "bed",
-    "cabinet", "shelf", "bookshelf", "drawer",
-    "ottoman", "footstool",  # Distinct from chair/stool
-    "stool", "bar stool",
-    "bench",
-    "nightstand", "dresser", "wardrobe",
+    "cabinet", "shelf", "drawer",
+    "bench", "nightstand", "dresser",
     
-    # Soft furnishings - distinct rug vs carpet vs mat
-    "pillow", "throw pillow", "cushion",
-    "blanket", "throw blanket",
-    "rug", "area rug",  # Distinct from carpet/mat
-    "carpet", "floor mat", "doormat",
-    "curtain", "drapes", "blinds", "window blinds",
+    # Soft furnishings
+    "pillow", "cushion", "blanket",
+    "rug", "carpet", "mat",
+    "curtain", "blinds",
     
     # Electronics
-    "laptop", "computer",
-    "phone", "cellphone", "smartphone",
-    "television", "tv", "tv screen",
-    "monitor", "computer monitor",
-    "keyboard", "computer keyboard",
-    "mouse", "computer mouse",
-    "mousepad", "keyboard wrist rest",
-    "remote", "remote control",
-    "camera",
-    "speaker", "headphones", "earbuds",
-    "charger", "power strip",
+    "laptop", "computer", "monitor", "tv", "television",
+    "keyboard", "mouse", "mousepad",
+    "phone", "remote", "camera",
+    "speaker", "headphones",
     
     # Kitchen
-    "cup", "mug", "glass", "water bottle", "bottle",
+    "cup", "mug", "glass", "bottle", "water bottle",
     "plate", "bowl",
     "fork", "spoon", "knife",
     "pan", "pot", "kettle",
     "microwave", "refrigerator", "sink", "oven", "stove",
-    "toaster", "blender", "coffee maker", "dishwasher",
+    "toaster", "coffee maker",
     
     # Food
-    "food", "fruit", "vegetable", "bread",
+    "food", "fruit", "bread",
     
-    # Music/Instruments - added for piano detection
-    "piano", "piano keys", "piano book", "sheet music",
+    # Music/Instruments
+    "piano", "piano book", "sheet music",
     
-    # Tools/Items
-    "book", "notebook", "magazine",
-    "pen", "pencil", "paper",
-    "backpack", "purse", "wallet", "bag",
-    "key", "keys",
-    "box",
+    # Items
+    "book", "notebook", "paper", "pen",
+    "backpack", "bag", "purse",
+    "box", "key",
     
-    # Lighting - commonly missed
-    "lamp", "table lamp", "floor lamp",
-    "light", "ceiling light", "ceiling fan",
-    "chandelier", "candle",
+    # Lighting
+    "lamp", "ceiling light", "ceiling fan", "chandelier",
     
-    # Decor - distinct picture/painting/artwork
-    "plant", "potted plant", "houseplant",
-    "vase", "flower vase",
-    "picture", "picture frame", "photo frame",
-    "painting", "artwork", "wall art",
-    "clock", "wall clock",
-    "mirror",
-    "decoration", "ornament",
+    # Decor
+    "plant", "vase",
+    "picture", "painting", "artwork",
+    "clock", "mirror",
     
-    # Structure - added staircase/railing/fireplace
-    "window", "door", "doorway", "door frame",
-    "wall",
-    "floor",
-    "ceiling",
-    "staircase", "stairs", "steps",
-    "railing", "banister", "handrail",
-    "fireplace", "mantle",
-    "hallway", "corridor",
+    # Structure
+    "window", "door", "doorway",
+    "wall", "floor", "ceiling",
+    "staircase", "stairs", "railing",
+    "fireplace", "hallway",
     
-    # Background class (helps with detection per Ultralytics docs)
+    # Background class
     ""
 ]
 
@@ -158,7 +133,12 @@ class YOLOWorldDetector:
                     model_name = f"{model_name}.pt"
                 self._model = YOLOWorld(model_name)
                 
-                # Set custom classes
+                # Move model to device BEFORE setting classes
+                # This ensures CLIP text encoding runs on GPU
+                logger.info(f"Moving model to {self.config.device}")
+                self._model.to(self.config.device)
+                
+                # Set custom classes (now on GPU for fast CLIP encoding)
                 logger.info(f"Setting {len(self.config.classes)} custom classes")
                 self._model.set_classes(self.config.classes)
                 
