@@ -137,7 +137,15 @@ def normalize_track_row(row: dict[str, Any]) -> TrackDet | None:
         return None
 
     # Bbox
+    # Orion tracks.jsonl commonly uses bbox_2d=[x1,y1,x2,y2].
     bbox = row.get("bbox")
+    if bbox is None:
+        bb2d = row.get("bbox_2d")
+        if isinstance(bb2d, list) and len(bb2d) == 4:
+            bbox = bb2d
+        elif isinstance(bb2d, dict) and {"x1", "y1", "x2", "y2"}.issubset(bb2d.keys()):
+            bbox = [bb2d["x1"], bb2d["y1"], bb2d["x2"], bb2d["y2"]]
+
     if bbox is None:
         bb = row.get("bounding_box")
         # Some formats store dict or list; try best-effort.
@@ -145,6 +153,7 @@ def normalize_track_row(row: dict[str, Any]) -> TrackDet | None:
             bbox = bb
         elif isinstance(bb, dict) and {"x1", "y1", "x2", "y2"}.issubset(bb.keys()):
             bbox = [bb["x1"], bb["y1"], bb["x2"], bb["y2"]]
+
     if bbox is None or not isinstance(bbox, list) or len(bbox) != 4:
         return None
 
@@ -313,6 +322,22 @@ def ask_gemini_frame_audit(model, frame_b64: str, frame_idx: int, dets: list[Tra
         for d in dets_sorted[:30]
     ]
 
+    schema = r'''{
+    "visible_objects": ["..."] ,
+    "missed_objects": ["..."] ,
+    "false_positives": ["..."] ,
+    "misclassifications": [{"predicted": "...", "should_be": "...", "why": "..."}],
+    "bbox_quality": "...",
+    "tracking_notes": "...",
+    "recommended_fixes": {
+         "detection": ["..."],
+         "classification": ["..."],
+         "tracking": ["..."],
+         "reid": ["..."]
+    },
+    "confidence": 0.0
+}'''
+
     prompt = f"""You are auditing an object tracking pipeline output for a video.
 
 {global_context}
@@ -334,21 +359,7 @@ Task:
    - re-id (thresholds, embedding issues, merges)
 
 Return STRICT JSON in this schema:
-{
-  "visible_objects": ["..."] ,
-  "missed_objects": ["..."] ,
-  "false_positives": ["..."] ,
-  "misclassifications": [{"predicted": "...", "should_be": "...", "why": "..."}],
-  "bbox_quality": "...",
-  "tracking_notes": "...",
-  "recommended_fixes": {
-     "detection": ["..."],
-     "classification": ["..."],
-     "tracking": ["..."],
-     "reid": ["..."]
-  },
-  "confidence": 0.0
-}
+{schema}
 """
 
     resp = model.generate_content([
@@ -359,6 +370,15 @@ Return STRICT JSON in this schema:
 
 
 def ask_gemini_track_pair_audit(model, crop_a_b64: str, crop_b_b64: str, track_meta: dict[str, Any]):
+    schema = r'''{
+    "same_object": true/false,
+    "confidence": 0.0,
+    "reasoning": "...",
+    "likely_failure_mode": "fragmentation|id_switch|wrong_merge|unknown",
+    "recommended_fixes": ["..."],
+    "notes": "..."
+}'''
+
     prompt = f"""You are checking whether two crops correspond to the same physical object.
 
 Track meta (from the tracking system):
@@ -370,14 +390,7 @@ Questions:
 3) Provide concrete suggestions to reduce this issue (tracking gating, re-id thresholding, candidate labels, etc.).
 
 Return STRICT JSON:
-{
-  "same_object": true/false,
-  "confidence": 0.0,
-  "reasoning": "...",
-  "likely_failure_mode": "fragmentation|id_switch|wrong_merge|unknown",
-  "recommended_fixes": ["..."],
-  "notes": "..."
-}
+{schema}
 """
 
     resp = model.generate_content([
@@ -389,6 +402,23 @@ Return STRICT JSON:
 
 
 def ask_gemini_overall_review(model, context: dict[str, Any], frame_audits: list[dict[str, Any]], track_audits: list[dict[str, Any]]):
+    schema = r'''{
+    "prioritized_issues": [
+        {
+            "title": "...",
+            "stage": "detection|classification|tracking|reid|vlm|other",
+            "severity": "low|medium|high|critical",
+            "evidence": ["..."],
+            "likely_root_cause": "...",
+            "concrete_fixes": ["..."],
+            "validation_experiments": ["..."]
+        }
+    ],
+    "quick_wins": ["..."],
+    "longer_term_work": ["..."],
+    "confidence": 0.0
+}'''
+
     prompt = f"""You are producing a comprehensive evaluation + action plan for a video perception pipeline.
 
 Context (system-produced metrics & summaries):
@@ -406,22 +436,7 @@ Deliver:
 3) A short "next experiments" list to validate improvements.
 
 Return STRICT JSON:
-{
-  "prioritized_issues": [
-    {
-      "title": "...",
-      "stage": "detection|classification|tracking|reid|vlm|other",
-      "severity": "low|medium|high|critical",
-      "evidence": ["..."],
-      "likely_root_cause": "...",
-      "concrete_fixes": ["..."],
-      "validation_experiments": ["..."]
-    }
-  ],
-  "quick_wins": ["..."],
-  "longer_term_work": ["..."],
-  "confidence": 0.0
-}
+{schema}
 """
 
     resp = model.generate_content(prompt)
