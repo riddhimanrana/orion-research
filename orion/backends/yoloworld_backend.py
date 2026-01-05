@@ -20,34 +20,88 @@ logger = logging.getLogger(__name__)
 
 
 # Default class vocabulary for indoor/activity tracking
+# Optimized based on Gemini validation: 53.7% precision → improved coverage
 DEFAULT_CLASSES = [
-    # People
-    "person", "face", "hand",
-    # Furniture
-    "chair", "table", "desk", "couch", "sofa", "bed", "cabinet", "shelf", "drawer",
-    "ottoman", "stool", "bench", "nightstand", "dresser", "wardrobe",
-    # Soft furnishings
-    "pillow", "blanket", "cushion", "rug", "carpet", "curtain", "mat",
+    # People - added feet for disambiguation from hands
+    "person", "face", "hand", "feet",
+    
+    # Furniture - distinct definitions to reduce chair/ottoman/stool confusion
+    "chair", "armchair", "office chair",
+    "table", "coffee table", "dining table", "side table",
+    "desk",
+    "couch", "sofa", "loveseat",
+    "bed",
+    "cabinet", "shelf", "bookshelf", "drawer",
+    "ottoman", "footstool",  # Distinct from chair/stool
+    "stool", "bar stool",
+    "bench",
+    "nightstand", "dresser", "wardrobe",
+    
+    # Soft furnishings - distinct rug vs carpet vs mat
+    "pillow", "throw pillow", "cushion",
+    "blanket", "throw blanket",
+    "rug", "area rug",  # Distinct from carpet/mat
+    "carpet", "floor mat", "doormat",
+    "curtain", "drapes", "blinds", "window blinds",
+    
     # Electronics
-    "laptop", "phone", "cellphone", "tv", "television", "monitor", "screen", 
-    "keyboard", "mouse", "remote", "controller", "camera",
-    "speaker", "headphones", "charger", "appliance",
+    "laptop", "computer",
+    "phone", "cellphone", "smartphone",
+    "television", "tv", "tv screen",
+    "monitor", "computer monitor",
+    "keyboard", "computer keyboard",
+    "mouse", "computer mouse",
+    "mousepad", "keyboard wrist rest",
+    "remote", "remote control",
+    "camera",
+    "speaker", "headphones", "earbuds",
+    "charger", "power strip",
+    
     # Kitchen
-    "cup", "mug", "glass", "bottle", "plate", "bowl", "fork", "spoon", "knife",
-    "pan", "pot", "microwave", "refrigerator", "sink", "faucet", "oven", "stove",
-    "toaster", "blender", "coffee maker", "kettle", "dishwasher",
+    "cup", "mug", "glass", "water bottle", "bottle",
+    "plate", "bowl",
+    "fork", "spoon", "knife",
+    "pan", "pot", "kettle",
+    "microwave", "refrigerator", "sink", "oven", "stove",
+    "toaster", "blender", "coffee maker", "dishwasher",
+    
     # Food
-    "food", "fruit", "vegetable", "bread", "pizza", "sandwich",
+    "food", "fruit", "vegetable", "bread",
+    
+    # Music/Instruments - added for piano detection
+    "piano", "piano keys", "piano book", "sheet music",
+    
     # Tools/Items
-    "book", "notebook", "pen", "pencil", "paper", "document",
-    "bag", "backpack", "purse", "wallet", "key", "keys",
-    "box", "container", "package", "tool", "toy", "toys",
-    # Lighting
-    "lamp", "light", "chandelier", "candle",
-    # Decor
-    "plant", "vase", "picture", "frame", "painting", "clock", "mirror", 
-    # Structure
-    "window", "door", "wall", "floor", "ceiling", "stairs",
+    "book", "notebook", "magazine",
+    "pen", "pencil", "paper",
+    "backpack", "purse", "wallet", "bag",
+    "key", "keys",
+    "box",
+    
+    # Lighting - commonly missed
+    "lamp", "table lamp", "floor lamp",
+    "light", "ceiling light", "ceiling fan",
+    "chandelier", "candle",
+    
+    # Decor - distinct picture/painting/artwork
+    "plant", "potted plant", "houseplant",
+    "vase", "flower vase",
+    "picture", "picture frame", "photo frame",
+    "painting", "artwork", "wall art",
+    "clock", "wall clock",
+    "mirror",
+    "decoration", "ornament",
+    
+    # Structure - added staircase/railing/fireplace
+    "window", "door", "doorway", "door frame",
+    "wall",
+    "floor",
+    "ceiling",
+    "staircase", "stairs", "steps",
+    "railing", "banister", "handrail",
+    "fireplace", "mantle",
+    "hallway", "corridor",
+    
     # Background class (helps with detection per Ultralytics docs)
     ""
 ]
