@@ -2,7 +2,7 @@
 3D Perception Engine
 ====================
 
-Handles depth estimation, SLAM, and 3D lifting of entities.
+Handles depth estimation and 3D lifting of entities.
 Includes camera intrinsics utilities for 3D backprojection.
 """
 
@@ -13,14 +13,10 @@ from typing import List, Dict, Any, Optional, Tuple
 from orion.perception.types import Perception3DResult, EntityState3D, Hand, CameraIntrinsics, VisibilityState
 from orion.perception.depth import DepthEstimator
 
-# Optional SLAM import - may not be available
-try:
-    from orion.slam.slam_engine import SLAMEngine, SLAMConfig
-    SLAM_AVAILABLE = True
-except ImportError:
-    SLAMEngine = None
-    SLAMConfig = None
-    SLAM_AVAILABLE = False
+# NOTE: SLAM is intentionally not used by the perception engine.
+# The project may still contain SLAM code for future experiments, but the
+# default 3D pipeline is depth-only.
+SLAM_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +122,7 @@ class Perception3DEngine:
         enable_depth: bool = True,
         enable_hands: bool = False,
         enable_occlusion: bool = False,
-        enable_slam: bool = True,
+        enable_slam: bool = False,
         depth_model_size: str = "small",
         camera_intrinsics: Optional[CameraIntrinsics] = None,
     ):
@@ -151,11 +147,7 @@ class Perception3DEngine:
         
         self.slam_engine = None
         if enable_slam:
-            try:
-                self.slam_engine = SLAMEngine(SLAMConfig(enable_slam=True, use_depth=enable_depth))
-                logger.info("Perception3DEngine: SLAMEngine initialized")
-            except Exception as e:
-                logger.error(f"Failed to initialize SLAMEngine: {e}")
+            logger.warning("Perception3DEngine: SLAM requested but is disabled/deprecated in this build")
 
     def update_camera_intrinsics(self, intrinsics: CameraIntrinsics):
         """Update the camera intrinsics used for 3D calculations."""
@@ -175,8 +167,6 @@ class Perception3DEngine:
             depth_map, _ = self.depth_estimator.estimate(frame)
             
         camera_pose = None
-        if self.slam_engine:
-            camera_pose = self.slam_engine.process_frame(frame, depth_map, timestamp=timestamp)
             
         # Lift detections to 3D
         entities_3d = []

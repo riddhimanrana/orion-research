@@ -216,6 +216,13 @@ class Observation:
     rich_description: Optional[str] = None
     scene_id: Optional[str] = None
     location_id: Optional[str] = None
+
+    # Open-vocabulary semantics (non-committal; used to delay canonical labels)
+    candidate_labels: Optional[List[Dict[str, Any]]] = None
+    """Top-k candidate label hypotheses, e.g. [{label, score, source}, ...]."""
+
+    candidate_group: Optional[str] = None
+    """Prompt group name used for candidate labeling (for debugging/analysis)."""
     
     def __post_init__(self):
         """Validate observation"""
@@ -264,6 +271,12 @@ class PerceptionEntity:
     # Quality improvements (optional)
     corrected_class: Optional[str] = None  # Class correction result
     correction_confidence: Optional[float] = None  # Correction confidence score
+
+    # Canonical open-vocab label (resolved via HDBSCAN clustering on candidate labels)
+    canonical_label: Optional[str] = None
+    """Stable fine-grained label derived from candidate label clustering."""
+    canonical_confidence: Optional[float] = None
+    """Confidence (0-1) of the canonical label assignment."""
     
     def __post_init__(self):
         """Validate entity"""
@@ -321,7 +334,7 @@ class PerceptionEntity:
     
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization"""
-        return {
+        d = {
             "entity_id": self.entity_id,
             "object_class": self.object_class.value,
             "appearance_count": self.appearance_count,
@@ -329,16 +342,20 @@ class PerceptionEntity:
             "last_seen_frame": self.last_seen_frame,
             "description": self.description,
             "description_frame": self.description_frame,
+            "canonical_label": self.canonical_label,
+            "canonical_confidence": round(self.canonical_confidence, 4) if self.canonical_confidence else None,
             "observations": [
                 {
                     "frame": obs.frame_number,
                     "timestamp": obs.timestamp,
                     "bbox": obs.bounding_box.to_list(),
                     "confidence": obs.confidence,
+                    "candidate_labels": obs.candidate_labels,
                 }
                 for obs in self.observations
             ],
         }
+        return d
 
 
 @dataclass

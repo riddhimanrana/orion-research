@@ -35,9 +35,9 @@ def setup_gemini():
     """Initialize Gemini API."""
     load_dotenv()
     
-    api_key = os.environ.get("GOOGLE_API_KEY")
+    api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        print("ERROR: GOOGLE_API_KEY not found in environment or .env file")
+        print("ERROR: GOOGLE_API_KEY or GEMINI_API_KEY not found in environment or .env file")
         sys.exit(1)
     
     try:
@@ -121,7 +121,8 @@ def ask_gemini_about_frame(genai, frame_path: Path, question: str) -> str:
     """Ask Gemini a question about a frame."""
     import PIL.Image
     
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    model_name = os.environ.get("GEMINI_MODEL") or "gemini-3-flash-preview"
+    model = genai.GenerativeModel(model_name)
     image = PIL.Image.open(frame_path)
     
     response = model.generate_content([question, image])
@@ -135,7 +136,8 @@ def compare_with_gemini(genai, orion_result, sample_frames, output_dir: Path):
     
     print("\n=== Comparing with Gemini Vision ===")
     
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    model_name = os.environ.get("GEMINI_MODEL") or "gemini-3-flash-preview"
+    model = genai.GenerativeModel(model_name)
     comparisons = []
     
     # Build global summary for context

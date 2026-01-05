@@ -15,7 +15,6 @@ results/<episode_id>/
 ├── graph_summary.json       # Episode-level scene graph summary (Phase 4)
 ├── entities.json            # Legacy: clustered entities (Phase 1)
 ├── camera_intrinsics.json   # Camera calibration parameters
-├── slam_trajectory.npy      # Camera poses (if SLAM enabled)
 ├── qa.jsonl                 # Video QA responses (Phase 6)
 └── viz/                     # Optional visualization outputs
     ├── tracks_overlay.mp4

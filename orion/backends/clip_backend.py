@@ -61,7 +61,8 @@ class CLIPEmbedder:
     def __init__(
         self,
         model_name: str = "openai/clip-vit-base-patch32",
-        device: Optional[str] = None
+        device: Optional[str] = None,
+        local_files_only: bool = True,
     ):
         """
         Initialize CLIP model
@@ -90,22 +91,93 @@ class CLIPEmbedder:
         logger.info(f"Device: {self.device}")
         
         # Load model and processor
-        try:
+        self.local_files_only = bool(local_files_only)
+
+        def _load(local_only: bool):
             # Use safetensors format to bypass torch CVE-2025-32434
-            self.processor = CLIPProcessor.from_pretrained(model_name, local_files_only=True)
-            self.model = CLIPModel.from_pretrained(
+            processor = CLIPProcessor.from_pretrained(model_name, local_files_only=local_only)
+            model = CLIPModel.from_pretrained(
                 model_name,
                 torch_dtype=torch.float16 if self.device != "cpu" else torch.float32,
-                use_safetensors=True,  # Bypass torch.load vulnerability
-                local_files_only=True  # Use cached models only
+                use_safetensors=True,
+                local_files_only=local_only,
             ).to(self.device)
-            
-            self.model.eval()
+            model.eval()
+            return processor, model
+
+        try:
+            self.processor, self.model = _load(self.local_files_only)
             logger.info("✓ CLIP loaded successfully")
-            
         except Exception as e:
-            logger.error(f"Failed to load CLIP: {e}")
-            raise
+            if self.local_files_only:
+                logger.warning(
+                    "CLIP not found in local cache; retrying download from HuggingFace. Error: %s",
+                    e,
+                )
+                self.processor, self.model = _load(False)
+                logger.info("✓ CLIP loaded successfully (downloaded)")
+            else:
+                logger.error(f"Failed to load CLIP: {e}")
+                raise
+
+    def encode_images(
+        self,
+        images: list[Union[Image.Image, np.ndarray]],
+        normalize: bool = True,
+    ) -> np.ndarray:
+        """Batch encode images to embeddings.
+
+        Returns:
+            (N, D) float32 array.
+        """
+        if not images:
+            return np.zeros((0, 512), dtype=np.float32)
+
+        pil_images: list[Image.Image] = []
+        for img in images:
+            if isinstance(img, np.ndarray):
+                pil_images.append(Image.fromarray(img))
+            else:
+                pil_images.append(img)
+
+        inputs = self.processor(images=pil_images, return_tensors="pt")
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+        with torch.no_grad():
+            feats = self.model.get_image_features(**inputs)
+
+        embs = feats.detach().cpu().float().numpy()
+        if normalize and embs.size:
+            norms = np.linalg.norm(embs, axis=1, keepdims=True)
+            embs = embs / np.clip(norms, 1e-12, None)
+        return embs
+
+    def encode_texts(self, texts: list[str], normalize: bool = True) -> np.ndarray:
+        """Batch encode texts to embeddings.
+
+        Returns:
+            (N, D) float32 array.
+        """
+        if not texts:
+            return np.zeros((0, 512), dtype=np.float32)
+
+        inputs = self.processor(
+            text=texts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=77,
+        )
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+        with torch.no_grad():
+            feats = self.model.get_text_features(**inputs)
+
+        embs = feats.detach().cpu().float().numpy()
+        if normalize and embs.size:
+            norms = np.linalg.norm(embs, axis=1, keepdims=True)
+            embs = embs / np.clip(norms, 1e-12, None)
+        return embs
     
     def encode_image(
         self,

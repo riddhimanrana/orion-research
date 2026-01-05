@@ -21,6 +21,58 @@ from .types import DEFAULT_INTRINSICS_PRESET, INTRINSICS_PRESETS
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# YOLO-World prompt presets
+#
+# Key design: Stage-1 detection should be high-recall and low-commitment.
+# Using 100+ fine-grained prompts in YOLO-World set_classes() tends to cause
+# prompt collapse/noisy semantics and slows the pipeline.
+# ---------------------------------------------------------------------------
+
+YOLOWORLD_PROMPT_COARSE = (
+    "person . face . hand . "
+    "container . bottle . cup . "
+    "bag . box . "
+    "furniture . chair . table . "
+    "electronic device . phone . laptop . "
+    "text . "
+    "door . window . "
+    ""  # background class marker; empty string handled by yoloworld_categories()
+)
+
+# The previous default (~100 class indoor vocabulary) is kept as a preset for
+# research/ablation runs.
+YOLOWORLD_PROMPT_INDOOR_FULL = (
+    # =============================================================
+    # GENERAL INDOOR VOCABULARY (~100 classes)
+    # Comprehensive list for indoor scene understanding
+    # =============================================================
+    "person . "
+    "chair . couch . sofa . armchair . stool . bench . office chair . "
+    "table . desk . coffee table . dining table . counter . shelf . "
+    "cabinet . drawer . dresser . wardrobe . closet . bookshelf . nightstand . "
+    "bed . pillow . blanket . mattress . "
+    "monitor . laptop . keyboard . mouse . computer . tablet . "
+    "tv . television . remote . speaker . headphones . game controller . "
+    "phone . cell phone . smartphone . "
+    "printer . router . charger . cable . outlet . switch . lamp . "
+    "refrigerator . microwave . oven . stove . toaster . blender . coffee maker . "
+    "sink . faucet . plate . bowl . cup . mug . glass . bottle . "
+    "fork . knife . spoon . pan . pot . cutting board . "
+    "backpack . bag . handbag . suitcase . umbrella . wallet . keys . "
+    "glasses . sunglasses . watch . hat . jacket . shoe . "
+    "picture frame . painting . poster . mirror . clock . vase . plant . "
+    "curtain . rug . carpet . towel . "
+    "box . basket . bin . trash can . recycling bin . "
+    "door . window . doorknob . handle . "
+    "book . notebook . pen . pencil . paper . magazine . "
+    "toy . ball . doll . stuffed animal . "
+    "food . fruit . apple . banana . orange . sandwich . pizza . "
+    "dog . cat . bird . "
+    ""  # background class
+)
+
+
 @dataclass
 class DetectionConfig:
     """Detection backend configuration (YOLO or YOLO-World)."""
@@ -54,76 +106,33 @@ class DetectionConfig:
     yoloworld_model: str = "models/yolov8l-worldv2-general.pt"
     """YOLO-World model weights file. Pre-baked general indoor model for speed."""
 
-    yoloworld_prompt: str = (
-        # =============================================================
-        # GENERAL INDOOR VOCABULARY (~100 classes)
-        # Comprehensive list for indoor scene understanding
-        # Pre-baked into models/yolov8l-worldv2-general.pt for speed
-        # =============================================================
-        
-        # People
-        "person . "
-        
-        # Furniture - Seating
-        "chair . couch . sofa . armchair . stool . bench . office chair . "
-        
-        # Furniture - Tables & Surfaces
-        "table . desk . coffee table . dining table . counter . shelf . "
-        
-        # Furniture - Storage
-        "cabinet . drawer . dresser . wardrobe . closet . bookshelf . nightstand . "
-        
-        # Furniture - Beds
-        "bed . pillow . blanket . mattress . "
-        
-        # Electronics - Computing
-        "monitor . laptop . keyboard . mouse . computer . tablet . "
-        
-        # Electronics - Entertainment
-        "tv . television . remote . speaker . headphones . game controller . "
-        
-        # Electronics - Communication
-        "phone . cell phone . smartphone . "
-        
-        # Electronics - Other
-        "printer . router . charger . cable . outlet . switch . lamp . "
-        
-        # Kitchen - Appliances
-        "refrigerator . microwave . oven . stove . toaster . blender . coffee maker . "
-        
-        # Kitchen - Items
-        "sink . faucet . plate . bowl . cup . mug . glass . bottle . "
-        "fork . knife . spoon . pan . pot . cutting board . "
-        
-        # Personal Items
-        "backpack . bag . handbag . suitcase . umbrella . wallet . keys . "
-        "glasses . sunglasses . watch . hat . jacket . shoe . "
-        
-        # Decor & Fixtures
-        "picture frame . painting . poster . mirror . clock . vase . plant . "
-        "curtain . rug . carpet . towel . "
-        
-        # Containers & Storage
-        "box . basket . bin . trash can . recycling bin . "
-        
-        # Doors & Windows
-        "door . window . doorknob . handle . "
-        
-        # Misc Common Objects
-        "book . notebook . pen . pencil . paper . magazine . "
-        "toy . ball . doll . stuffed animal . "
-        "food . fruit . apple . banana . orange . sandwich . pizza . "
-        
-        # Animals
-        "dog . cat . bird . "
-        
-        # Background class (improves detection per YOLO-World docs)
-        ""
-    )
-    """Dot-separated prompt for YOLO-World. Comprehensive ~100 class indoor vocabulary."""
+    yoloworld_prompt_preset: Literal["coarse", "indoor_full", "custom"] = "coarse"
+    """Prompt preset for YOLO-World when yoloworld_use_custom_classes=True.
+
+    - coarse: small, stable super-categories (recommended default)
+    - indoor_full: legacy ~100 class indoor vocabulary (ablation/research)
+    - custom: use yoloworld_prompt as provided
+    """
+
+    yoloworld_prompt: str = ""
+    """Dot-separated prompt for YOLO-World when yoloworld_prompt_preset='custom'."""
 
     yoloworld_use_custom_classes: bool = True
     """If True, constrain YOLO-World via `set_classes(yoloworld_categories())`. If False, run YOLO-World with its default/open vocabulary."""
+
+    # Candidate open-vocab labeling (non-committal hypotheses, stored in detections)
+    # NOTE: This is CLIP-based and can be used with ANY detector backend.
+    yoloworld_enable_candidate_labels: bool = True
+    """If True, attach top-k candidate open-vocab labels to each detection (does NOT affect detection)."""
+
+    yoloworld_candidate_top_k: int = 5
+    """Top-k candidate labels to store per detection."""
+
+    yoloworld_candidate_prompt_groups: str = "electronics,containers,kitchen,office,personal_items"
+    """Comma-separated prompt groups used for candidate labeling (see orion/perception/open_vocab.py)."""
+
+    yoloworld_candidate_rotate_every_frames: int = 4
+    """Rotate candidate prompt groups every N sampled frames to cover long-tail labels over time."""
 
     def __post_init__(self):
         """Validate detection config."""
@@ -151,10 +160,29 @@ class DetectionConfig:
             raise ValueError(f"bbox_padding_percent must be >= 0, got {self.bbox_padding_percent}")
 
         if self.backend == "yoloworld":
-            if self.yoloworld_use_custom_classes and not self.yoloworld_prompt.strip():
-                raise ValueError(
-                    "yoloworld_prompt cannot be empty when yoloworld_use_custom_classes=True and backend='yoloworld'"
-                )
+            if self.yoloworld_use_custom_classes:
+                if self.yoloworld_prompt_preset == "custom" and not self.yoloworld_prompt.strip():
+                    raise ValueError(
+                        "yoloworld_prompt cannot be empty when yoloworld_prompt_preset='custom' and yoloworld_use_custom_classes=True"
+                    )
+
+            if self.yoloworld_candidate_top_k < 1:
+                raise ValueError("yoloworld_candidate_top_k must be >= 1")
+            if self.yoloworld_candidate_rotate_every_frames < 1:
+                raise ValueError("yoloworld_candidate_rotate_every_frames must be >= 1")
+
+        # Validate candidate prompt groups early (applies for any backend).
+        if self.yoloworld_enable_candidate_labels:
+            try:
+                from orion.perception.open_vocab import resolve_prompt_groups
+
+                raw = getattr(self, "yoloworld_candidate_prompt_groups", "")
+                group_names = [g.strip() for g in str(raw).split(",") if g.strip()]
+                # If empty, runtime will default to all groups.
+                if group_names:
+                    resolve_prompt_groups(group_names)
+            except Exception as e:
+                raise ValueError(f"Invalid yoloworld_candidate_prompt_groups: {e}")
 
         logger.debug(
             f"DetectionConfig validated: backend={self.backend}, model={self.model}, "
@@ -167,8 +195,15 @@ class DetectionConfig:
         Note: Empty string ('') is preserved as a background class per Ultralytics docs,
         which can improve detection performance in some scenarios.
         """
+        if self.yoloworld_prompt_preset == "coarse":
+            prompt = YOLOWORLD_PROMPT_COARSE
+        elif self.yoloworld_prompt_preset == "indoor_full":
+            prompt = YOLOWORLD_PROMPT_INDOOR_FULL
+        else:
+            prompt = self.yoloworld_prompt
+
         categories = []
-        for token in self.yoloworld_prompt.split('.'):
+        for token in prompt.split('.'):
             stripped = token.strip()
             categories.append(stripped)  # Keep all including empty string
         # Remove trailing empties except one (if present for background class)
@@ -179,17 +214,22 @@ class DetectionConfig:
 
 @dataclass
 class EmbeddingConfig:
-    """CLIP embedding configuration"""
+    """Re-ID embedding configuration.
     
-    # Model
-    model: str = "openai/clip-vit-base-patch32"
-    """CLIP model name from HuggingFace"""
+    V-JEPA2 is the canonical Re-ID backbone for Orion v2.
+    It provides 3D-aware video embeddings that handle viewpoint changes
+    better than 2D encoders (CLIP/DINO).
     
-    embedding_dim: int = 512
-    """Output embedding dimension"""
+    CLIP is still used *separately* for candidate-label scoring (open-vocab),
+    but not for Re-ID embeddings.
+    """
     
-    backend: Literal["clip", "dino", "dinov3", "vjepa2"] = "vjepa2"
-    """Embedding backend to use ('clip' for CLIP, 'dino' legacy, 'dinov3' video encoder, 'vjepa2' for 3D-aware video embeddings)."""
+    # V-JEPA2 model (the only supported Re-ID backend)
+    model: str = "facebook/vjepa2-vitl-fpc64-256"
+    """V-JEPA2 model name from HuggingFace."""
+    
+    embedding_dim: int = 1024
+    """Output embedding dimension (V-JEPA2 vitl = 1024)."""
 
     # Cluster / memory efficiency settings
     use_cluster_embeddings: bool = False
@@ -211,36 +251,16 @@ class EmbeddingConfig:
     """Device for embedding model (auto/cuda/mps/cpu)"""
 
     # Batch processing
-    batch_size: int = 32
-    """Embeddings per batch (higher = faster but more memory)"""
-
-    # Conditioning
-    use_text_conditioning: bool = True
-    """Condition embeddings on YOLO class labels"""
+    batch_size: int = 16
+    """Embeddings per batch. V-JEPA2 is heavier than CLIP; default lowered to 16."""
     
     def __post_init__(self):
-        """Validate embedding config"""
-        valid_models = {
-            "openai/clip-vit-base-patch32",
-            "openai/clip-vit-large-patch14",
-            "openai/clip-vit-base-patch16",
-        }
-        if self.model not in valid_models:
-            logger.warning(f"Unusual model: {self.model}. May not be recognized.")
-        
-        valid_dims = {512, 768, 1024}
+        """Validate embedding config."""
+        valid_dims = {768, 1024}
         if self.embedding_dim not in valid_dims:
             raise ValueError(
                 f"embedding_dim must be one of {valid_dims}, got {self.embedding_dim}"
             )
-        
-        if self.backend not in {"clip", "dino", "dinov3", "vjepa2"}:
-            raise ValueError(f"backend must be 'clip', 'dino', 'dinov3', or 'vjepa2', got {self.backend}")
-        
-        if self.backend in {"dino", "dinov3", "vjepa2"} and self.use_text_conditioning:
-            # DINO variants are vision-only; disable conditioning
-            logger.warning("Text conditioning requested with DINO backend; disabling use_text_conditioning.")
-            self.use_text_conditioning = False
 
         if not (0.0 <= self.cluster_similarity_threshold <= 1.0):
             raise ValueError(
@@ -253,8 +273,8 @@ class EmbeddingConfig:
         
         if self.batch_size < 1:
             raise ValueError(f"batch_size must be >= 1, got {self.batch_size}")
-        if self.batch_size > 256:
-            logger.warning(f"Very large batch_size: {self.batch_size}. May cause OOM.")
+        if self.batch_size > 64:
+            logger.warning(f"Large batch_size for V-JEPA2: {self.batch_size}. May cause OOM.")
         valid_devices = {"auto", "cuda", "mps", "cpu"}
         if self.device not in valid_devices:
             raise ValueError(f"device must be one of {valid_devices}, got {self.device}")
@@ -585,8 +605,8 @@ def get_ultra_fast_config() -> PerceptionConfig:
             confidence_threshold=0.5,
         ),
         embedding=EmbeddingConfig(
-            embedding_dim=512,
-            batch_size=128,
+            batch_size=32,
+            use_cluster_embeddings=True,
         ),
         description=DescriptionConfig(
             max_tokens=50,
@@ -613,8 +633,8 @@ def get_fast_config() -> PerceptionConfig:
             confidence_threshold=0.4,
         ),
         embedding=EmbeddingConfig(
-            embedding_dim=512,
-            batch_size=64,
+            batch_size=16,
+            use_cluster_embeddings=True,
         ),
         description=DescriptionConfig(
             max_tokens=100,
@@ -641,8 +661,7 @@ def get_balanced_config() -> PerceptionConfig:
             confidence_threshold=0.35,
         ),
         embedding=EmbeddingConfig(
-            embedding_dim=512,
-            batch_size=32,
+            batch_size=16,
         ),
         description=DescriptionConfig(
             max_tokens=200,
@@ -666,20 +685,15 @@ def get_accurate_config() -> PerceptionConfig:
             confidence_threshold=0.2,  # Lower threshold for more recall
         ),
         embedding=EmbeddingConfig(
-            embedding_dim=1280,
-            backend="vjepa2",
-            batch_size=16,
+            batch_size=8,
             device="auto",
         ),
         description=DescriptionConfig(
             max_tokens=300,
             temperature=0.2,
         ),
-        depth=DepthConfig(
-            model_name="depth_anything_v2",
-        ),
         target_fps=8.0,
-        enable_3d=True,
+        enable_3d=False,
         enable_tracking=True,
         clustering_cluster_selection_epsilon=0.5,
     )
@@ -698,8 +712,6 @@ def get_vjepa_config() -> PerceptionConfig:
             confidence_threshold=0.25,
         ),
         embedding=EmbeddingConfig(
-            backend="vjepa2",
-            embedding_dim=1024,  # V-JEPA2 ViT-L
             batch_size=16,
             device="auto",
         ),
@@ -710,4 +722,31 @@ def get_vjepa_config() -> PerceptionConfig:
         enable_3d=False,
         enable_depth=False,
         enable_tracking=True,
+    )
+
+
+def get_yoloworld_coarse_config() -> PerceptionConfig:
+    """YOLO-World coarse Stage 1 + V-JEPA2 Stage 2 + canonicalization Stage 3.
+
+    Intended for iterative tuning runs on a GPU box (e.g., Lambda):
+    - Stage 1: YOLO-World with a small, stable prompt preset to avoid prompt collapse
+    - Stage 1.5: CLIP candidate labels (fine-grained hypotheses)
+    - Stage 2: V-JEPA2 embeddings for tracking/Re-ID
+    - Stage 3: HDBSCAN-based canonical label resolution
+    """
+    det = DetectionConfig(
+        backend="yoloworld",
+        yoloworld_prompt_preset="coarse",
+        yoloworld_use_custom_classes=True,
+        yoloworld_enable_candidate_labels=True,
+        yoloworld_candidate_top_k=5,
+        confidence_threshold=0.15,
+    )
+    return PerceptionConfig(
+        detection=det,
+        embedding=EmbeddingConfig(batch_size=16, device="auto"),
+        description=DescriptionConfig(max_tokens=200, temperature=0.3),
+        target_fps=5.0,
+        enable_tracking=True,
+        use_memgraph=False,
     )

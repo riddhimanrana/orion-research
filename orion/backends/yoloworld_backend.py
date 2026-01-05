@@ -19,97 +19,42 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-# Default class vocabulary for indoor/activity tracking
-# v5 (FINAL): Optimized for 67.7% precision based on Gemini validation
-# Clean vocabulary without duplicates, proven best performance
+# Default class vocabulary: COARSE prompts only to avoid prompt collapse.
+# For fine-grained labeling, use the candidate-label pipeline (CLIP-based).
+# The legacy large vocabulary is kept in LEGACY_INDOOR_CLASSES for research.
 DEFAULT_CLASSES = [
-    # People
+    # Coarse, stable super-categories
+    "person", "face", "hand",
+    "container", "bottle", "cup",
+    "bag", "box",
+    "furniture", "table", "chair",
+    "electronic device", "phone", "laptop",
+    "door", "window",
+    "text",
+    "",  # Background class per Ultralytics guidance
+]
+
+# Legacy vocabulary (~100 classes) retained for ablation/research only.
+# Do NOT use as default; causes prompt collapse + noisy semantics.
+LEGACY_INDOOR_CLASSES = [
     "person", "face", "hand", "feet",
-    
-    # Furniture - seating
-    "chair", "armchair", "office chair", "stool", "ottoman",
-    "couch", "sofa",
-    "bench",
-    
-    # Furniture - surfaces
-    "table", "coffee table", "dining table", "side table", "desk",
-    "kitchen island", "counter",
-    "nightstand", "dresser",
-    
-    # Furniture - storage
-    "cabinet", "shelf", "drawer",
-    
-    # Beds
-    "bed",
-    
-    # Soft furnishings
-    "pillow", "cushion", "blanket",
-    "rug", "carpet", "mat",
-    "curtain", "blinds",
-    
-    # Electronics - screens
-    "laptop", "closed laptop",
-    "computer", "desktop computer",
-    "monitor", "computer screen",
-    "television", "tv screen",
-    
-    # Electronics - peripherals
-    "keyboard", "mouse", "mousepad",
-    "camera",
-    "speaker", "bluetooth speaker",
-    "headphones", "earbuds",
-    "phone", "smartphone", "remote",
-    "cable", "wire", "power cord",
-    
-    # Kitchen - appliances
-    "microwave", "refrigerator", "sink", "oven", "stove",
-    "toaster", "coffee maker",
-    
-    # Kitchen - items
-    "cup", "mug", "glass", "bottle", "water bottle",
-    "plate", "bowl",
-    "fork", "spoon", "knife",
-    "pan", "pot", "kettle",
-    
-    # Food
+    "chair", "armchair", "office chair", "stool", "ottoman", "couch", "sofa", "bench",
+    "table", "coffee table", "dining table", "side table", "desk", "kitchen island", "counter", "nightstand", "dresser",
+    "cabinet", "shelf", "drawer", "bed",
+    "pillow", "cushion", "blanket", "rug", "carpet", "mat", "curtain", "blinds",
+    "laptop", "closed laptop", "computer", "desktop computer", "monitor", "computer screen", "television", "tv screen",
+    "keyboard", "mouse", "mousepad", "camera", "speaker", "bluetooth speaker", "headphones", "earbuds",
+    "phone", "smartphone", "remote", "cable", "wire", "power cord",
+    "microwave", "refrigerator", "sink", "oven", "stove", "toaster", "coffee maker",
+    "cup", "mug", "glass", "bottle", "water bottle", "plate", "bowl", "fork", "spoon", "knife", "pan", "pot", "kettle",
     "food", "fruit", "bread",
-    
-    # Music/Instruments
     "piano", "piano book", "sheet music",
-    
-    # Reading/Writing
-    "book", "textbook",
-    "notebook", "notepad",
-    "paper", "document",
-    "pen", "pencil",
-    
-    # Bags/Containers
-    "backpack", "bag", "purse",
-    "box", "key",
-    
-    # Lighting
-    "lamp", "table lamp", "floor lamp",
-    "ceiling light", "ceiling fan", "chandelier",
-    "light fixture",
-    
-    # Decor
-    "plant", "potted plant", "vase",
-    "picture", "picture frame", "painting", "artwork",
-    "clock", "mirror",
-    "decoration",
-    
-    # Structure - rooms/spaces
-    "doorway", "hallway",
-    
-    # Structure - architectural
-    "window", "door",
-    "wall", "floor", "ceiling",
-    "staircase", "stairs", "railing",
-    "fireplace",
-    "baseboard",
-    
-    # Background class
-    ""
+    "book", "textbook", "notebook", "notepad", "paper", "document", "pen", "pencil",
+    "backpack", "bag", "purse", "box", "key",
+    "lamp", "table lamp", "floor lamp", "ceiling light", "ceiling fan", "chandelier", "light fixture",
+    "plant", "potted plant", "vase", "picture", "picture frame", "painting", "artwork", "clock", "mirror", "decoration",
+    "doorway", "hallway", "window", "door", "wall", "floor", "ceiling", "staircase", "stairs", "railing", "fireplace", "baseboard",
+    "",
 ]
 
 
@@ -134,11 +79,22 @@ class YOLOWorldDetector:
     """
     YOLO-World open-vocabulary object detector.
     
-    Unlike YOLO11x which is trained on fixed COCO classes,
-    YOLO-World can detect any object specified via text prompts.
+    .. deprecated::
+        Use `orion.managers.model_manager.ModelManager.yoloworld` instead.
+        This standalone class is kept for backward compatibility and research
+        scripts, but the canonical path uses coarse defaults to prevent prompt
+        collapse. If you need the legacy ~100 class vocabulary, pass
+        `YOLOWorldConfig(classes=LEGACY_INDOOR_CLASSES.copy())`.
     """
     
     def __init__(self, config: Optional[YOLOWorldConfig] = None):
+        import warnings
+        warnings.warn(
+            "YOLOWorldDetector is deprecated; prefer ModelManager.yoloworld for pipeline runs. "
+            "Default class list is now coarse (~17 classes) to prevent prompt collapse.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.config = config or YOLOWorldConfig()
         self._model = None
         self._loaded = False

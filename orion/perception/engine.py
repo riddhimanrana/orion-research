@@ -156,10 +156,12 @@ class PerceptionEngine:
         # self.reid_model: Optional[ReidModel] = None
         self.depth_estimator: Optional[DepthEstimator] = None
         self.enhanced_tracker: Optional[TrackerProtocol] = None
-        self.slam_engine: Optional[SLAMEngine] = None
         
         # Scene context manager for v2 (FastVLM scene captions)
         self.scene_context: Optional[SceneContextManager] = None
+
+        # Optional: open-vocab candidate labeler (non-committal hypotheses)
+        self._open_vocab_labeler = None
 
         # Tracking history
         self.tracking_history: Dict[int, List[Track]] = {}  # To store track history
@@ -192,11 +194,8 @@ class PerceptionEngine:
             enable_3d=self.config.enable_3d,
             enable_occlusion=self.config.enable_occlusion,
         )
-        # Visual embedder (V-JEPA2 doesn't need CLIP)
-        if self.config.embedding.backend == "vjepa2":
-            self.embedder = VisualEmbedder(clip_model=None, config=self.config.embedding)
-        else:
-            self.embedder = VisualEmbedder(self.model_manager.clip, self.config.embedding)
+        # Visual embedder (always V-JEPA2 for Re-ID)
+        self.embedder = VisualEmbedder(config=self.config.embedding)
         # Entity tracker (optional, can be None)
         self.tracker = EntityTracker(self.config)
         # Entity describer
@@ -255,6 +254,52 @@ class PerceptionEngine:
 
         logger.info("✓ All components initialized\n")
 
+    def _ensure_open_vocab_labeler(self):
+        """Lazily initialize the open-vocab candidate labeler."""
+        if self._open_vocab_labeler is not None:
+            return
+
+        det_cfg = self.config.detection
+        # Candidate labeling is CLIP-based and can be used with ANY detector backend.
+        # We keep the existing config field name for backward compatibility.
+        if not getattr(det_cfg, "yoloworld_enable_candidate_labels", False):
+            self._open_vocab_labeler = False
+            return
+
+        try:
+            from orion.perception.candidate_labeler import OpenVocabCandidateLabeler
+            from orion.perception.open_vocab import PromptSchedule, resolve_prompt_groups
+
+            group_names = [
+                g.strip() for g in getattr(det_cfg, "yoloworld_candidate_prompt_groups", "").split(",")
+                if g.strip()
+            ]
+
+            # If no groups were configured, default to all known groups.
+            if not group_names:
+                group_names = list(resolve_prompt_groups(None).keys())
+
+            schedule = PromptSchedule(
+                group_names=group_names,
+                rotate_every_frames=int(getattr(det_cfg, "yoloworld_candidate_rotate_every_frames", 4)),
+            )
+
+            # This may download CLIP weights if not cached.
+            clip = self.model_manager.clip
+            self._open_vocab_labeler = OpenVocabCandidateLabeler(
+                clip_embedder=clip,
+                prompt_schedule=schedule,
+                top_k=int(getattr(det_cfg, "yoloworld_candidate_top_k", 5)),
+            )
+            logger.info(
+                "✓ Open-vocab candidate labeling enabled (%s groups, top_k=%s)",
+                len(group_names),
+                getattr(det_cfg, "yoloworld_candidate_top_k", 5),
+            )
+        except Exception as e:
+            logger.warning("Open-vocab candidate labeling disabled (init failed): %s", e)
+            self._open_vocab_labeler = False
+
     @profile("engine_process_video")
     def process_video(self, video_path: str, save_visualizations: bool = False, output_dir: str = "results") -> PerceptionResult:
         """
@@ -262,7 +307,7 @@ class PerceptionEngine:
         
         Args:
             video_path: Path to video file
-            save_visualizations: If True, export SLAM/tracking data for visualization
+            save_visualizations: If True, export camera intrinsics and tracking/entity data for visualization
             output_dir: Directory to save visualization data
             
         Returns:
@@ -351,11 +396,34 @@ class PerceptionEngine:
         t0 = time.time()
         detections = self.observer.process_video(video_path)
         metrics_timings["detection_seconds"] = time.time() - t0
+
+        # Step 1.5: Attach open-vocab candidate label hypotheses (non-committal)
+        self._ensure_open_vocab_labeler()
+        if self._open_vocab_labeler not in (None, False) and detections:
+            try:
+                by_frame: dict[int, list[dict]] = {}
+                for det in detections:
+                    by_frame.setdefault(int(det.get("frame_number", 0)), []).append(det)
+                # Rotate prompt groups on the *sampled* frame index rather than the raw
+                # video frame id. Raw ids can skip large intervals (e.g. 0, 6, 12, ...),
+                # causing uneven prompt-group coverage.
+                for sample_idx, frame_id in enumerate(sorted(by_frame.keys())):
+                    frame_dets = by_frame[frame_id]
+                    self._open_vocab_labeler.attach_candidates(frame_dets, frame_number=sample_idx)
+
+                # Lightweight coverage metric for debugging/tuning.
+                dets_with_cands = sum(1 for d in detections if d.get("candidate_labels"))
+                logger.info(
+                    "  ✓ Candidate labels attached: %d/%d detections (%.1f%%)",
+                    dets_with_cands,
+                    len(detections),
+                    100.0 * dets_with_cands / max(1, len(detections)),
+                )
+            except Exception as e:
+                logger.warning("Candidate labeling failed: %s", e)
         
-        # Retrieve SLAM engine from observer if it was used (Phase 1 3D)
-        if self.observer.perception_engine and self.observer.perception_engine.slam_engine:
-            self.slam_engine = self.observer.perception_engine.slam_engine
-            logger.info(f"  ✓ Retrieved SLAM trajectory ({len(self.slam_engine.poses)} poses)")
+        # NOTE: SLAM is intentionally disabled/removed from the perception engine.
+        # Depth-only 3D lifting can still be enabled via Perception3DEngine.
         
         # Step 2: Embed detections
         t0 = time.time()
@@ -385,6 +453,16 @@ class PerceptionEngine:
         t0 = time.time()
         entities = self._reid_deduplicate_entities(entities)
         metrics_timings["reid_seconds"] = time.time() - t0
+
+        # Step 4.6: Canonical label resolution (HDBSCAN on candidate labels)
+        t0 = time.time()
+        try:
+            from orion.perception.canonical_labeler import canonicalize_entities
+            num_canonical = canonicalize_entities(entities)
+            logger.info(f"  ✓ Canonical labels: {num_canonical}/{len(entities)} entities")
+        except Exception as e:
+            logger.warning(f"Canonical labeling failed: {e}")
+        metrics_timings["canonicalization_seconds"] = time.time() - t0
 
         # Step 5: Describe entities
         t0 = time.time()
@@ -430,7 +508,7 @@ class PerceptionEngine:
             "timings": metrics_timings,
             "sampled_frames": sampled_frames,
             "detections_per_sampled_frame": (len(detections) / sampled_frames) if sampled_frames else 0.0,
-            "embedding_backend": getattr(self.config.embedding, "backend", "clip"),
+            "embedding_backend": "vjepa2",
             "embedding_dim": self.config.embedding.embedding_dim,
             "detector_backend": self.config.detection.backend,
             "detector_model": (
@@ -474,23 +552,15 @@ class PerceptionEngine:
         return result
 
     def _export_visualization_data(self, result: PerceptionResult, output_dir: str):
-        """Export SLAM trajectory, camera intrinsics, and tracking data for visualization."""
+        """Export camera intrinsics and tracking/entity data for visualization."""
         from pathlib import Path
         
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         
         logger.info(f"Exporting visualization data to {output_dir}/...")
-        
-        # 1. Export SLAM trajectory if available
-        if self.slam_engine is not None and len(self.slam_engine.poses) > 0:
-            trajectory_file = output_path / "slam_trajectory.npy"
-            np.save(trajectory_file, np.array(self.slam_engine.poses))
-            logger.info(f"  ✓ Saved SLAM trajectory: {trajectory_file}")
-        else:
-            logger.warning("  ✗ No SLAM trajectory to export (SLAM not active or no poses)")
-        
-        # 2. Export camera intrinsics (preset or config derived)
+
+        # 1. Export camera intrinsics (preset or config derived)
         intrinsics_file = output_path / "camera_intrinsics.json"
         camera_intrinsics = self.config.camera.resolve_intrinsics(
             width=self.config.camera.width,
@@ -509,8 +579,8 @@ class PerceptionEngine:
         with open(intrinsics_file, "w") as f:
             json.dump(intrinsics_payload, f, indent=2)
         logger.info(f"  ✓ Saved camera intrinsics: {intrinsics_file}")
-        
-        # 3. Export tracking data (entities with re-tracking events)
+
+        # 2. Export tracking/entity data
         entities_file = output_path / "entities.json"
         entities_data = {
             "total_entities": len(result.entities),
@@ -1021,6 +1091,8 @@ class PerceptionEngine:
                 raw_yolo_class=det.get("object_class"),
                 frame_width=det.get("frame_width"),
                 frame_height=det.get("frame_height"),
+                candidate_labels=det.get("candidate_labels"),
+                candidate_group=det.get("candidate_group"),
             )
             
             observations.append(obs)
@@ -1028,7 +1100,7 @@ class PerceptionEngine:
         return observations
 
     def _run_enhanced_tracking(self, detections: List[dict]) -> None:
-        """Run EnhancedTracker over detections grouped by frame, with SLAM pose update."""
+        """Run EnhancedTracker over detections grouped by frame."""
         if self.enhanced_tracker is None:
             return
 
@@ -1043,20 +1115,8 @@ class PerceptionEngine:
             # Build arrays for tracker
             converted, embs = self._convert_for_enhanced_tracker(frame_dets)
 
-            # For now, use simple identity pose (SLAM integration requires frame/depth data)
-            # TODO: Properly integrate SLAM by passing frames and depth to process_frame()
-            camera_pose = None
-            if self.slam_engine is not None:
-                # Generate simple forward-moving trajectory for visualization
-                # In a full implementation, pass actual frame data to slam_engine.process_frame()
-                t = np.array([0.0, 0.0, fidx * 0.05])  # Move 5cm per frame
-                camera_pose = np.eye(4)
-                camera_pose[:3, 3] = t
-                self.slam_engine.poses.append(camera_pose)
-                self.slam_engine.trajectory.append(t)
-
-            # Update tracker with pose for camera motion compensation
-            active_tracks = self.enhanced_tracker.update(converted, embs, camera_pose=camera_pose, frame_idx=fidx)
+            # Update tracker (camera_pose intentionally omitted; SLAM is not part of the engine)
+            active_tracks = self.enhanced_tracker.update(converted, embs, camera_pose=None, frame_idx=fidx)
             if active_tracks:
                 self.tracking_history[fidx] = active_tracks
             last_stats = self.enhanced_tracker.get_statistics()
