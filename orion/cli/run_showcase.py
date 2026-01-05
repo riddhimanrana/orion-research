@@ -92,7 +92,12 @@ def _phase2(args: argparse.Namespace, video_path: Path, results_dir: Path) -> Di
     if not tracks_path.exists():
         raise FileNotFoundError("tracks.jsonl missing; run Phase 1 first")
 
-    logger.info("[Phase 2] Building memory.json")
+    # Configure Re-ID backend (dino or vjepa2)
+    from orion.managers.model_manager import ModelManager
+    mm = ModelManager.get_instance()
+    mm.reid_backend = getattr(args, 'reid_backend', 'dino')
+    logger.info(f"[Phase 2] Building memory.json (Re-ID backend: {mm.reid_backend})")
+    
     build_memory_from_tracks(
         episode_id=args.episode,
         video_path=video_path,
@@ -196,6 +201,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hand-track-conf", type=float, default=0.3)
     parser.add_argument("--enable-3d", action="store_true", help="Enable 3D perception (Depth/SLAM)")
     parser.add_argument("--reid-threshold", type=float, default=0.70)
+    parser.add_argument("--reid-backend", default="dino", choices=["dino", "vjepa2"],
+                        help="Re-ID embedding backend: dino (faster) or vjepa2 (better for viewpoint changes)")
     parser.add_argument("--max-crops-per-track", type=int, default=5)
 
     parser.add_argument("--skip-phase1", action="store_true")

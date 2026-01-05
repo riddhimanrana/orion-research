@@ -145,8 +145,17 @@ def compute_observation_embedding(
         raise RuntimeError(f"Empty crop for bbox {raw_bbox_list} @ frame {fid}")
 
     mm = ModelManager.get_instance()
-    dino = mm.dino
-    emb = dino.encode_image(crop, normalize=True)
+    reid_model = mm.reid_embedder  # Uses dino or vjepa2 based on reid_backend
+    
+    # Handle different embedding APIs (DINO vs V-JEPA2)
+    if hasattr(reid_model, 'embed_single_image'):
+        # V-JEPA2 backend
+        emb_tensor = reid_model.embed_single_image(crop)
+        emb = emb_tensor.numpy().flatten()
+    else:
+        # DINO backend
+        emb = reid_model.encode_image(crop, normalize=True)
+    
     return emb.astype(np.float32)
 
 
@@ -206,7 +215,8 @@ def compute_track_embeddings(
         Dict mapping track_id -> embedding vector (np.ndarray)
     """
     mm = ModelManager.get_instance()
-    dino = mm.dino
+    reid_model = mm.reid_embedder  # Uses dino or vjepa2 based on reid_backend
+    use_vjepa2 = hasattr(reid_model, 'embed_single_image')
 
     by_frame = _group_by(tracks, "frame_id")
     needed_frames = sorted(by_frame.keys())
@@ -245,11 +255,19 @@ def compute_track_embeddings(
         if not crops:
             continue
 
-        # Encode in batch if possible
-        try:
-            embs = dino.encode_images_batch(crops)
-        except Exception:
-            embs = [dino.encode_image(c) for c in crops]
+        # Encode: V-JEPA2 vs DINO have different APIs
+        if use_vjepa2:
+            # V-JEPA2: embed each crop as single-frame video
+            embs = []
+            for crop in crops:
+                emb_tensor = reid_model.embed_single_image(crop)
+                embs.append(emb_tensor.numpy().flatten())
+        else:
+            # DINO: use batch encoding if available
+            try:
+                embs = reid_model.encode_images_batch(crops)
+            except Exception:
+                embs = [reid_model.encode_image(c) for c in crops]
 
         for (tid, _), emb in zip(meta, embs):
             per_track_embs.setdefault(tid, []).append(emb.astype(np.float32))

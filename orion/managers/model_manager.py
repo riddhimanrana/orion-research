@@ -91,6 +91,7 @@ class ModelManager:
         self._clip: Optional[Any] = None
         self._fastvlm: Optional[Any] = None
         self._dino: Optional[Any] = None
+        self._vjepa2: Optional[Any] = None
         self._groundingdino: Optional[Any] = None
         
         # Model configuration
@@ -98,6 +99,9 @@ class ModelManager:
         self.yoloworld_model_name = "yolov8m-worldv2.pt"  # YOLO-World model
         self.yoloworld_classes: Optional[list] = None  # Classes to set for YOLO-World
         self.groundingdino_model_id = "IDEA-Research/grounding-dino-base"
+        
+        # Re-ID backend configuration (dino or vjepa2)
+        self.reid_backend = "dino"  # or "vjepa2"
         
         # LLM for contextual understanding
         self._ollama_client: Optional[Any] = None
@@ -311,6 +315,55 @@ class ModelManager:
             raise
 
     # ========================================================================
+    # V-JEPA2 Video Embedder (3D-aware for better Re-ID)
+    # ========================================================================
+
+    @property
+    def vjepa2(self) -> Any:
+        """
+        Get V-JEPA2 embedder (lazy loaded).
+
+        V-JEPA2 is a 3D-aware video encoder that handles the same object
+        from different viewing angles better than 2D encoders like CLIP/DINO.
+
+        Returns:
+            VJepa2Embedder instance
+        """
+        if self._vjepa2 is None:
+            self._vjepa2 = self._load_vjepa2()
+        return self._vjepa2
+
+    def _load_vjepa2(self) -> Any:
+        """Load V-JEPA2 model for 3D-aware video embeddings"""
+        try:
+            from orion.backends.vjepa2_backend import VJepa2Embedder
+
+            logger.info("Loading V-JEPA2 embedder (3D-aware video encoder)…")
+
+            embedder = VJepa2Embedder(
+                model_name="facebook/vjepa2-vitl-fpc64-256",
+                device=self.device,
+            )
+
+            logger.info("✓ V-JEPA2 loaded (3D-aware embeddings for Re-ID)")
+            return embedder
+        except Exception as e:
+            logger.error(f"Failed to load V-JEPA2: {e}")
+            raise
+
+    @property
+    def reid_embedder(self) -> Any:
+        """
+        Get the configured Re-ID embedder (DINO or V-JEPA2).
+
+        The backend is controlled by `self.reid_backend`.
+        Defaults to DINO for backward compatibility.
+        """
+        if self.reid_backend == "vjepa2":
+            return self.vjepa2
+        return self.dino
+
+    # ========================================================================
     # GroundingDINO Zero-Shot Detector
     # ========================================================================
 
@@ -412,6 +465,9 @@ class ModelManager:
         if self._dino is not None:
             del self._dino
             self._dino = None
+        if self._vjepa2 is not None:
+            del self._vjepa2
+            self._vjepa2 = None
         if self._groundingdino is not None:
             del self._groundingdino
             self._groundingdino = None
