@@ -341,7 +341,11 @@ class FrameObserver:
                         "class_id": int(boxes.cls[i]),
                         "class_name": result.names[int(boxes.cls[i])],
                     }
-                )\n        return detections\n    \n    @profile(\"observer_detect_objects\")\n    def detect_objects(
+                )
+        return detections
+
+    @profile("observer_detect_objects")
+    def detect_objects(
         self,
         frame: np.ndarray,
         frame_number: int,
