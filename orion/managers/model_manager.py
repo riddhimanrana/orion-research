@@ -371,7 +371,30 @@ class ModelManager:
             del self._clip
             self._clip = None
         
-        if self._fastvlm is not None:\n            del self._fastvlm\n            self._fastvlm = None\n        if self._vjepa2 is not None:\n            del self._vjepa2\n            self._vjepa2 = None\n        \n        # Clear GPU memory\n        if torch.cuda.is_available():\n            torch.cuda.empty_cache()\n        elif torch.backends.mps.is_available():\n            torch.mps.empty_cache()\n        \n        logger.info(\"✓ Cleanup complete\")\n    \n    def get_memory_usage(self) -> dict:\n        \"\"\"Get current memory usage\"\"\"\n        usage = {\n            \"yolo_loaded\": self._yolo is not None,\n            \"yoloworld_loaded\": self._yoloworld is not None,\n            \"clip_loaded\": self._clip is not None,\n            \"fastvlm_loaded\": self._fastvlm is not None,\n            \"vjepa2_loaded\": self._vjepa2 is not None,\n        }
+        if self._fastvlm is not None:
+            del self._fastvlm
+            self._fastvlm = None
+        if self._vjepa2 is not None:
+            del self._vjepa2
+            self._vjepa2 = None
+        
+        # Clear GPU memory
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        elif torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+        
+        logger.info("✓ Cleanup complete")
+    
+    def get_memory_usage(self) -> dict:
+        """Get current memory usage"""
+        usage = {
+            "yolo_loaded": self._yolo is not None,
+            "yoloworld_loaded": self._yoloworld is not None,
+            "clip_loaded": self._clip is not None,
+            "fastvlm_loaded": self._fastvlm is not None,
+            "vjepa2_loaded": self._vjepa2 is not None,
+        }
         
         if torch.cuda.is_available():
             usage["gpu_memory_allocated"] = torch.cuda.memory_allocated() / 1024**3  # GB
