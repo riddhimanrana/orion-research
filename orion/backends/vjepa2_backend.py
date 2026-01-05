@@ -117,9 +117,17 @@ class VJepa2Embedder:
         
         with torch.no_grad():
             # Use get_vision_features() per official docs
-            embedding = self._model.get_vision_features(**inputs)
+            # Returns [batch, num_patches, hidden_dim] - need to pool
+            features = self._model.get_vision_features(**inputs)
+            
+            # Pool across patches (mean pooling)
+            # Shape: [batch, num_patches, 1024] -> [batch, 1024]
+            embedding = features.mean(dim=1)
+            
+            # L2 normalize for cosine similarity
+            embedding = torch.nn.functional.normalize(embedding, p=2, dim=-1)
         
-        return embedding.cpu()
+        return embedding.cpu().float()
     
     def embed_video_sequence(
         self, 
@@ -168,9 +176,16 @@ class VJepa2Embedder:
         
         with torch.no_grad():
             # Use get_vision_features() per official V-JEPA2 docs
-            embedding = self._model.get_vision_features(**inputs)
+            # Returns [batch, num_patches, hidden_dim] - need to pool
+            features = self._model.get_vision_features(**inputs)
+            
+            # Pool across patches (mean pooling)
+            embedding = features.mean(dim=1)
+            
+            # L2 normalize for cosine similarity
+            embedding = torch.nn.functional.normalize(embedding, p=2, dim=-1)
         
-        return embedding.cpu()
+        return embedding.cpu().float()
     
     def embed_track_crops(
         self,
