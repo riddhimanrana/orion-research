@@ -42,17 +42,21 @@ DYNAMIC_CLASSES = {
     "pen", "pencil", "paper", "document",
     # Small furniture (can move)
     "chair", "stool", "pillow", "blanket", "vase", "plant",
-    "wrist rest", "mousepad", "pencil case", "figurine"
+    "wrist rest", "mousepad", "pencil case", "figurine",
+    # Large furniture - can appear from multiple angles, needs Re-ID
+    "couch", "sofa", "bed", "desk", "table", "dining table", "coffee table",
+    "bookshelf", "dresser", "cabinet", "nightstand", "wardrobe", "closet",
+    # Appliances - distinct objects
+    "refrigerator", "microwave", "oven", "tv", "television", "monitor",
+    # Architecture - doors/windows can appear from multiple angles
+    "door", "window", "staircase", "stairs", "railing",
 }
 
 STATIC_CLASSES = {
-    # Large furniture
-    "couch", "sofa", "bed", "desk", "table", "dining table", "coffee table",
-    "bookshelf", "dresser", "cabinet", "nightstand", "wardrobe", "closet",
-    # Appliances
-    "refrigerator", "microwave", "oven", "tv", "television", "monitor",
-    # Architecture
-    "wall", "ceiling", "floor", "door", "window", "staircase", "railing"
+    # Only truly background elements that don't need cross-view matching
+    "wall", "ceiling", "floor",
+    # Large uniform surfaces
+    "rug", "carpet", "mat"
 }
 
 SUPPRESS_CLASSES = {
@@ -76,11 +80,29 @@ CLASS_THRESHOLDS = {
     "keyboard": 0.75,
     "mouse": 0.75,
     
-    # Furniture - can be more lenient  
+    # Furniture - more lenient (same furniture from different angles)
     "chair": 0.72,
     "stool": 0.72,
     "pillow": 0.65,
     "blanket": 0.65,
+    "couch": 0.65,
+    "sofa": 0.65,
+    "bed": 0.65,
+    "desk": 0.68,
+    "table": 0.68,
+    "cabinet": 0.65,
+    
+    # Architecture - need to match across different views
+    "door": 0.60,      # Doors look very different from different angles
+    "window": 0.65,
+    "stairs": 0.60,
+    "staircase": 0.60,
+    
+    # Appliances
+    "tv": 0.70,
+    "television": 0.70,
+    "monitor": 0.72,
+    "refrigerator": 0.70,
     
     # Default for unlisted classes
     "_default": 0.75
