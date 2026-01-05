@@ -100,8 +100,8 @@ class ModelManager:
         self.yoloworld_classes: Optional[list] = None  # Classes to set for YOLO-World
         self.groundingdino_model_id = "IDEA-Research/grounding-dino-base"
         
-        # Re-ID backend configuration (dino or vjepa2)
-        self.reid_backend = "dino"  # or "vjepa2"
+        # Re-ID backend configuration - V-JEPA2 is default (3D-aware video encoder)
+        self.reid_backend = "vjepa2"  # Use V-JEPA2 for 3D-aware Re-ID (per v2 architecture)
         
         # LLM for contextual understanding
         self._ollama_client: Optional[Any] = None

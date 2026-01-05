@@ -433,7 +433,9 @@ def build_memory_from_tracks(
     tracks = _read_tracks_jsonl(tracks_path)
 
     # Compute per-track embeddings
-    logger.info("Computing per-track embeddings (cropped DINO encodings)…")
+    from orion.managers.model_manager import ModelManager
+    mm = ModelManager.get_instance()
+    logger.info(f"Computing per-track embeddings ({mm.reid_backend.upper()} encoder)…")
     track_embs = compute_track_embeddings(video_path, tracks, max_crops_per_track)
     logger.info(f"✓ Got embeddings for {len(track_embs)} tracks")
 
