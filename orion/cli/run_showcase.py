@@ -114,9 +114,11 @@ def _phase3_graph(args: argparse.Namespace, results_dir: Path) -> Dict:
     graph_path = results_dir / "scene_graph.jsonl"
     summary_path = results_dir / "graph_summary.json"
     if args.skip_graph:
-        if not summary_path.exists():
-            raise FileNotFoundError("graph_summary.json missing; cannot skip graph stage")
-        return json.loads(summary_path.read_text())
+        if summary_path.exists():
+            return json.loads(summary_path.read_text())
+        # Return empty summary if skipping and no graph exists
+        logger.info("[Graph] Skipped (--skip-graph)")
+        return {"nodes": 0, "edges": 0, "skipped": True}
 
     if graph_path.exists() and summary_path.exists() and not args.force_graph:
         logger.info("[Graph] Reusing existing scene graph")
