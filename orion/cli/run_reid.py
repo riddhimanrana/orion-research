@@ -39,7 +39,7 @@ def main():
     parser.add_argument("--video", type=str, help="Path to source video", required=False)
     parser.add_argument("--tracks", type=str, help="Path to tracks.jsonl (defaults to results/<episode>/tracks.jsonl)", required=False)
     parser.add_argument("--out", type=str, help="Output directory (defaults to results/<episode>)", required=False)
-    parser.add_argument("--threshold", type=float, default=0.75, help="Default cosine similarity threshold")
+    parser.add_argument("--threshold", type=float, default=0.70, help="Default cosine similarity threshold")
     parser.add_argument("--class-thresholds", type=str, default=None, help="Path to JSON mapping {class: threshold}")
     parser.add_argument("--max-crops-per-track", type=int, default=5, help="Max crops to embed per track")
     args = parser.parse_args()

@@ -322,7 +322,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-graph", action="store_true")
     parser.add_argument("--skip-samples", action="store_true")
 
-    parser.add_argument("--reid-threshold", type=float, default=0.75)
+    parser.add_argument("--reid-threshold", type=float, default=0.70)
     parser.add_argument("--max-crops-per-track", type=int, default=5)
 
     # Graph parameters (matching run_scene_graph)

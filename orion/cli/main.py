@@ -148,7 +148,7 @@ For more help: orion <command> --help
     embed_parser.add_argument(
         "--similarity", 
         type=float, 
-        default=0.75, 
+        default=0.70, 
         help="Cosine similarity threshold for clustering (default: 0.75)"
     )
 

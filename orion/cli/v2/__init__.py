@@ -69,7 +69,7 @@ Examples:
     embed_parser.add_argument("--embedder", choices=["vjepa2", "dino", "clip"], default="vjepa2")
     embed_parser.add_argument("--mode", choices=["single", "video"], default="single",
                               help="single=best frame, video=multi-crop as video")
-    embed_parser.add_argument("--threshold", type=float, default=0.75, 
+    embed_parser.add_argument("--threshold", type=float, default=0.70, 
                               help="Cosine similarity threshold for clustering")
     
     # === FILTER ===

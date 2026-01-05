@@ -193,7 +193,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hand-max", type=int, default=2)
     parser.add_argument("--hand-det-conf", type=float, default=0.5)
     parser.add_argument("--hand-track-conf", type=float, default=0.3)
-    parser.add_argument("--reid-threshold", type=float, default=0.75)
+    parser.add_argument("--reid-threshold", type=float, default=0.70)
     parser.add_argument("--max-crops-per-track", type=int, default=5)
 
     parser.add_argument("--skip-phase1", action="store_true")

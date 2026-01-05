@@ -195,7 +195,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hand-det-conf", type=float, default=0.5)
     parser.add_argument("--hand-track-conf", type=float, default=0.3)
     parser.add_argument("--enable-3d", action="store_true", help="Enable 3D perception (Depth/SLAM)")
-    parser.add_argument("--reid-threshold", type=float, default=0.75)
+    parser.add_argument("--reid-threshold", type=float, default=0.70)
     parser.add_argument("--max-crops-per-track", type=int, default=5)
 
     parser.add_argument("--skip-phase1", action="store_true")
