@@ -48,26 +48,7 @@ def get_default_device() -> str:
     return "cpu"
 
 
-def process_video_to_tracks(
-    video_path: str,
-    episode_id: str,
-    target_fps: float = 5.0,
-    yolo_model: str = "yolo11m",
-    detector_backend: str = "yolo",
-    yoloworld_open_vocab: bool = False,
-    yoloworld_prompt: str | None = None,
-    confidence_threshold: float = 0.25,
-    iou_threshold: float = 0.3,
-    groundingdino_prompt: str | None = None,
-    groundingdino_box_threshold: float | None = None,
-    groundingdino_text_threshold: float | None = None,
-    max_age: int = 30,
-    device: str = "auto",
-    save_viz: bool = False,
-    enable_hand_detector: bool = False,
-    hand_max_hands: int = 2,
-    hand_detection_confidence: float = 0.5,
-    hand_tracking_confidence: float = 0.3,
+def process_video_to_tracks(\n    video_path: str,\n    episode_id: str,\n    target_fps: float = 5.0,\n    yolo_model: str = \"yolo11m\",\n    detector_backend: str = \"yolo\",\n    yoloworld_open_vocab: bool = False,\n    yoloworld_prompt: str | None = None,\n    confidence_threshold: float = 0.25,\n    iou_threshold: float = 0.3,\n    max_age: int = 30,\n    device: str = \"auto\",\n    save_viz: bool = False,\n    enable_hand_detector: bool = False,\n    hand_max_hands: int = 2,\n    hand_detection_confidence: float = 0.5,\n    hand_tracking_confidence: float = 0.3,
     enable_3d: bool = False,
     depth_model_size: str = "small",
     disable_slam: bool = False,
@@ -80,17 +61,13 @@ def process_video_to_tracks(
         episode_id: Episode identifier for results
         target_fps: Target FPS for processing
         yolo_model: YOLO variant to use
-        detector_backend: Detection backend ('yolo', 'yoloworld', 'groundingdino')
+        detector_backend: Detection backend ('yolo', 'yoloworld')
         confidence_threshold: Min detection confidence
         iou_threshold: Min IoU for track association
         max_age: Frames to keep unmatched tracks
         device: Device to run on ('auto', 'cuda', 'mps', 'cpu')
         save_viz: Save visualization outputs
-        enable_3d: Enable 3D perception (Depth/SLAM)
-        
-    Returns:
-        Dictionary with statistics
-    """
+        enable_3d: Enable 3D perception (Depth/SLAM)\n        \n    Returns:\n        Dictionary with statistics\n    \"\"\"
     # Auto-detect device if needed
     if device == "auto":
         device = get_default_device()
@@ -112,15 +89,7 @@ def process_video_to_tracks(
     from orion.perception.config import DetectionConfig
     from ultralytics import YOLO
     
-    # Initialize detector based on backend
-    yolo = None
-    yoloworld = None
-    grounding_dino = None
-    
-    if detector_backend == "yolo":
-        logger.info(f"Loading YOLO model: {yolo_model}")
-        yolo = YOLO(f"{yolo_model}.pt")
-    elif detector_backend == "yoloworld":
+    # Initialize detector based on backend\n    yolo = None\n    yoloworld = None\n    \n    if detector_backend == \"yolo\":\n        logger.info(f\"Loading YOLO model: {yolo_model}\")\n        yolo = YOLO(f\"{yolo_model}.pt\")\n    elif detector_backend == \"yoloworld\":
         # Get model from config (default: yolov8l-worldv2.pt)
         det_config_temp = DetectionConfig(
             backend="yoloworld",
@@ -137,53 +106,7 @@ def process_video_to_tracks(
             # Verify classes match config if possible, but for now trust the file
             logger.info(f"  Model classes: {yoloworld.names}")
         else:
-            # Constrain YOLO-World to our custom household prompt/categories
-            custom_classes = det_config_temp.yoloworld_categories()
-            logger.info(f"  Setting {len(custom_classes)} custom classes for open-vocab detection")
-            yoloworld.set_classes(custom_classes)
-            yoloworld.set_classes(custom_classes)
-    elif detector_backend == "groundingdino":
-        logger.info("Loading GroundingDINO model...")
-        from orion.perception.detectors.grounding_dino import GroundingDINOWrapper
-        import torch
-        gdino_device = "cpu" if torch.backends.mps.is_available() else device
-        grounding_dino = GroundingDINOWrapper(
-            model_id="IDEA-Research/grounding-dino-base",
-            device=gdino_device,
-            use_half_precision=False
-        )
-    
-    det_config = DetectionConfig(
-        backend=detector_backend,
-        model=yolo_model,
-        confidence_threshold=confidence_threshold,
-        yoloworld_use_custom_classes=(False if yoloworld_open_vocab else True),
-        yoloworld_prompt=(yoloworld_prompt or DetectionConfig().yoloworld_prompt),
-        groundingdino_prompt=(groundingdino_prompt or DetectionConfig().groundingdino_prompt),
-        groundingdino_box_threshold=(
-            float(groundingdino_box_threshold)
-            if groundingdino_box_threshold is not None
-            else DetectionConfig().groundingdino_box_threshold
-        ),
-        groundingdino_text_threshold=(
-            float(groundingdino_text_threshold)
-            if groundingdino_text_threshold is not None
-            else DetectionConfig().groundingdino_text_threshold
-        ),
-    )
-    
-    observer = FrameObserver(
-        config=det_config,
-        detector_backend=detector_backend,
-        yolo_model=yolo,
-        grounding_dino=grounding_dino,
-        yoloworld_model=yoloworld,
-        target_fps=target_fps,
-        enable_3d=enable_3d,
-        depth_model_size=depth_model_size,
-        enable_slam=(not disable_slam),
-        show_progress=True,
-    )
+            # Constrain YOLO-World to our custom household prompt/categories\n            custom_classes = det_config_temp.yoloworld_categories()\n            logger.info(f\"  Setting {len(custom_classes)} custom classes for open-vocab detection\")\n            yoloworld.set_classes(custom_classes)\n    \n    det_config = DetectionConfig(\n        backend=detector_backend,\n        model=yolo_model,\n        confidence_threshold=confidence_threshold,\n        yoloworld_use_custom_classes=(False if yoloworld_open_vocab else True),\n        yoloworld_prompt=(yoloworld_prompt or DetectionConfig().yoloworld_prompt),\n    )\n    \n    observer = FrameObserver(\n        config=det_config,\n        detector_backend=detector_backend,\n        yolo_model=yolo,\n        yoloworld_model=yoloworld,\n        target_fps=target_fps,\n        enable_3d=enable_3d,\n        depth_model_size=depth_model_size,\n        enable_slam=False,\n        show_progress=True,\n    )
     current_step += 1
     
     # Initialize tracker
@@ -331,9 +254,9 @@ def main():
     parser.add_argument(
         "--detector-backend",
         type=str,
-        default="yolo",
-        choices=["yolo", "yoloworld", "groundingdino"],
-        help="Detection backend (default: yolo)"
+        default="yoloworld",
+        choices=["yolo", "yoloworld"],
+        help="Detection backend (default: yoloworld)"
     )
     parser.add_argument(
         "--yoloworld-open-vocab",
@@ -348,24 +271,6 @@ def main():
             "Dot-separated prompt/classes for YOLO-World set_classes() (e.g. 'chair . table . lamp'). "
             "Only used when --detector-backend yoloworld and --yoloworld-open-vocab is NOT set."
         ),
-    )
-    parser.add_argument(
-        "--groundingdino-prompt",
-        type=str,
-        default=None,
-        help="Dot-separated prompt for GroundingDINO (overrides config default)",
-    )
-    parser.add_argument(
-        "--groundingdino-box-threshold",
-        type=float,
-        default=None,
-        help="GroundingDINO box threshold (overrides config default)",
-    )
-    parser.add_argument(
-        "--groundingdino-text-threshold",
-        type=float,
-        default=None,
-        help="GroundingDINO text threshold (overrides config default)",
     )
     parser.add_argument(
         "--conf-threshold",
@@ -466,9 +371,6 @@ def main():
             detector_backend=args.detector_backend,
             yoloworld_open_vocab=args.yoloworld_open_vocab,
             yoloworld_prompt=args.yoloworld_prompt,
-            groundingdino_prompt=args.groundingdino_prompt,
-            groundingdino_box_threshold=args.groundingdino_box_threshold,
-            groundingdino_text_threshold=args.groundingdino_text_threshold,
             enable_hand_detector=args.detect_hands,
             hand_max_hands=args.hand_max,
             hand_detection_confidence=args.hand_det_conf,

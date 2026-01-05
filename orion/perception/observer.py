@@ -47,9 +47,8 @@ class FrameObserver:
     def __init__(
         self,
         config: DetectionConfig,
-        detector_backend: Literal["yolo", "groundingdino", "yoloworld"] = "yolo",
+        detector_backend: Literal["yolo", "yoloworld"] = "yolo",
         yolo_model: Optional[Any] = None,
-        grounding_dino: Optional[Any] = None,
         yoloworld_model: Optional[Any] = None,
         target_fps: float = 2.0,
         show_progress: bool = True,
@@ -57,15 +56,14 @@ class FrameObserver:
         depth_model: str = "midas",
         depth_model_size: str = "small",
         enable_occlusion: bool = False,
-        enable_slam: bool = True,
+        enable_slam: bool = False,
     ):
         """
         Initialize observer.
         
         Args:
-            detector_backend: Detection backend identifier ('yolo', 'groundingdino', 'yoloworld')
+            detector_backend: Detection backend identifier ('yolo', 'yoloworld')
             yolo_model: YOLO model instance from ModelManager
-            grounding_dino: GroundingDINO wrapper when backend='groundingdino'
             yoloworld_model: YOLO-World model instance when backend='yoloworld'
             config: Detection configuration
             target_fps: Target frames per second for processing
@@ -79,13 +77,10 @@ class FrameObserver:
         self.show_progress = show_progress
         self.detector_backend = detector_backend
         self.yolo = yolo_model if detector_backend == "yolo" else None
-        self.grounding_dino = grounding_dino if detector_backend == "groundingdino" else None
         self.yoloworld = yoloworld_model if detector_backend == "yoloworld" else None
 
         if self.detector_backend == "yolo" and self.yolo is None:
             raise ValueError("YOLO backend selected but yolo_model was not provided")
-        if self.detector_backend == "groundingdino" and self.grounding_dino is None:
-            raise ValueError("GroundingDINO backend selected but wrapper was not provided")
         if self.detector_backend == "yoloworld" and self.yoloworld is None:
             raise ValueError("YOLO-World backend selected but yoloworld_model was not provided")
 
@@ -285,9 +280,7 @@ class FrameObserver:
 
     def _run_detection_backend(self, frame: np.ndarray) -> List[Dict[str, Any]]:
         """Dispatch to the configured detection backend."""
-        if self.detector_backend == "groundingdino":
-            return self._detect_with_groundingdino(frame)
-        elif self.detector_backend == "yoloworld":
+        if self.detector_backend == "yoloworld":
             return self._detect_with_yoloworld(frame)
         else:
             return self._detect_with_yolo(frame)
@@ -348,46 +341,7 @@ class FrameObserver:
                         "class_id": int(boxes.cls[i]),
                         "class_name": result.names[int(boxes.cls[i])],
                     }
-                )
-        return detections
-
-    def _detect_with_groundingdino(self, frame: np.ndarray) -> List[Dict[str, Any]]:
-        """Run GroundingDINO inference and normalize outputs."""
-        if self.grounding_dino is None:
-            return []
-
-        raw_detections = self.grounding_dino.detect(
-            frame_bgr=frame,
-            prompt=self.config.groundingdino_prompt,
-            box_threshold=self.config.groundingdino_box_threshold,
-            text_threshold=self.config.groundingdino_text_threshold,
-            max_detections=self.config.groundingdino_max_detections,
-        )
-
-        normalized: List[Dict[str, Any]] = []
-        for det in raw_detections:
-            label = det.get("label", "object").strip() or "object"
-            class_id = self._register_grounding_label(label)
-            normalized.append(
-                {
-                    "bbox": det.get("bbox", [0, 0, 0, 0]),
-                    "confidence": det.get("confidence", 0.0),
-                    "class_id": class_id,
-                    "class_name": label,
-                }
-            )
-        return normalized
-
-    def _register_grounding_label(self, label: str) -> int:
-        """Register unseen GroundingDINO labels for downstream components."""
-        normalized = label.lower()
-        if normalized not in self._grounding_label_map:
-            self._grounding_label_map[normalized] = len(self.detector_classes)
-            self.detector_classes.append(label)
-        return self._grounding_label_map[normalized]
-    
-    @profile("observer_detect_objects")
-    def detect_objects(
+                )\n        return detections\n    \n    @profile(\"observer_detect_objects\")\n    def detect_objects(
         self,
         frame: np.ndarray,
         frame_number: int,

@@ -49,7 +49,6 @@ from orion.perception.describer import EntityDescriber
 from orion.perception.depth import DepthEstimator
 # from orion.utils.file_utils import find_latest_file
 from orion.settings import OrionSettings
-from orion.perception.detectors.grounding_dino import GroundingDINOWrapper
 
 # Add this import
 from orion.perception.trackers.enhanced import Track
@@ -107,14 +106,6 @@ try:
 except Exception as e:
     logging.warning(f"EnhancedTracker import failed: {e}")
     ENHANCED_TRACKER_AVAILABLE = False
-
-# Optional SLAM for camera motion compensation
-try:
-    from orion.slam.slam_engine import SLAMEngine, SLAMConfig
-    SLAM_AVAILABLE = True
-except Exception as e:
-    logging.warning(f"SLAMEngine import failed: {e}")
-    SLAM_AVAILABLE = False
 
 # Memgraph Backend
 try:
@@ -178,21 +169,6 @@ class PerceptionEngine:
         """Initializes all perception components based on the config."""
         settings = OrionSettings.load()
         
-        # GroundingDINO detector
-        if self.config.detection.backend == "groundingdino":
-            logger.info("Initializing GroundingDINO detector...")
-            # GroundingDINO has MPS compatibility issues on macOS - force CPU
-            import torch
-            gdino_device = "cpu" if torch.backends.mps.is_available() else self.config.embedding.device
-            logger.info(f"  GroundingDINO will use device: {gdino_device}")
-            self.grounding_dino = GroundingDINOWrapper(
-                model_id=self.config.detection.groundingdino_model_id,
-                device=gdino_device,
-                use_half_precision=False
-            )
-        else:
-            self.grounding_dino = None
-
         # YOLO-World detector
         yoloworld_model = None
         if self.config.detection.backend == "yoloworld":
@@ -211,7 +187,6 @@ class PerceptionEngine:
             config=self.config.detection,
             detector_backend=self.config.detection.backend,
             yolo_model=self.model_manager.yolo if self.config.detection.backend == "yolo" else None,
-            grounding_dino=self.grounding_dino,
             yoloworld_model=yoloworld_model,
             target_fps=self.config.target_fps,
             enable_3d=self.config.enable_3d,
@@ -461,7 +436,7 @@ class PerceptionEngine:
             "detector_model": (
                 self.config.detection.model
                 if self.config.detection.backend == "yolo"
-                else self.config.detection.groundingdino_model_id
+                else self.config.detection.yoloworld_model
             ),
             "cluster_embeddings": int(sum(1 for d in detections if 'cluster_rep_id' in d and d.get('cluster_size'))),
             "avg_cluster_size": float(np.mean([d.get('cluster_size',1) for d in detections if d.get('cluster_size')])) if any(d.get('cluster_size') for d in detections) else 1.0,

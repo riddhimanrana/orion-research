@@ -10,8 +10,8 @@ This package now focuses purely on the perception stage. Graph/scene memory util
 Modules:
     - types: Data structures (Observation, PerceptionEntity, Hand, EntityState3D, etc.)
     - config: Configuration for perception components
-    - observer: Frame sampling and YOLO/GroundingDINO detection
-    - embedder: CLIP embedding generation
+    - observer: Frame sampling and YOLO/YOLO-World detection
+    - embedder: V-JEPA2 embedding generation for Re-ID
     - tracker: HDBSCAN clustering into entities
     - describer: FastVLM description generation
     - depth: Monocular depth estimation helpers

@@ -23,10 +23,10 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DetectionConfig:
-    """Detection backend configuration (YOLO, GroundingDINO, or YOLO-World)."""
+    """Detection backend configuration (YOLO or YOLO-World)."""
 
-    backend: Literal["yolo", "groundingdino", "yoloworld"] = "yoloworld"
-    """Primary detector to use for frame observations. Options: 'yolo', 'groundingdino', 'yoloworld'
+    backend: Literal["yolo", "yoloworld"] = "yoloworld"
+    """Primary detector to use for frame observations. Options: 'yolo', 'yoloworld'
     
     v2 default: 'yoloworld' for open-vocabulary detection without retraining.
     """
@@ -49,26 +49,6 @@ class DetectionConfig:
     # Cropping
     bbox_padding_percent: float = 0.1
     """Padding to add around bounding boxes when cropping (percentage of box size)."""
-
-    # GroundingDINO-specific options
-    groundingdino_model_id: str = "IDEA-Research/grounding-dino-base"
-    """Hugging Face model identifier for GroundingDINO."""
-
-    groundingdino_prompt: str = (
-        "person . chair . couch . dining table . tv . laptop . keyboard . monitor . "
-        "book . cup . bottle . plant . refrigerator . microwave . oven . sink . bed . "
-        "counter . cabinet . dog . cat . backpack . suitcase . chair"
-    )
-    """Dot-separated open-vocabulary prompt used by GroundingDINO."""
-
-    groundingdino_box_threshold: float = 0.30
-    """Box confidence threshold for GroundingDINO post-processing."""
-
-    groundingdino_text_threshold: float = 0.25
-    """Text confidence threshold for GroundingDINO token matching."""
-
-    groundingdino_max_detections: int = 100
-    """Upper bound on detections returned per frame when using GroundingDINO."""
 
     # YOLO-World specific options (v2 primary detector)
     yoloworld_model: str = "models/yolov8l-worldv2-general.pt"
@@ -147,8 +127,8 @@ class DetectionConfig:
 
     def __post_init__(self):
         """Validate detection config."""
-        if self.backend not in {"yolo", "groundingdino", "yoloworld"}:
-            raise ValueError(f"backend must be 'yolo', 'groundingdino', or 'yoloworld', got {self.backend}")
+        if self.backend not in {"yolo", "yoloworld"}:
+            raise ValueError(f"backend must be 'yolo' or 'yoloworld', got {self.backend}")
 
         # Model validation
         valid_models = {"yolo11n", "yolo11s", "yolo11m", "yolo11x"}
@@ -162,16 +142,6 @@ class DetectionConfig:
         if not (0 <= self.iou_threshold <= 1):
             raise ValueError(f"iou_threshold must be in [0, 1], got {self.iou_threshold}")
 
-        if not (0 <= self.groundingdino_box_threshold <= 1):
-            raise ValueError(
-                f"groundingdino_box_threshold must be in [0, 1], got {self.groundingdino_box_threshold}"
-            )
-
-        if not (0 <= self.groundingdino_text_threshold <= 1):
-            raise ValueError(
-                f"groundingdino_text_threshold must be in [0, 1], got {self.groundingdino_text_threshold}"
-            )
-
         # Size validation
         if self.min_object_size < 1:
             raise ValueError(f"min_object_size must be >= 1, got {self.min_object_size}")
@@ -179,12 +149,6 @@ class DetectionConfig:
         # Padding validation
         if self.bbox_padding_percent < 0:
             raise ValueError(f"bbox_padding_percent must be >= 0, got {self.bbox_padding_percent}")
-
-        if self.backend == "groundingdino":
-            if not self.groundingdino_prompt.strip():
-                raise ValueError("groundingdino_prompt cannot be empty when backend='groundingdino'")
-            if self.groundingdino_max_detections < 1:
-                raise ValueError("groundingdino_max_detections must be >= 1")
 
         if self.backend == "yoloworld":
             if self.yoloworld_use_custom_classes and not self.yoloworld_prompt.strip():
@@ -196,10 +160,6 @@ class DetectionConfig:
             f"DetectionConfig validated: backend={self.backend}, model={self.model}, "
             f"conf_thresh={self.confidence_threshold}, iou_thresh={self.iou_threshold}"
         )
-
-    def grounding_categories(self) -> list[str]:
-        """Return normalized category list for GroundingDINO prompts."""
-        return [token.strip() for token in self.groundingdino_prompt.split('.') if token.strip()]
 
     def yoloworld_categories(self) -> list[str]:
         """Return normalized category list for YOLO-World prompts.
@@ -697,19 +657,17 @@ def get_accurate_config() -> PerceptionConfig:
     """
     Accurate mode: maximum quality (slowest)
     
-    Uses YOLO11x for best detection quality.
-    Note: GroundingDINO has MPS compatibility issues on macOS and is very slow on CPU.
-    For open-vocabulary detection, use --groundingdino flag explicitly.
+    Uses YOLO11x for best detection quality with V-JEPA2 for Re-ID.
     """
     return PerceptionConfig(
         detection=DetectionConfig(
-            backend="yolo",  # Use YOLO11x for best quality (GroundingDINO has MPS issues)
+            backend="yolo",  # Use YOLO11x for best quality
             model="yolo11x",  # Largest YOLO model
             confidence_threshold=0.2,  # Lower threshold for more recall
         ),
         embedding=EmbeddingConfig(
-            embedding_dim=768,
-            backend="dino",
+            embedding_dim=1280,
+            backend="vjepa2",
             batch_size=16,
             device="auto",
         ),

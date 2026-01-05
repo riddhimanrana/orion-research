@@ -8,10 +8,10 @@ Orion is a memory-centric video understanding system for persistent object track
 ## Architecture
 
 **Phase 1 (Current): Perception Pipeline**
-- Detection: YOLO11 (Ultralytics) or GroundingDINO (zero-shot) for 2D proposals
-- Embeddings: Configurable backend (CLIP / DINO / DINOv3) for appearance & Re-ID
+- Detection: YOLO11 or YOLO-World (open-vocabulary) for 2D proposals
+- Embeddings: V-JEPA2 for 3D-aware Re-ID (video-native)
 - Re-ID: Adaptive merging with per-class similarity thresholds and spatial/temporal heuristics
-- Descriptions: FastVLM (mlx-vlm local) for visual descriptions
+- Semantic Filtering: FastVLM for visual descriptions, SentenceTransformers for false-positive rejection
 - Depth: DepthAnythingV2 for spatial mapping (optional)
 
 **Phase 2–4 (Roadmap): Memory Engine**
@@ -145,27 +145,27 @@ Configuration:
 
 Edit `orion/perception/config.py` or adjust fields programmatically (e.g., backend, clustering, `reid_debug`).
 
-### Switching to GroundingDINO Detection
+### Using YOLO-World Open Vocabulary
 
-GroundingDINO can replace YOLO11 when you need stronger zero-shot coverage or text-conditioned prompts. Toggle it directly through the perception config:
+YOLO-World provides open-vocabulary detection with custom prompts. Use it for flexible zero-shot detection:
 
 ```python
 from orion.perception.config import PerceptionConfig
 from orion.perception.engine import PerceptionEngine
 
 config = PerceptionConfig()
-config.detection.backend = "groundingdino"
-config.detection.groundingdino_model_id = "IDEA-Research/grounding-dino-base"  # or tiny/large variants
-config.detection.groundingdino_prompt = "person . chair . laptop . monitor . bottle ."
+config.detection.backend = "yoloworld"
+config.detection.yoloworld_model = "models/yolov8x-worldv2.pt"  # x = big model
+config.detection.yoloworld_open_vocab = True  # dynamic vocabulary at runtime
 
 engine = PerceptionEngine(config=config)
 result = engine.process_video("data/examples/test.mp4")
 ```
 
 Key notes:
-- Prompts are dot-separated phrases; keep them concise for best grounding results.
-- `groundingdino_box_threshold` / `groundingdino_text_threshold` control aggressiveness (lower = more boxes).
-- Pillow is now a core dependency (`pip install -e .` pulls it in) to support Hugging Face processors.
+- Pre-baked models (`yolov8l-worldv2-general.pt`) are faster but fixed vocabulary.
+- Open vocab mode (`yoloworld_open_vocab=True`) allows runtime prompt changes.
+- Use bigger models (`yolov8x-worldv2.pt`) for better detection quality.
 
 
 License: See `LICENSE`.

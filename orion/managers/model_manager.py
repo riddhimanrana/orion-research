@@ -91,13 +91,11 @@ class ModelManager:
         self._clip: Optional[Any] = None
         self._fastvlm: Optional[Any] = None
         self._vjepa2: Optional[Any] = None
-        self._groundingdino: Optional[Any] = None
         
         # Model configuration
         self.yolo_model_name = "yolo11m"  # Default to medium (balanced)
         self.yoloworld_model_name = "yolov8m-worldv2.pt"  # YOLO-World model
         self.yoloworld_classes: Optional[list] = None  # Classes to set for YOLO-World
-        self.groundingdino_model_id = "IDEA-Research/grounding-dino-base"
         
         # LLM for contextual understanding
         self._ollama_client: Optional[Any] = None
@@ -311,39 +309,6 @@ class ModelManager:
         return self.vjepa2
 
     # ========================================================================
-    # GroundingDINO Zero-Shot Detector
-    # ========================================================================
-
-    @property
-    def groundingdino(self) -> Any:
-        """Get GroundingDINO detector wrapper (lazy loaded)."""
-        if self._groundingdino is None:
-            self._groundingdino = self._load_groundingdino()
-        return self._groundingdino
-
-    def _load_groundingdino(self) -> Any:
-        """Load GroundingDINO detector via Hugging Face."""
-        try:
-            from orion.perception.detectors.grounding_dino import GroundingDINOWrapper
-
-            logger.info(
-                "Loading GroundingDINO wrapper (%s)…",
-                self.groundingdino_model_id,
-            )
-
-            detector = GroundingDINOWrapper(
-                model_id=self.groundingdino_model_id,
-                device=self.device,
-                use_half_precision=self.device != "cpu",
-            )
-
-            logger.info("✓ GroundingDINO ready")
-            return detector
-        except Exception as e:
-            logger.error(f"Failed to load GroundingDINO: {e}")
-            raise
-    
-    # ========================================================================
     # FastVLM Describer
     # ========================================================================
     
@@ -406,36 +371,7 @@ class ModelManager:
             del self._clip
             self._clip = None
         
-        if self._fastvlm is not None:
-            del self._fastvlm
-            self._fastvlm = None
-        if self._dino is not None:
-            del self._dino
-            self._dino = None
-        if self._vjepa2 is not None:
-            del self._vjepa2
-            self._vjepa2 = None
-        if self._groundingdino is not None:
-            del self._groundingdino
-            self._groundingdino = None
-        
-        # Clear GPU memory
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        elif torch.backends.mps.is_available():
-            torch.mps.empty_cache()
-        
-        logger.info("✓ Cleanup complete")
-    
-    def get_memory_usage(self) -> dict:
-        """Get current memory usage"""
-        usage = {
-            "yolo_loaded": self._yolo is not None,
-            "clip_loaded": self._clip is not None,
-            "fastvlm_loaded": self._fastvlm is not None,
-            "dino_loaded": self._dino is not None,
-                "groundingdino_loaded": self._groundingdino is not None,
-        }
+        if self._fastvlm is not None:\n            del self._fastvlm\n            self._fastvlm = None\n        if self._vjepa2 is not None:\n            del self._vjepa2\n            self._vjepa2 = None\n        \n        # Clear GPU memory\n        if torch.cuda.is_available():\n            torch.cuda.empty_cache()\n        elif torch.backends.mps.is_available():\n            torch.mps.empty_cache()\n        \n        logger.info(\"✓ Cleanup complete\")\n    \n    def get_memory_usage(self) -> dict:\n        \"\"\"Get current memory usage\"\"\"\n        usage = {\n            \"yolo_loaded\": self._yolo is not None,\n            \"yoloworld_loaded\": self._yoloworld is not None,\n            \"clip_loaded\": self._clip is not None,\n            \"fastvlm_loaded\": self._fastvlm is not None,\n            \"vjepa2_loaded\": self._vjepa2 is not None,\n        }
         
         if torch.cuda.is_available():
             usage["gpu_memory_allocated"] = torch.cuda.memory_allocated() / 1024**3  # GB

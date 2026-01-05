@@ -7,11 +7,11 @@
 ### Architecture Layers (understand dependencies)
 
 1. **Perception Engine** (`orion/perception/engine.py`): Frame-level detection, embedding, tracking
-   - Detectors: YOLO11, GroundingDINO, YOLO-World (configurable via `DetectionConfig.backend`)
-   - Embedders: CLIP, DINO, DINOv3 (for Re-ID) in `orion/backends/`
+   - Detectors: YOLO11, YOLO-World (configurable via `DetectionConfig.backend`)
+   - Embedders: V-JEPA2 (video-native 3D-aware Re-ID) in `orion/backends/`
    - Trackers: EnhancedTracker with adaptive Re-ID thresholds (`orion/perception/trackers/enhanced.py`)
-   - Depth: DepthAnythingV3 for spatial mapping
-   - VLM: MLX-VLM (local FastVLM) for visual descriptions on Apple Silicon
+   - Depth: DepthAnythingV2 for spatial mapping
+   - VLM: MLX-VLM (local FastVLM) for visual descriptions + SentenceTransformers for semantic filtering
 
 2. **Scene Graph** (`orion/graph/`): Temporal object relationships
    - Per-frame: `SGNode` (objects) + `SGEdge` (relations: on, near, held_by)
@@ -36,13 +36,13 @@ Frame → Observation (detections)
 
 **Key Types:**
 - `PerceptionConfig`: Detection, embedding, depth, tracking settings (presets: fast/balanced/accurate)
-- `DetectionConfig`: Backend (yolo/groundingdino/yoloworld), thresholds, model size
-- `EmbeddingConfig`: Backend (clip/dino/dinov3), dimension, model name
+- `DetectionConfig`: Backend (yolo/yoloworld), thresholds, model size
+- `EmbeddingConfig`: Backend (vjepa2), dimension, model name
 - `SceneGraph`: nodes (SGNode: id, label, bbox, attributes) + edges (SGEdge: subject→predicate→object)
 
 **Backend Architecture:**
-- Detection backends in `orion/perception/detectors/`: YOLO, GroundingDINO, YOLO-World
-- Embedding backends in `orion/backends/`: CLIP, DINO, DINOv3 (separate from detectors)
+- Detection backends in `orion/perception/detectors/`: YOLO, YOLO-World
+- Embedding backends in `orion/backends/`: V-JEPA2 (video-native), CLIP (legacy)
 - Each backend implements factory pattern with `validate()` called in config `__post_init__`
 
 See [orion/perception/types.py](orion/perception/types.py) and [orion/graph/types.py](orion/graph/types.py).
@@ -116,8 +116,8 @@ docker exec -it orion-memgraph mgconsole
 
 ### Detection & Embedding Backend Abstraction
 ```python
-# DetectionConfig.backend ∈ {yolo, groundingdino, yoloworld}
-# EmbeddingConfig.backend ∈ {clip, dino, dinov3}
+# DetectionConfig.backend ∈ {yolo, yoloworld}
+# EmbeddingConfig.backend ∈ {vjepa2}
 # Instantiation happens in PerceptionEngine.__init__() via factory pattern
 # Each backend has validate() method called in config __post_init__
 ```

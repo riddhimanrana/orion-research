@@ -390,7 +390,7 @@ def main():
     parser.add_argument("--fps", type=float, default=5.0, help="Processing FPS")
     parser.add_argument("--device", default="cuda", choices=["cuda", "mps", "cpu"])
     parser.add_argument("--reid-threshold", type=float, default=0.70)
-    parser.add_argument("--detector", default="yoloworld", choices=["yolo", "yoloworld", "groundingdino"])
+    parser.add_argument("--detector", default="yoloworld", choices=["yolo", "yoloworld"])
     parser.add_argument("--skip-phase1", action="store_true", help="Skip detection (use existing tracks)")
     parser.add_argument("--skip-phase2", action="store_true", help="Skip Re-ID (use existing memory)")
     parser.add_argument("--gemini-sleep", type=float, default=0.5, help="Sleep between Gemini calls")
