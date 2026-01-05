@@ -23,9 +23,13 @@ import argparse
 import json
 import os
 from pathlib import Path
+import sys
 
 from orion.perception.config import get_fast_config, get_balanced_config, get_accurate_config
 from orion.perception.engine import run_perception
+
+
+print("Executing eval_perception_run.py", flush=True)
 
 
 def build_config(mode: str, tracking: bool, target_fps: float | None, conf: float | None):
@@ -62,9 +66,11 @@ def main():
     ap.add_argument("--no-save", action="store_true", help="Do not write results/perception_run.json")
     args = ap.parse_args()
 
+    print(f"args.tracking: {args.tracking}")
     cfg = build_config(args.mode, args.tracking, args.target_fps, args.conf)
+    print(f"cfg.enable_tracking: {cfg.enable_tracking}")
 
-    res = run_perception(args.video, config=cfg)
+    res = run_perception(args.video, config=cfg, save_visualizations=args.tracking)
     metrics = res.metrics or {}
     timings = metrics.get("timings", {})
 

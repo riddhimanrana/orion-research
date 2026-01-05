@@ -410,10 +410,10 @@ class EnhancedTracker:
                 # In egocentric video: semantic + size more reliable than spatial
                 # (camera moves a lot, making spatial unreliable)
                 cost_matrix[t_idx, d_idx] = (
-                    0.3 * spatial_cost +      # Reduced (camera moves)
+                    0.4 * spatial_cost +      # Increased priority
                     0.2 * size_cost +          # Same
-                    0.45 * semantic_cost +     # Increased (normalized labels reliable)
-                    0.05 * appearance_cost     # Same (CLIP not discriminative)
+                    0.1 * semantic_cost +     # Reduced penalty for class flicker
+                    0.3 * appearance_cost     # Increased priority for Re-ID
                 )
         
         return cost_matrix

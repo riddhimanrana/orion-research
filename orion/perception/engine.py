@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 # Initialise logger early so try/except blocks can use it
 logger = logging.getLogger(__name__)
 
-from orion.perception.types import (
+from orion.perception.custom_types import (
     Observation,
     PerceptionEntity,
     # PerceptionResult,
@@ -46,13 +46,14 @@ from orion.perception.embedder import VisualEmbedder
 from orion.perception.tracker import EntityTracker
 from orion.perception.describer import EntityDescriber
 # from orion.perception.reid import ReidModel
-from orion.perception.depth import DepthEstimator
 # from orion.utils.file_utils import find_latest_file
 from orion.settings import OrionSettings
 from orion.perception.groundingdino_wrapper import GroundingDINOWrapper
+from orion.perception.yoloworld_wrapper import YOLOWorld
 
 # Add this import
 from orion.perception.enhanced_tracker import Track
+from orion.perception.reid_matcher import build_memory_from_tracks
 
 
 @dataclass
@@ -105,7 +106,7 @@ try:
     ENHANCED_TRACKER_AVAILABLE = True
 except Exception as e:
     logging.warning(f"EnhancedTracker import failed: {e}")
-    ENHANCED_TRACKER_AVAILABLE = False
+    raise e
 
 # Optional SLAM for camera motion compensation
 try:
@@ -145,6 +146,7 @@ class PerceptionEngine:
             config: Perception configuration (uses defaults if None)
             verbose: Enable verbose logging
         """
+        print("Initializing PerceptionEngine...")
         self.config = config or PerceptionConfig()
         self.verbose = verbose
         self.memgraph = db_manager
@@ -159,14 +161,15 @@ class PerceptionEngine:
         self.tracker: Optional[EntityTracker] = None
         self.describer: Optional[EntityDescriber] = None
         # self.reid_model: Optional[ReidModel] = None
-        self.depth_estimator: Optional[DepthEstimator] = None
         self.enhanced_tracker: Optional[TrackerProtocol] = None
         self.slam_engine: Optional[SLAMEngine] = None
         self.tapnet_tracker: Optional['TapNetTracker'] = None
 
         # Tracking history
         self.tracking_history: Dict[int, List[Track]] = {}  # To store track history
+        print("Calling _initialize_components...")
         self._initialize_components()
+        print("Finished initializing PerceptionEngine.")
 
     def _initialize_components(self):
         """Initializes all perception components based on the config."""
@@ -174,7 +177,6 @@ class PerceptionEngine:
         # GroundingDINO detector
         if self.config.detection.backend == "groundingdino":
             logger.info("Initializing GroundingDINO detector...")
-            # self.grounding_dino = GroundingDino(self.model_manager)
             self.grounding_dino = GroundingDINOWrapper(
                 model_id=self.config.detection.groundingdino_model_id,
                 device=self.config.embedding.device,
@@ -183,12 +185,25 @@ class PerceptionEngine:
         else:
             self.grounding_dino = None
 
+        # YOLO-World detector
+        if self.config.detection.backend == "yoloworld":
+            logger.info("Initializing YOLO-World detector...")
+            self.yolo_world = YOLOWorld(
+                model_id=self.config.detection.yoloworld_model_id,
+                device=self.config.embedding.device
+            )
+            # Example of setting a custom vocabulary
+            self.yolo_world.set_vocabulary(["person", "car", "dog", "chair"])
+        else:
+            self.yolo_world = None
+
         # Frame observer
         self.observer = FrameObserver(
             config=self.config.detection,
             detector_backend=self.config.detection.backend,
             yolo_model=self.model_manager.yolo if self.config.detection.backend == "yolo" else None,
             grounding_dino=self.grounding_dino,
+            yolo_world=self.yolo_world,
             target_fps=self.config.target_fps
         )
         # Visual embedder
@@ -197,51 +212,37 @@ class PerceptionEngine:
         self.tracker = EntityTracker(self.config)
         # Entity describer
         self.describer = None
-        # self.describer = EntityDescriber(
-        #     vlm_model=self.model_manager.fastvlm,
-        #     config=self.config.description,
-        #     enable_class_correction=True,
-        #     enable_spatial_analysis=True,
-        # )
-        # self.reid_model = ReidModel(self.config.reid)
-        # self.depth_estimator = DepthEstimator(self.config.depth.model_name)
-        self.depth_estimator = None
-        self.enhanced_tracker = EnhancedTracker(
-            max_age=self.config.tracking.max_age,
-            min_hits=self.config.tracking.min_hits,
-            iou_threshold=self.config.tracking.iou_threshold,
-            appearance_threshold=self.config.tracking.appearance_threshold,
-        )
 
-        logger.info("✓ All components initialized\n")
+        # Enhanced tracker
+        if self.config.enable_tracking and ENHANCED_TRACKER_AVAILABLE:
+            logger.info("Initializing EnhancedTracker...")
+            self.enhanced_tracker = EnhancedTracker(
+                max_age=self.config.tracking.max_age,
+                min_hits=self.config.tracking.min_hits,
+                iou_threshold=self.config.tracking.iou_threshold,
+                appearance_threshold=self.config.tracking.appearance_threshold,
+                max_gallery_size=self.config.tracking.max_gallery_size,
+                ema_alpha=self.config.tracking.ema_alpha,
+                clip_model=self.model_manager.clip,
+            )
+        else:
+            self.enhanced_tracker = None
 
-        # Initialize TapNet tracker (after other components)
-        if self.config.tracker_backend == "tapnet":
-            if not TAPNET_AVAILABLE:
-                logger.warning("TapNet backend requested but module unavailable.")
-            else:
-                try:
-                    self.tapnet_tracker = TapNetTracker(
-                        checkpoint_path=self.config.tapnet_checkpoint_path or "",
-                        max_points=self.config.tapnet_max_points,
-                        resolution=self.config.tapnet_resolution,
-                        device=self.config.embedding.device,
-                        online_mode=self.config.tapnet_online_mode,
-                        min_track_length=self.config.tapnet_min_track_length,
-                    )
-                    logger.info("  ✓ TapNetTracker initialized (point trajectories)")
-                except Exception as e:
-                    logger.warning(f"  ✗ TapNetTracker failed to initialize: {e}")
-
-    @profile("engine_process_video")
-    def process_video(self, video_path: str, save_visualizations: bool = False, output_dir: str = "results") -> PerceptionResult:
+    def process_video(
+        self,
+        video_path: str,
+        output_dir: str,
+        save_visualizations: bool = False,
+        run_name: Optional[str] = None,
+    ) -> PerceptionResult:
         """
         Process video through complete perception pipeline.
         
         Args:
             video_path: Path to video file
+            output_dir: Directory to save output data
             save_visualizations: If True, export SLAM/tracking data for visualization
-            output_dir: Directory to save visualization data
+            run_name: Optional run name for tracking ID assignment
             
         Returns:
             PerceptionResult with entities and observations
@@ -423,6 +424,19 @@ class PerceptionEngine:
             self._export_visualization_data(result, output_dir)
             self._save_tracking_results(output_dir)
             
+        # Build memory.json from tracks
+        if self.config.enable_reid:
+            logger.info("Building memory from tracks...")
+            build_memory_from_tracks(
+                episode_id=run_name or Path(video_path).stem,
+                video_path=Path(video_path),
+                tracks_path=Path(output_dir) / "tracks.jsonl",
+                results_dir=Path(output_dir),
+                cosine_threshold=self.config.reid.cosine_threshold,
+                max_crops_per_track=self.config.reid.max_crops_per_track,
+                class_thresholds=self.config.reid.class_thresholds,
+            )
+
         return result
 
     def _run_tapnet_tracking(self, detections: List[Dict]):
@@ -641,7 +655,7 @@ class PerceptionEngine:
         """Resolve camera intrinsics using the runtime camera config."""
         return self.config.camera.resolve_intrinsics(width=width, height=height)
 
-    def _get_depth_estimator(self) -> Optional[DepthEstimator]:
+    def _get_depth_estimator(self):
         """Lazily initialize and return the shared depth estimator."""
         return None
     
@@ -1067,8 +1081,8 @@ class PerceptionEngine:
             h_px = max(1.0, y2 - y1)
 
             # 3D center (prefer centroid_3d_mm if available)
-            c3d = det.get("centroid_3d_mm")
             depth_mm = float(det.get("depth_mm", 0.0) or 0.0)
+            c3d = det.get("centroid_3d_mm")
             if c3d is not None and len(c3d) == 3:
                 cx_mm, cy_mm, cz_mm = float(c3d[0]), float(c3d[1]), float(c3d[2])
             else:
@@ -1096,6 +1110,7 @@ class PerceptionEngine:
 
     def _save_tracking_results(self, output_dir: str):
         """Saves tracking history to a JSONL file."""
+        logger.info("Attempting to save tracking results...")
         if not self.tracking_history:
             logging.warning("No tracking history to save.")
             return
@@ -1133,14 +1148,16 @@ def run_perception(
     video_path: str,
     config: Optional[PerceptionConfig] = None,
     verbose: bool = False,
+    save_visualizations: bool = False,
 ) -> PerceptionResult:
     """
-    Convenience function to run perception pipeline.
-    
+    Convenience function to run perception pipeline on a single video.
+        
     Args:
         video_path: Path to video file
-        config: Optional perception configuration
+        config: Perception configuration (uses defaults if None)
         verbose: Enable verbose logging
+        save_visualizations: If True, export SLAM/tracking data for visualization
         
     Returns:
         PerceptionResult with entities and observations
@@ -1151,4 +1168,6 @@ def run_perception(
         >>> print(f"Found {result.unique_entities} entities")
     """
     engine = PerceptionEngine(config=config, verbose=verbose)
-    return engine.process_video(video_path)
+    # Create a temporary directory for the output
+    output_dir = "results/temp_perception"
+    return engine.process_video(video_path, output_dir, save_visualizations=save_visualizations)

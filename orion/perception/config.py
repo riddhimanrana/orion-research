@@ -11,8 +11,8 @@ Author: Orion Research Team
 Date: October 2025
 """
 
-from dataclasses import dataclass, field
-from typing import Literal, Optional
+from dataclasses import asdict, dataclass, field
+from typing import Dict, Literal, Optional
 
 import logging
 
@@ -25,12 +25,12 @@ logger = logging.getLogger(__name__)
 class DetectionConfig:
     """Detection backend configuration (YOLO or GroundingDINO)."""
 
-    backend: Literal["yolo", "groundingdino", "yoloworld"] = "groundingdino"
+    backend: Literal["yolo", "groundingdino", "yoloworld"] = "yoloworld"
     """Primary detector to use for frame observations. Options: 'yolo', 'groundingdino', 'yoloworld'"""
 
-    # YOLO-specific settings
-    model: Literal["yolo11n", "yolo11s", "yolo11m", "yolo11x"] = "yolo11x"
-    """YOLO model size (n=fastest, x=most accurate)."""
+    # YOLO-World-specific settings
+    yoloworld_model_id: str = "yolov8s-world.pt"
+    """YOLO-World model version."""
 
     # Detection thresholds (shared)
     confidence_threshold: float = 0.4
@@ -69,13 +69,8 @@ class DetectionConfig:
 
     def __post_init__(self):
         """Validate detection config."""
-        if self.backend not in {"yolo", "groundingdino"}:
-            raise ValueError(f"backend must be 'yolo' or 'groundingdino', got {self.backend}")
-
-        # Model validation
-        valid_models = {"yolo11n", "yolo11s", "yolo11m", "yolo11x"}
-        if self.model not in valid_models:
-            raise ValueError(f"Invalid model: {self.model}. Must be one of {valid_models}")
+        if self.backend not in {"yolo", "groundingdino", "yoloworld"}:
+            raise ValueError(f"backend must be 'yolo', 'groundingdino', or 'yoloworld', got {self.backend}")
 
         # Threshold validation
         if not (0 <= self.confidence_threshold <= 1):
@@ -109,13 +104,17 @@ class DetectionConfig:
                 raise ValueError("groundingdino_max_detections must be >= 1")
 
         logger.debug(
-            f"DetectionConfig validated: backend={self.backend}, model={self.model}, "
+            f"DetectionConfig validated: backend={self.backend}, "
             f"conf_thresh={self.confidence_threshold}, iou_thresh={self.iou_threshold}"
         )
 
     def grounding_categories(self) -> list[str]:
         """Return normalized category list for GroundingDINO prompts."""
         return [token.strip() for token in self.groundingdino_prompt.split('.') if token.strip()]
+
+    def to_dict(self):
+        """Return config as a dictionary."""
+        return asdict(self)
 
 
 @dataclass
@@ -204,6 +203,10 @@ class EmbeddingConfig:
             f"dim={self.embedding_dim}, batch_size={self.batch_size}, device={self.device}"
         )
 
+    def to_dict(self):
+        """Return config as a dictionary."""
+        return asdict(self)
+
 
 @dataclass
 class DescriptionConfig:
@@ -276,24 +279,9 @@ class DescriptionConfig:
             f"temperature={self.temperature}, describe_once={self.describe_once}"
         )
 
-
-@dataclass
-class DepthConfig:
-    """Depth estimation configuration for Phase 1 3D perception."""
-
-    model_name: Literal["depth_anything_v3", "depth_anything_v2"] = "depth_anything_v2"
-    model_size: Literal["small", "base", "large"] = "small"
-    device: Optional[str] = None  # auto-detect by default
-    half_precision: bool = True
-    max_depth_mm: float = 10000.0
-
-    def __post_init__(self):
-        if self.max_depth_mm <= 0:
-            raise ValueError(f"max_depth_mm must be > 0, got {self.max_depth_mm}")
-        if self.model_size not in {"small", "base", "large"}:
-            raise ValueError(
-                f"model_size must be one of ['small', 'base', 'large'], got {self.model_size}"
-            )
+    def to_dict(self):
+        """Return config as a dictionary."""
+        return asdict(self)
 
 
 @dataclass
@@ -315,6 +303,10 @@ class HandTrackingConfig:
             if not (0.0 <= value <= 1.0):
                 raise ValueError(f"{name} must be in [0,1], got {value}")
 
+    def to_dict(self):
+        """Return config as a dictionary."""
+        return asdict(self)
+
 
 @dataclass
 class OcclusionConfig:
@@ -328,6 +320,10 @@ class OcclusionConfig:
             raise ValueError("depth_margin_mm must be >= 0")
         if not (0.0 <= self.occlusion_threshold <= 1.0):
             raise ValueError("occlusion_threshold must be in [0,1]")
+
+    def to_dict(self):
+        """Return config as a dictionary."""
+        return asdict(self)
 
 
 @dataclass
@@ -381,6 +377,10 @@ class CameraConfig:
 
         return CameraIntrinsics.auto_estimate(width=width, height=height)
 
+    def to_dict(self):
+        """Return config as a dictionary."""
+        return asdict(self)
+
 
 @dataclass
 class TrackingConfig:
@@ -389,12 +389,40 @@ class TrackingConfig:
     min_hits: int = 3
     iou_threshold: float = 0.3
     appearance_threshold: float = 0.5
+    max_gallery_size: int = 5
+    ema_alpha: float = 0.9
+    max_gallery_size: int = 5
+    ema_alpha: float = 0.9
     reid_window_frames: int = 90
     class_belief_lr: float = 0.3
     max_distance_pixels: float = 150.0
     max_distance_3d_mm: float = 1500.0
     ttl_frames: int = 30
 
+    def to_dict(self):
+        """Return config as a dictionary."""
+        return asdict(self)
+
+
+@dataclass
+class ReidConfig:
+    """Configuration for the Re-ID module."""
+    
+    enable_reid: bool = True
+    """Enable Re-ID to build memory.json from tracks."""
+    
+    cosine_threshold: float = 0.75
+    """Similarity threshold for clustering tracks into memory objects."""
+    
+    max_crops_per_track: int = 5
+    """Maximum number of crops to use for computing a track's embedding."""
+    
+    class_thresholds: Optional[Dict[str, float]] = None
+    """Optional per-class overrides for the cosine threshold."""
+
+    def to_dict(self):
+        """Return config as a dictionary."""
+        return asdict(self)
 
 @dataclass
 class PerceptionConfig:
@@ -403,11 +431,11 @@ class PerceptionConfig:
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     description: DescriptionConfig = field(default_factory=DescriptionConfig)
-    depth: DepthConfig = field(default_factory=DepthConfig)
     hand_tracking: HandTrackingConfig = field(default_factory=HandTrackingConfig)
     occlusion: OcclusionConfig = field(default_factory=OcclusionConfig)
     camera: CameraConfig = field(default_factory=CameraConfig)
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
+    reid: ReidConfig = field(default_factory=ReidConfig)
     
     # General settings
     target_fps: float = 4.0
@@ -417,10 +445,10 @@ class PerceptionConfig:
     """Enable intelligent scene change detection for frame sampling"""
     
     # 3D Perception settings
-    enable_3d: bool = True
+    enable_3d: bool = False
     """Enable 3D perception (depth, 3D coordinates, occlusion)"""
     
-    enable_depth: bool = True
+    enable_depth: bool = False
     """Enable depth estimation stage (Phase 1 3D)."""
     
     enable_hands: bool = True
@@ -436,6 +464,10 @@ class PerceptionConfig:
     # Phase 2: Tracking settings
     enable_tracking: bool = False
     """Enable temporal entity tracking with Bayesian beliefs"""
+
+    # Phase 2: Re-ID settings (moved to ReidConfig)
+    enable_reid: bool = True
+    """Enable Re-ID to build memory.json from tracks."""
 
     # Tracker backend selection (prototype: 'simple' existing logic or 'tapnet')
     tracker_backend: Literal["simple", "tapnet"] = "simple"
@@ -486,6 +518,9 @@ class PerceptionConfig:
             )
             self.enable_depth = True
         
+        # Sync enable_reid from the new ReidConfig
+        self.enable_reid = self.reid.enable_reid
+        
         logger.debug(
             f"PerceptionConfig validated: target_fps={self.target_fps}, "
             f"scene_detection={self.use_scene_detection}, "
@@ -522,6 +557,10 @@ class PerceptionConfig:
                 f"clustering_cluster_selection_epsilon={self.clustering_cluster_selection_epsilon} < 0; forcing 0.0"
             )
             self.clustering_cluster_selection_epsilon = 0.0
+
+    def to_dict(self):
+        """Return config as a dictionary."""
+        return asdict(self)
 
 
 # Preset configurations
@@ -609,11 +648,9 @@ def get_accurate_config() -> PerceptionConfig:
     """
     return PerceptionConfig(
         detection=DetectionConfig(
-            backend="groundingdino",
-            model="yolo11x",
-            confidence_threshold=0.1,  # Lowered for more recall
-            groundingdino_box_threshold=0.1,  # Lowered for more recall
-            groundingdino_text_threshold=0.1,  # Lowered for more recall
+            backend="yoloworld",
+            yoloworld_model_id="yolov8l-world.pt",  # Use large model
+            confidence_threshold=0.15,  # Adjusted for large model
         ),
         embedding=EmbeddingConfig(
             embedding_dim=768,
@@ -625,11 +662,9 @@ def get_accurate_config() -> PerceptionConfig:
             max_tokens=300,
             temperature=0.2,
         ),
-        depth=DepthConfig(
-            model_name="depth_anything_v2",
-        ),
         target_fps=8.0,
-        enable_3d=True,
+        enable_3d=False,
+        enable_depth=False,
         enable_tracking=True,
         clustering_cluster_selection_epsilon=0.5,
     )
