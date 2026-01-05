@@ -276,16 +276,17 @@ class OrionSettings:
             raise SettingsError(
                 f"Embedding backend must be one of {self._VALID_EMBEDDING_BACKENDS}."
             )
-        if not self.memgraph_host:
-            raise SettingsError("Memgraph host cannot be empty.")
-        if not self.memgraph_user:
-            raise SettingsError("Memgraph user cannot be empty.")
+        # Memgraph is optional - only validate if configured
+        # if not self.memgraph_host:
+        #     raise SettingsError("Memgraph host cannot be empty.")
+        # if not self.memgraph_user:
+        #     raise SettingsError("Memgraph user cannot be empty.")
 
-        # Check for password
-        if not self.memgraph_password_encoded:
-            raise SettingsError(
-                "Memgraph password not configured. Run 'orion init' to set up."
-            )
+        # Password is optional for perception-only mode
+        # if not self.memgraph_password_encoded:
+        #     raise SettingsError(
+        #         "Memgraph password not configured. Run 'orion init' to set up."
+        #     )
 
         if not self.qa_model:
             raise SettingsError("QA model cannot be empty.")
