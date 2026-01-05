@@ -47,6 +47,14 @@ def get_video_path(episode: str) -> Path:
             if "video_path" in meta:
                 return Path(meta["video_path"])
     
+    # Check detections.json metadata (from new Phase 1 script)
+    detections_path = results_dir / "detections.json"
+    if detections_path.exists():
+        with open(detections_path) as f:
+            data = json.load(f)
+            if "metadata" in data and "video" in data["metadata"]:
+                return Path(data["metadata"]["video"])
+    
     # Check common locations
     episode_dir = Path("data/examples/episodes") / episode
     if (episode_dir / "video.mp4").exists():
