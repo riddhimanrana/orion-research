@@ -11,6 +11,73 @@ from orion.managers.model_manager import ModelManager
 logger = logging.getLogger(__name__)
 
 
+# Label normalization map - group semantic duplicates for better Re-ID
+LABEL_NORMALIZATION = {
+    # Screen/display devices
+    "computer screen": "monitor",
+    "computer monitor": "monitor",
+    "television": "monitor",
+    "tv": "monitor",
+    "screen": "monitor",
+    "display": "monitor",
+    "computer": "monitor",
+    "desktop": "monitor",
+    
+    # Seating
+    "office chair": "chair",
+    "armchair": "chair",
+    "stool": "chair",
+    "seat": "chair",
+    
+    # Bottles
+    "water bottle": "bottle",
+    "plastic bottle": "bottle",
+    
+    # Couches
+    "sofa": "couch",
+    "loveseat": "couch",
+    "settee": "couch",
+    
+    # Plants
+    "houseplant": "plant",
+    "potted plant": "plant",
+    
+    # Tables/surfaces
+    "counter": "table",
+    "countertop": "table",
+    "desk": "table",
+    "dining table": "table",
+    "coffee table": "table",
+    
+    # Lighting
+    "floor lamp": "lamp",
+    "table lamp": "lamp",
+    "desk lamp": "lamp",
+    
+    # Wall art
+    "artwork": "picture",
+    "painting": "picture",
+    "picture frame": "picture",
+    "frame": "picture",
+    "poster": "picture",
+    
+    # Floor coverings
+    "carpet": "rug",
+    "mat": "rug",
+    "floor mat": "rug",
+    
+    # Pillows
+    "cushion": "pillow",
+    "throw pillow": "pillow",
+}
+
+
+def normalize_label(label: str) -> str:
+    """Normalize label to canonical form for better Re-ID clustering."""
+    label_lower = label.lower().strip()
+    return LABEL_NORMALIZATION.get(label_lower, label_lower)
+
+
 def _read_tracks_jsonl(tracks_path: Path) -> List[Dict[str, Any]]:
     items: List[Dict[str, Any]] = []
     with open(tracks_path, "r") as f:
@@ -291,17 +358,23 @@ def cluster_tracks(
     track_meta: Dict[int, Dict[str, Any]] = {}
     for tid_str, obs in by_track.items():
         tid = int(tid_str)
-        cats = [o.get("class_name", "object") for o in obs]
-        category = max(set(cats), key=cats.count) if cats else "object"
+        # Get raw labels
+        raw_cats = [o.get("class_name", o.get("label", "object")) for o in obs]
+        raw_category = max(set(raw_cats), key=raw_cats.count) if raw_cats else "object"
+        
+        # Apply label normalization for clustering
+        normalized_category = normalize_label(raw_category)
+        
         frames = [int(o.get("frame_id", 0)) for o in obs]
         track_meta[tid] = {
-            "category": category,
+            "category": normalized_category,  # Use normalized for clustering
+            "raw_category": raw_category,     # Keep original for reference
             "first": min(frames) if frames else 0,
             "last": max(frames) if frames else 0,
             "count": len(obs),
         }
 
-    # Greedy clustering per category
+    # Greedy clustering per normalized category
     memory_objects: Dict[str, Dict[str, Any]] = {}
     embeddings_map: Dict[str, np.ndarray] = {}
     track_to_memory: Dict[int, str] = {}
@@ -309,7 +382,7 @@ def cluster_tracks(
     mem_counter = 1
     emb_counter = 1
 
-    # Group track ids by category
+    # Group track ids by normalized category
     cat_to_tids: Dict[str, List[int]] = {}
     for tid, meta in track_meta.items():
         if tid in track_embeddings:
@@ -371,9 +444,13 @@ def cluster_tracks(
                 })
                 
 
+            # Collect unique raw labels from member tracks
+            raw_labels = list(set(track_meta[tid]["raw_category"] for tid in members))
+
             memory_objects[mem_id] = {
                 "memory_id": mem_id,
-                "class": final_category,
+                "class": final_category,  # Normalized canonical label
+                "raw_labels": raw_labels,  # Original labels before normalization
                 "first_seen_frame": first,
                 "last_seen_frame": last,
                 "total_observations": total_obs,
