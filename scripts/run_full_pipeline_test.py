@@ -199,9 +199,9 @@ def run_embedding_stage(video_path: str, detections_by_frame: Dict[int, List[Dic
     """
     logger.info("🧠 Loading V-JEPA2 for embeddings...")
     
-    from orion.backends.vjepa2_backend import VJEPA2Embedder
+    from orion.backends.vjepa2_backend import VJepa2Embedder
     
-    embedder = VJEPA2Embedder(
+    embedder = VJepa2Embedder(
         model_name="facebook/vjepa2-vitl-fpc64-256",
         device=get_device()
     )
@@ -222,7 +222,7 @@ def run_embedding_stage(video_path: str, detections_by_frame: Dict[int, List[Dic
             continue
         
         # Crop and embed each detection
-        crops = []
+        frame_embeddings = []
         for det in dets:
             x1, y1, x2, y2 = [int(c) for c in det["bbox"]]
             x1, y1 = max(0, x1), max(0, y1)
@@ -230,18 +230,21 @@ def run_embedding_stage(video_path: str, detections_by_frame: Dict[int, List[Dic
             
             if x2 > x1 and y2 > y1:
                 crop = frame[y1:y2, x1:x2]
-                crops.append(crop)
+                # Embed single crop using single image mode
+                try:
+                    emb = embedder.embed_single_image(crop)
+                    frame_embeddings.append(emb.squeeze().numpy())
+                    embedding_count += 1
+                except Exception as e:
+                    logger.warning(f"Embedding failed for crop: {e}")
+                    frame_embeddings.append(None)
         
-        if crops:
-            # Batch embed
-            embeddings = embedder.embed_crops(crops)
-            embeddings_by_frame[frame_idx] = embeddings
-            embedding_count += len(embeddings)
+        embeddings_by_frame[frame_idx] = frame_embeddings
     
     cap.release()
     total_time = time.time() - start_time
     
-    logger.info(f"✅ Embeddings: {embedding_count} in {total_time:.2f}s")
+    logger.info(f"✅ Embeddings: {embedding_count} in {total_time:.2f}s ({embedding_count/total_time:.1f}/s)")
     
     return {
         "embeddings_by_frame": embeddings_by_frame,
