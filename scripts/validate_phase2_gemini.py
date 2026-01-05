@@ -60,12 +60,21 @@ def load_tracks(results_dir: Path) -> list[dict]:
 
 def get_video_path(episode: str) -> Path:
     """Find video for episode."""
+    results_dir = Path("results") / episode
+    
+    # Check episode_meta.json first (from Phase 1)
+    episode_meta_path = results_dir / "episode_meta.json"
+    if episode_meta_path.exists():
+        with open(episode_meta_path) as f:
+            meta = json.load(f)
+            if "video_path" in meta:
+                return Path(meta["video_path"])
+    
     # Check common locations
     episode_dir = Path("data/examples/episodes") / episode
     if (episode_dir / "video.mp4").exists():
         return episode_dir / "video.mp4"
     
-    results_dir = Path("results") / episode
     if (results_dir / "video.mp4").exists():
         return results_dir / "video.mp4"
     
