@@ -342,8 +342,17 @@ def main():
     tracks_by_id, clusters, memory = load_data(results_dir)
     print(f"Loaded {len(tracks_by_id)} tracks, {len(clusters)} clusters")
     
-    # Current thresholds from code
-    from orion.cli.commands.embed import CLASS_THRESHOLDS
+    # Current thresholds from code (inlined to avoid import)
+    CLASS_THRESHOLDS = {
+        "person": 0.85, "hand": 0.80, "face": 0.85, "arm": 0.75,
+        "book": 0.70, "notebook": 0.70, "laptop": 0.80, "phone": 0.78,
+        "keyboard": 0.75, "mouse": 0.75, "chair": 0.72, "stool": 0.72,
+        "pillow": 0.65, "blanket": 0.65, "couch": 0.65, "sofa": 0.65,
+        "bed": 0.65, "desk": 0.68, "table": 0.68, "cabinet": 0.65,
+        "door": 0.60, "window": 0.65, "stairs": 0.60, "staircase": 0.60,
+        "tv": 0.70, "television": 0.70, "monitor": 0.72, "refrigerator": 0.70,
+        "rug": 0.55, "carpet": 0.55, "mat": 0.55, "_default": 0.75
+    }
     
     # Analyze
     metrics, inconsistent = analyze_clusters(clusters, tracks_by_id)
