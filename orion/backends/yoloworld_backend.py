@@ -20,14 +20,15 @@ logger = logging.getLogger(__name__)
 
 
 # Default class vocabulary for indoor/activity tracking
-# Optimized based on Gemini validation - streamlined to ~80 classes
+# Optimized based on Gemini validation - v2 with confusion fixes
 DEFAULT_CLASSES = [
     # People
     "person", "face", "hand", "feet",
     
-    # Furniture - streamlined to avoid redundancy
+    # Furniture
     "chair", "armchair", "office chair", "stool", "ottoman",
-    "table", "coffee table", "dining table", "desk",
+    "table", "coffee table", "dining table", "side table", "desk",
+    "kitchen island", "counter",
     "couch", "sofa",
     "bed",
     "cabinet", "shelf", "drawer",
@@ -38,11 +39,17 @@ DEFAULT_CLASSES = [
     "rug", "carpet", "mat",
     "curtain", "blinds",
     
-    # Electronics
-    "laptop", "computer", "monitor", "tv", "television",
+    # Electronics - separated to reduce confusion
+    "laptop", "closed laptop",
+    "computer", "desktop computer",
+    "monitor", "computer screen",
+    "television", "tv screen",
     "keyboard", "mouse", "mousepad",
-    "phone", "remote", "camera",
-    "speaker", "headphones",
+    "phone", "smartphone", "remote",
+    "camera",
+    "speaker", "bluetooth speaker",
+    "headphones", "earbuds",
+    "cable", "wire", "power cord",
     
     # Kitchen
     "cup", "mug", "glass", "bottle", "water bottle",
@@ -58,21 +65,31 @@ DEFAULT_CLASSES = [
     # Music/Instruments
     "piano", "piano book", "sheet music",
     
-    # Items
-    "book", "notebook", "paper", "pen",
+    # Items - clearer book/paper distinction
+    "book", "textbook",
+    "notebook", "notepad",
+    "paper", "document",
+    "pen", "pencil",
     "backpack", "bag", "purse",
     "box", "key",
     
     # Lighting
-    "lamp", "ceiling light", "ceiling fan", "chandelier",
+    "lamp", "table lamp", "floor lamp",
+    "ceiling light", "ceiling fan", "chandelier",
+    "light fixture",
     
     # Decor
-    "plant", "vase",
-    "picture", "painting", "artwork",
+    "plant", "potted plant", "vase",
+    "picture", "picture frame", "painting", "artwork",
     "clock", "mirror",
+    "decoration",
     
     # Structure
     "window", "door", "doorway",
+    "wall", "floor", "ceiling",
+    "staircase", "stairs", "railing",
+    "fireplace", "hallway",
+    "baseboard",
     "wall", "floor", "ceiling",
     "staircase", "stairs", "railing",
     "fireplace", "hallway",
