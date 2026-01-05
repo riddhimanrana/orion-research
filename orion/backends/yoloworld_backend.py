@@ -20,136 +20,102 @@ logger = logging.getLogger(__name__)
 
 
 # Default class vocabulary for indoor/activity tracking
-# Optimized based on Gemini validation - v3 with expanded coverage
+# v4: Optimized for precision - v2 core + targeted additions from Gemini
 DEFAULT_CLASSES = [
     # People
-    "person", "face", "hand", "feet", "legs",
+    "person", "face", "hand", "feet",
     
     # Furniture - seating
     "chair", "armchair", "office chair", "stool", "ottoman",
-    "couch", "sofa", "loveseat",
-    "bench", "recliner",
+    "couch", "sofa",
+    "bench",
     
     # Furniture - surfaces
     "table", "coffee table", "dining table", "side table", "desk",
-    "kitchen island", "counter", "countertop",
-    "nightstand", "dresser", "vanity",
+    "kitchen island", "counter",
+    "nightstand", "dresser",
     
     # Furniture - storage
-    "cabinet", "shelf", "drawer", "bookshelf",
-    "closet", "wardrobe",
+    "cabinet", "shelf", "drawer",
     
     # Beds
-    "bed", "mattress", "headboard",
+    "bed",
     
     # Soft furnishings
-    "pillow", "cushion", "blanket", "throw",
-    "rug", "carpet", "mat", "runner",
-    "curtain", "blinds", "drapes", "shade",
+    "pillow", "cushion", "blanket",
+    "rug", "carpet", "mat",
+    "curtain", "blinds",
     
-    # Electronics - screens
-    "laptop", "closed laptop", "open laptop",
-    "computer", "desktop computer", "computer tower",
+    # Electronics - screens (consolidated)
+    "laptop", "closed laptop",
+    "computer", "desktop computer",
     "monitor", "computer screen",
-    "television", "tv", "tv screen",
+    "television", "tv screen",
     
     # Electronics - peripherals
-    "keyboard", "mouse", "mousepad", "wrist rest",
-    "webcam", "camera",
-    "speaker", "bluetooth speaker", "soundbar",
+    "keyboard", "mouse", "mousepad",
+    "camera",
+    "speaker", "bluetooth speaker",
     "headphones", "earbuds",
-    "remote", "controller",
+    "phone", "smartphone", "remote",
+    "cable", "wire", "power cord",
     
-    # Electronics - devices
-    "phone", "smartphone", "tablet",
-    "router", "modem",
-    "cable", "wire", "power cord", "charger",
-    
-    # Electrical/HVAC
-    "electrical outlet", "outlet", "power outlet", "socket",
-    "light switch", "switch", "dimmer",
-    "electrical panel", "breaker box",
-    "air conditioner", "ac unit", "hvac unit",
-    "thermostat", "smoke detector", "carbon monoxide detector",
-    "vent", "air vent", "register",
+    # Electrical/HVAC (new in v4)
+    "electrical outlet", "outlet",
+    "light switch",
+    "electrical panel",
+    "air conditioner", "ac unit",
+    "thermostat",
     
     # Kitchen - appliances
-    "microwave", "refrigerator", "fridge", "freezer",
-    "oven", "stove", "stovetop", "range",
-    "dishwasher", "toaster", "coffee maker",
-    "sink", "faucet",
+    "microwave", "refrigerator", "sink", "oven", "stove",
+    "toaster", "coffee maker",
     
     # Kitchen - items
     "cup", "mug", "glass", "bottle", "water bottle",
-    "plate", "bowl", "dish",
-    "fork", "spoon", "knife", "utensil",
-    "pan", "pot", "kettle", "cutting board",
+    "plate", "bowl",
+    "fork", "spoon", "knife",
+    "pan", "pot", "kettle",
     
     # Food
-    "food", "fruit", "bread", "snack",
+    "food", "fruit", "bread",
     
-    # Music/Instruments
-    "piano", "keyboard instrument", "piano bench",
-    "sheet music", "piano book", "music book",
-    "guitar",
+    # Music/Instruments (expanded)
+    "piano", "piano book", "sheet music",
     
-    # Reading/Writing - distinct categories
-    "book", "textbook", "novel",
-    "magazine", "newspaper",
-    "notebook", "notepad", "journal",
-    "paper", "document", "letter",
-    "folder", "binder",
-    "pen", "pencil", "marker",
+    # Reading/Writing (clearer distinction)
+    "book", "textbook",
+    "notebook", "notepad",
+    "paper", "document",
+    "pen", "pencil",
     
     # Bags/Containers
-    "backpack", "bag", "purse", "handbag",
-    "suitcase", "luggage",
-    "box", "container", "bin", "basket",
-    
-    # Keys/Small items
-    "key", "keychain", "wallet",
-    "glasses", "sunglasses",
-    "watch",
+    "backpack", "bag", "purse",
+    "box", "key",
     
     # Lighting
-    "lamp", "table lamp", "floor lamp", "desk lamp",
-    "ceiling light", "pendant light", "chandelier",
-    "ceiling fan",
-    "light fixture", "sconce", "track light",
-    "candle",
+    "lamp", "table lamp", "floor lamp",
+    "ceiling light", "ceiling fan", "chandelier",
+    "light fixture",
     
     # Decor
-    "plant", "potted plant", "houseplant",
-    "vase", "planter",
-    "picture", "picture frame", "painting", "artwork", "poster",
-    "clock", "wall clock",
-    "mirror",
-    "sculpture", "figurine", "decoration",
+    "plant", "potted plant", "vase",
+    "picture", "picture frame", "painting", "artwork",
+    "clock", "mirror",
+    "decoration",
     
     # Structure - rooms/spaces
-    "room", "hallway", "corridor",
-    "doorway", "entrance", "foyer",
-    "landing", "balcony",
+    "doorway", "hallway",
     
     # Structure - architectural
-    "window", "door", "door handle", "doorknob",
+    "window", "door",
     "wall", "floor", "ceiling",
-    "staircase", "stairs", "step", "railing", "banister",
-    "fireplace", "mantle", "hearth",
-    "baseboard", "molding", "trim",
-    "column", "pillar", "beam",
+    "staircase", "stairs", "railing",
+    "fireplace",
+    "baseboard",
     
-    # Children/Toys
-    "toy", "tricycle", "bicycle",
-    "stuffed animal", "doll",
-    "play mat",
-    
-    # Bathroom (if applicable)
-    "toilet", "bathtub", "shower",
-    "towel", "soap",
-    
-    # Outdoor (visible through windows)
-    "tree", "fence", "patio",
+    # Children/Toys (new in v4)
+    "tricycle",
     
     # Background class
     ""
