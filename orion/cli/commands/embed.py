@@ -117,6 +117,9 @@ def get_track_tier(label: str) -> int:
 def extract_track_crops(video_path: str, tracks_by_id: dict, output_dir: Path, 
                         console: Console, max_crops_per_track: int = 10):
     """Extract image crops for each track."""
+    import cv2
+    import numpy as np
+    
     cap = cv2.VideoCapture(video_path)
     
     # Get unique frames we need
@@ -223,7 +226,7 @@ def embed_tracks_vjepa2(crops_by_track: dict, device: str, console: Console):
 def cluster_tracks_by_similarity(track_embeddings: dict, tracks_by_id: dict, 
                                   similarity_threshold: float = 0.75):
     """Cluster tracks by cosine similarity within same class."""
-    from sklearn.metrics.pairwise import cosine_similarity
+    import numpy as np
     
     # Group tracks by class
     tracks_by_class = defaultdict(list)
@@ -305,6 +308,8 @@ def cluster_tracks_by_similarity(track_embeddings: dict, tracks_by_id: dict,
 def create_memory(unified_mapping: dict, track_embeddings: dict, 
                   tracks_by_id: dict, tracks: list) -> dict:
     """Create unified object memory."""
+    import numpy as np
+    
     # Group by unified ID
     by_unified = defaultdict(list)
     for track_id, unified_id in unified_mapping.items():
@@ -360,6 +365,8 @@ def handle_embed(args, settings) -> int:
         - results/<episode>/memory.json: Unified object memory with embeddings
         - results/<episode>/embed_stats.json: Run statistics
     """
+    import numpy as np
+    
     episode = args.episode
     results_dir = Path("results") / episode
     
