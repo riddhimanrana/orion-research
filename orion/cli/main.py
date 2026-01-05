@@ -11,6 +11,7 @@ from .commands import (
     handle_analyze,
     handle_config,
     handle_detect,
+    handle_embed,
     handle_init,
     handle_memgraph,
     handle_ollama,
@@ -134,6 +135,22 @@ For more help: orion <command> --help
     detect_parser.add_argument("--confidence", type=float, default=0.25, help="Detection confidence threshold (default: 0.25)")
     detect_parser.add_argument("--device", default="cuda", choices=["cuda", "cpu", "mps"], help="Device to run on")
     detect_parser.add_argument("--classes", nargs="+", help="Custom class prompts (overrides default vocabulary)")
+
+    # ═══════════════════════════════════════════════════════════
+    # EMBED COMMAND (Phase 2: V-JEPA2 Re-ID)
+    # ═══════════════════════════════════════════════════════════
+    embed_parser = subparsers.add_parser(
+        "embed",
+        help="Run Phase 2: V-JEPA2 embedding + track clustering"
+    )
+    embed_parser.add_argument("--episode", "-e", required=True, help="Episode with detection results")
+    embed_parser.add_argument("--device", default="cuda", choices=["cuda", "cpu", "mps"], help="Device to run on")
+    embed_parser.add_argument(
+        "--similarity", 
+        type=float, 
+        default=0.75, 
+        help="Cosine similarity threshold for clustering (default: 0.75)"
+    )
 
     # ═══════════════════════════════════════════════════════════
     # INFO COMMANDS
@@ -374,6 +391,9 @@ def main() -> None:
 
     elif args.command == "detect":
         handle_detect(args, settings)
+
+    elif args.command == "embed":
+        handle_embed(args, settings)
 
     elif args.command == "qa":
         handle_qa(args, settings)
