@@ -33,7 +33,7 @@ def load_dotenv():
 
 
 def setup_gemini():
-    """Initialize Gemini API."""
+    """Initialize Gemini API (google-genai via Orion adapter)."""
     load_dotenv()
     
     api_key = os.environ.get("GOOGLE_API_KEY")
@@ -42,11 +42,15 @@ def setup_gemini():
         sys.exit(1)
     
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        return genai
-    except ImportError:
-        print("ERROR: google-generativeai not installed. Run: pip install google-generativeai")
+        from orion.utils.gemini_client import GeminiClientError, get_gemini_model
+    except Exception:
+        print("ERROR: Orion Gemini adapter not available")
+        sys.exit(1)
+
+    try:
+        return get_gemini_model("gemini-3-flash-preview", api_key=api_key)
+    except GeminiClientError as exc:
+        print(f"ERROR: {exc}")
         sys.exit(1)
 
 
@@ -126,13 +130,11 @@ def get_frame_detections(tracks, frame_id, window=2):
     return frame_tracks
 
 
-def validate_frame_with_gemini(genai, frame_path, frame_id, frame_detections, max_retries=3):
+def validate_frame_with_gemini(model, frame_path, frame_id, frame_detections, max_retries=3):
     """Validate frame detections using Gemini Vision."""
     import PIL.Image
     import time as _time
     
-    # Use gemini-3-flash-preview for best quality
-    model = genai.GenerativeModel("gemini-3-flash-preview")
     image = PIL.Image.open(frame_path)
     
     labels = [t['label'] for t in frame_detections]
@@ -245,7 +247,7 @@ def main():
     
     # Setup Gemini
     print("\nInitializing Gemini API...")
-    genai = setup_gemini()
+    model = setup_gemini()
     
     # Extract sample frames
     video_path = metadata['video_path']
@@ -261,7 +263,7 @@ def main():
         print(f"\n  Frame {frame_id}...")
         frame_detections = get_frame_detections(tracks, frame_id)
         
-        validation = validate_frame_with_gemini(genai, frame_path, frame_id, frame_detections)
+        validation = validate_frame_with_gemini(model, frame_path, frame_id, frame_detections)
         if validation:
             validations.append(validation)
             print(f"    Accuracy: {validation.get('accuracy_score', 'N/A')}")

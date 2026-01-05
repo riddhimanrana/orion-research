@@ -47,39 +47,55 @@ import cv2
 # Allow running as a script from repo root
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from orion.utils.gemini_client import GeminiClientError, get_gemini_model
+
 
 # ----------------------------
 # Utilities
 # ----------------------------
 
-def load_dotenv() -> None:
-    """Load environment variables from repo-root .env (without clobbering existing env)."""
-    env_path = Path(__file__).resolve().parent.parent / ".env"
-    if not env_path.exists():
-        return
 
-    for raw in env_path.read_text().splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
+def resolve_video_path(video_arg: str | None, results_dir: Path) -> Path | None:
+    """Resolve a usable video path.
+
+    Supports:
+    - explicit --video <path>
+    - results_dir/episode_meta.json: {"video_path": ...}
+    - common repo-relative shortcuts like `test.mp4` -> `data/examples/test.mp4`
+    """
+
+    repo_root = Path(__file__).resolve().parent.parent
+
+    candidates: list[Path] = []
+
+    if video_arg:
+        p = Path(video_arg)
+        candidates.append(p)
+        if not p.is_absolute():
+            candidates.append(repo_root / p)
+
+        # If user passed a bare filename, try common locations.
+        if "/" not in video_arg and "\\" not in video_arg:
+            candidates.append(repo_root / "data" / "examples" / video_arg)
+            candidates.append(repo_root / "data" / video_arg)
+
+    # Try to infer from episode_meta.json if present
+    meta = load_optional_json(results_dir / "episode_meta.json")
+    vp = (meta or {}).get("video_path")
+    if vp:
+        vpp = Path(vp)
+        candidates.append(vpp)
+        if not vpp.is_absolute():
+            candidates.append(repo_root / vpp)
+
+    for c in candidates:
+        try:
+            if c.exists():
+                return c.resolve()
+        except OSError:
             continue
-        k, v = line.split("=", 1)
-        os.environ.setdefault(k.strip(), v.strip())
 
-
-def setup_gemini():
-    """Initialize Gemini client via google-generativeai."""
-    load_dotenv()
-
-    api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "Missing GOOGLE_API_KEY or GEMINI_API_KEY. Add it to environment or .env (repo root)."
-        )
-
-    import google.generativeai as genai
-
-    genai.configure(api_key=api_key)
-    return genai
+    return None
 
 
 def to_base64_jpeg(frame_bgr) -> str:
@@ -467,9 +483,11 @@ def main() -> int:
     if not results_dir.exists():
         raise FileNotFoundError(f"Results directory not found: {results_dir}")
 
-    genai = setup_gemini()
     model_name = args.model or os.environ.get("GEMINI_MODEL") or "gemini-3-flash-preview"
-    model = genai.GenerativeModel(model_name)
+    try:
+        model = get_gemini_model(model_name)
+    except GeminiClientError as exc:
+        raise RuntimeError(str(exc)) from exc
 
     tracks = load_tracks(results_dir)
     by_frame: dict[int, list[TrackDet]] = defaultdict(list)
@@ -530,17 +548,13 @@ def main() -> int:
     }
 
     # Determine video path (required for frame-level audits)
-    video_path = Path(args.video) if args.video else None
+    video_path = resolve_video_path(args.video, results_dir)
     if video_path is None:
-        # Try to infer from episode_meta.json if present
-        meta = load_optional_json(results_dir / "episode_meta.json")
-        vp = (meta or {}).get("video_path")
-        if vp:
-            video_path = Path(vp)
-
-    if video_path is None or not video_path.exists():
+        hint = "data/examples/test.mp4" if args.video in {None, "test.mp4"} else None
+        extra = f" Try: --video {hint}" if hint else ""
         raise FileNotFoundError(
             "Video path not provided or not found. Pass --video <path> (or ensure results/episode_meta.json has video_path)."
+            + extra
         )
 
     # Frame audits

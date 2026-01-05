@@ -44,7 +44,7 @@ def load_dotenv():
 
 
 def setup_gemini():
-    """Initialize Gemini API."""
+    """Initialize Gemini API (google-genai via Orion adapter)."""
     load_dotenv()
     
     api_key = os.environ.get("GOOGLE_API_KEY")
@@ -53,11 +53,16 @@ def setup_gemini():
         sys.exit(1)
     
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        return genai
-    except ImportError:
-        print("ERROR: google-generativeai not installed. Run: pip install google-generativeai")
+        from orion.utils.gemini_client import GeminiClientError, get_gemini_model
+    except Exception:
+        print("ERROR: Orion Gemini adapter not available")
+        sys.exit(1)
+
+    model_name = os.environ.get("GEMINI_MODEL") or "gemini-2.5-flash"
+    try:
+        return get_gemini_model(model_name, api_key=api_key)
+    except GeminiClientError as exc:
+        print(f"ERROR: {exc}")
         sys.exit(1)
 
 
@@ -171,16 +176,13 @@ def extract_frame(video_path: Path, frame_id: int) -> Optional[np.ndarray]:
 
 
 def validate_frame_with_gemini(
-    genai,
+    model,
     frame: np.ndarray,
     frame_id: int,
     orion_detections: List[Dict],
-    model_name: str = "gemini-2.5-flash",
 ) -> FrameValidation:
     """Validate a single frame's detections using Gemini."""
     import PIL.Image
-    
-    model = genai.GenerativeModel(model_name)
     
     # Summarize Orion detections for this frame
     orion_classes = [d.get("class_name", "unknown") for d in orion_detections]
@@ -259,7 +261,7 @@ Main categories: furniture (chair, couch, table, desk, bed, shelf, cabinet), peo
 
 
 def run_gemini_validation(
-    genai,
+    model,
     video_path: Path,
     tracks: List[Dict],
     output_dir: Path,
@@ -291,7 +293,7 @@ def run_gemini_validation(
             continue
         
         detections = by_frame[frame_id]
-        validation = validate_frame_with_gemini(genai, frame, frame_id, detections, model_name=gemini_model)
+        validation = validate_frame_with_gemini(model, frame, frame_id, detections)
         validations.append(validation)
         
         print(f"{validation.gemini_verdict} (P={validation.precision:.2f}, R={validation.recall:.2f})")
@@ -406,7 +408,7 @@ def main():
         sys.exit(1)
     
     # Setup Gemini
-    genai = setup_gemini()
+    model = setup_gemini()
     
     # Phase 1: Detection + Tracking
     from orion.config import ensure_results_dir
@@ -459,7 +461,7 @@ def main():
     
     # Phase 3: Gemini Validation
     validations = run_gemini_validation(
-        genai=genai,
+        model=model,
         video_path=video_path,
         tracks=tracks,
         output_dir=results_dir,

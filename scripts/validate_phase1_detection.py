@@ -25,12 +25,13 @@ from pathlib import Path
 from typing import Any, Optional
 
 import cv2
-import google.generativeai as genai
 import numpy as np
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
+
+from orion.utils.gemini_client import GeminiClientError, get_gemini_model
 
 console = Console()
 
@@ -144,7 +145,7 @@ def frame_to_base64(frame: np.ndarray) -> str:
 
 
 def validate_frame_detections(
-    model: genai.GenerativeModel,
+    model,
     frame: np.ndarray,
     detections: list[dict],
     frame_id: int,
@@ -221,7 +222,7 @@ Respond in this exact JSON format:
 
 
 def analyze_vocabulary_coverage(
-    model: genai.GenerativeModel,
+    model,
     video_path: Path,
     current_vocab: list[str],
     sample_frames: int = 5
@@ -299,7 +300,7 @@ Respond in JSON format:
 
 
 def generate_improved_vocabulary(
-    model: genai.GenerativeModel,
+    model,
     current_vocab: list[str],
     validation_results: list[dict],
     vocab_analysis: dict
@@ -379,8 +380,11 @@ def main():
         console.print("[red]Error: GOOGLE_API_KEY or GEMINI_API_KEY not set[/red]")
         sys.exit(1)
     
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-2.0-flash')
+    try:
+        model = get_gemini_model("gemini-2.0-flash", api_key=api_key)
+    except GeminiClientError as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        sys.exit(1)
     
     # Load data
     results_dir = Path("results") / args.episode

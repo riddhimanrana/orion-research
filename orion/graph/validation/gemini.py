@@ -23,14 +23,18 @@ class GeminiValidationError(RuntimeError):
 
 def _load_gemini_model(api_key: str, model_name: str):
     try:
-        import google.generativeai as genai  # type: ignore
-    except ImportError as exc:  # pragma: no cover - dependency missing at runtime
+        from orion.utils.gemini_client import get_gemini_model
+    except Exception as exc:  # pragma: no cover
         raise GeminiValidationError(
-            "google-generativeai is not installed. Install it via 'pip install google-generativeai'."
+            "Gemini client helpers are unavailable; ensure Orion is importable."
         ) from exc
 
-    genai.configure(api_key=api_key)
-    return genai.GenerativeModel(model_name)
+    try:
+        return get_gemini_model(model_name, api_key=api_key)
+    except Exception as exc:  # pragma: no cover - dependency missing at runtime
+        raise GeminiValidationError(
+            "google-genai is not installed. Install it via 'pip install google-genai'."
+        ) from exc
 
 
 def _read_env_file(env_path: Path) -> Dict[str, str]:

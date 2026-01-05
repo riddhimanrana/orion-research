@@ -327,17 +327,17 @@ def run_gemini_analysis(video_path: str, tracks_path: str,
     import cv2
     import numpy as np
     
-    api_key = os.environ.get("GEMINI_API_KEY")
+    api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
     if not api_key:
         logger.warning("GEMINI_API_KEY not set, skipping Gemini analysis")
         return {"skipped": True, "reason": "no_api_key"}
     
     try:
-        import google.generativeai as genai
         import PIL.Image
-        
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash-exp")
+
+        from orion.utils.gemini_client import GeminiClientError, get_gemini_model
+
+        model = get_gemini_model("gemini-2.0-flash-exp", api_key=api_key)
         
         # Load tracks
         tracks_by_frame = {}

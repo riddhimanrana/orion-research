@@ -418,11 +418,10 @@ def validate_with_gemini(video_path: str, tracks_by_frame: Dict,
         return {"validation_skipped": True}
     
     try:
-        import google.generativeai as genai
         import PIL.Image
-        
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash-exp")
+        from orion.utils.gemini_client import GeminiClientError, get_gemini_model
+
+        model = get_gemini_model("gemini-2.0-flash-exp", api_key=api_key)
         
         cap = cv2.VideoCapture(video_path)
         

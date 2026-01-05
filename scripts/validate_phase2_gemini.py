@@ -25,12 +25,13 @@ from pathlib import Path
 from typing import Any, Optional
 
 import cv2
-import google.generativeai as genai
 import numpy as np
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
+
+from orion.utils.gemini_client import GeminiClientError, get_gemini_model
 
 console = Console()
 
@@ -235,7 +236,7 @@ def sample_same_class_pairs(memory: dict, tracks: list[dict], sample_size: int =
 
 
 def validate_merge_with_gemini(
-    model: genai.GenerativeModel,
+    model,
     frame: np.ndarray,
     tracks_info: list[dict],
     object_info: dict,
@@ -296,7 +297,7 @@ Respond in this exact JSON format:
 
 
 def validate_separation_with_gemini(
-    model: genai.GenerativeModel,
+    model,
     frame: np.ndarray,
     tracks_info: list[dict],
     obj1: dict,
@@ -357,7 +358,7 @@ Respond in this exact JSON format:
 
 
 def run_full_scene_analysis(
-    model: genai.GenerativeModel,
+    model,
     video_path: Path,
     memory: dict,
 ) -> dict:
@@ -466,8 +467,11 @@ def main():
         console.print("[red]Error: GOOGLE_API_KEY or GEMINI_API_KEY not set[/red]")
         sys.exit(1)
     
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-2.0-flash')
+    try:
+        model = get_gemini_model("gemini-2.0-flash", api_key=api_key)
+    except GeminiClientError as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        sys.exit(1)
     
     # Load data
     results_dir = Path("results") / args.episode

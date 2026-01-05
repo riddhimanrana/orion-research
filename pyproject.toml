@@ -30,7 +30,7 @@ dependencies = [
     # Phase 3 additions
     "sentence-transformers>=2.2.0",  # For semantic filtering (all-mpnet-base-v2)
     # Phase 5 additions
-    "google-generativeai>=0.8.0",  # For Gemini validation
+    "google-genai>=0.3.0",  # For Gemini validation (google.genai)
 ]
 
 [project.optional-dependencies]

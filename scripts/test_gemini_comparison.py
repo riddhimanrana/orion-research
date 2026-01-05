@@ -32,20 +32,20 @@ def load_dotenv():
 
 
 def setup_gemini():
-    """Initialize Gemini API."""
+    """Initialize Gemini API (google-genai via Orion adapter)."""
     load_dotenv()
-    
-    api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        print("ERROR: GOOGLE_API_KEY or GEMINI_API_KEY not found in environment or .env file")
-        sys.exit(1)
-    
+
+    model_name = os.environ.get("GEMINI_MODEL") or "gemini-3-flash-preview"
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        return genai
-    except ImportError:
-        print("ERROR: google-generativeai not installed. Run: pip install google-generativeai")
+        from orion.utils.gemini_client import GeminiClientError, get_gemini_model
+    except Exception:
+        print("ERROR: Orion Gemini adapter not available")
+        sys.exit(1)
+
+    try:
+        return get_gemini_model(model_name)
+    except GeminiClientError as exc:
+        print(f"ERROR: {exc}")
         sys.exit(1)
 
 
@@ -117,27 +117,23 @@ def load_orion_results(results_dir: Path):
     return tracks
 
 
-def ask_gemini_about_frame(genai, frame_path: Path, question: str) -> str:
+def ask_gemini_about_frame(model, frame_path: Path, question: str) -> str:
     """Ask Gemini a question about a frame."""
     import PIL.Image
-    
-    model_name = os.environ.get("GEMINI_MODEL") or "gemini-3-flash-preview"
-    model = genai.GenerativeModel(model_name)
+
     image = PIL.Image.open(frame_path)
     
     response = model.generate_content([question, image])
     return response.text
 
 
-def compare_with_gemini(genai, orion_result, sample_frames, output_dir: Path):
+def compare_with_gemini(model, orion_result, sample_frames, output_dir: Path):
     """Compare Orion results with Gemini Vision analysis."""
     import PIL.Image
     from collections import Counter
     
     print("\n=== Comparing with Gemini Vision ===")
     
-    model_name = os.environ.get("GEMINI_MODEL") or "gemini-3-flash-preview"
-    model = genai.GenerativeModel(model_name)
     comparisons = []
     
     # Build global summary for context
@@ -239,7 +235,7 @@ def ask_questions_with_gemini(genai, sample_frames):
     
     for q in questions:
         print(f"\n  Q: {q}")
-        answer = ask_gemini_about_frame(genai, frame_path, q)
+        answer = ask_gemini_about_frame(model, frame_path, q)
         print(f"  A: {answer[:200]}..." if len(answer) > 200 else f"  A: {answer}")
         time.sleep(1)
 
@@ -267,7 +263,7 @@ def main():
         sys.exit(1)
     
     # Initialize Gemini
-    genai = setup_gemini()
+    model = setup_gemini()
     print("✓ Gemini API initialized")
     
     # Extract sample frames
@@ -284,7 +280,7 @@ def main():
     
     # Compare with Gemini
     if orion_result:
-        compare_with_gemini(genai, orion_result, sample_frames, output_dir)
+        compare_with_gemini(model, orion_result, sample_frames, output_dir)
     
     # Interactive Q&A demo
     if args.qa:

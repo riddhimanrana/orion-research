@@ -7,6 +7,9 @@ import json
 import time
 from pathlib import Path
 
+# Ensure repo root is on sys.path so we can import Orion utilities when running as a script.
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 def load_dotenv():
     """Load environment variables from .env file."""
     env_path = Path(__file__).parent.parent / ".env"
@@ -20,16 +23,14 @@ def load_dotenv():
 
 load_dotenv()
 
-import google.generativeai as genai
+from orion.utils.gemini_client import GeminiClientError, get_gemini_model
 from PIL import Image
 
-api_key = os.environ.get("GOOGLE_API_KEY")
-if not api_key:
-    print("ERROR: GOOGLE_API_KEY not found")
+try:
+    model = get_gemini_model("gemini-2.0-flash")
+except GeminiClientError as exc:
+    print(f"ERROR: {exc}")
     sys.exit(1)
-
-genai.configure(api_key=api_key)
-model = genai.GenerativeModel("gemini-2.0-flash")
 
 # Use existing sample frames
 frames_dir = Path(__file__).parent.parent / "results" / "gemini_test" / "sample_frames"

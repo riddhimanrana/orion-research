@@ -13,9 +13,10 @@ from pathlib import Path
 from collections import Counter
 
 try:
-    import google.generativeai as genai
-except ImportError:
-    genai = None
+    from orion.utils.gemini_client import GeminiClientError, get_gemini_model
+except Exception:  # pragma: no cover
+    GeminiClientError = RuntimeError  # type: ignore
+    get_gemini_model = None  # type: ignore
 
 
 def load_tracks(results_dir: Path) -> dict:
@@ -116,18 +117,15 @@ def main():
     parser.add_argument("--output", default="results/vocab_validation.json", help="Output file")
     args = parser.parse_args()
     
-    if genai is None:
-        print("ERROR: google-generativeai not installed")
+    if get_gemini_model is None:
+        print("ERROR: Orion Gemini adapter not available")
         return
-    
-    # Configure Gemini
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        print("ERROR: GEMINI_API_KEY not set")
+
+    try:
+        model = get_gemini_model("gemini-2.0-flash")
+    except GeminiClientError as exc:
+        print(f"ERROR: {exc}")
         return
-    
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash")
     
     # Load video
     video = cv2.VideoCapture(args.video)

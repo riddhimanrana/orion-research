@@ -36,7 +36,7 @@ def load_dotenv():
 
 
 def setup_gemini():
-    """Initialize Gemini API."""
+    """Initialize Gemini API (google-genai via Orion adapter)."""
     load_dotenv()
     
     api_key = os.environ.get("GOOGLE_API_KEY")
@@ -45,11 +45,15 @@ def setup_gemini():
         return None
     
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        return genai
-    except ImportError:
-        print("WARNING: google-generativeai not installed")
+        from orion.utils.gemini_client import GeminiClientError, get_gemini_model
+    except Exception:
+        print("WARNING: Orion Gemini adapter not available")
+        return None
+
+    try:
+        return get_gemini_model("gemini-2.0-flash", api_key=api_key)
+    except GeminiClientError as exc:
+        print(f"WARNING: {exc}")
         return None
 
 
@@ -313,7 +317,7 @@ def analyze_tracking(tracks: list):
     return by_label
 
 
-def validate_with_gemini(genai, video_path: str, tracks: list, results_dir: Path, 
+def validate_with_gemini(model, video_path: str, tracks: list, results_dir: Path, 
                          sample_every_n: int = 30):
     """Validate frames with Gemini."""
     import cv2
@@ -323,7 +327,7 @@ def validate_with_gemini(genai, video_path: str, tracks: list, results_dir: Path
     print("GEMINI VALIDATION")
     print(f"{'='*80}")
     
-    model = genai.GenerativeModel("gemini-2.0-flash")  # Using stable model for reliability
+    # `model` is a lightweight wrapper around google-genai.
     
     # Get unique frames from tracks
     frame_ids = sorted(set(t['frame_id'] for t in tracks))
@@ -460,12 +464,12 @@ def main():
     analyze_tracking(tracks)
     
     # Step 3: Gemini validation
-    genai = setup_gemini()
-    if genai:
+    model = setup_gemini()
+    if model:
         with open(results_dir / "episode_meta.json") as f:
             meta = json.load(f)
         video_path = meta["video_path"]
-        validate_with_gemini(genai, video_path, tracks, results_dir, 
+        validate_with_gemini(model, video_path, tracks, results_dir, 
                             sample_every_n=args.validate_every)
     
     print(f"\n{'='*80}")
