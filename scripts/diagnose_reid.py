@@ -333,8 +333,8 @@ def main():
     
     if args.backend in ["clip", "all"]:
         try:
-            from orion.backends.clip_backend import CLIPBackend
-            backends["clip"] = CLIPBackend(device=device)
+            from orion.backends.clip_backend import CLIPEmbedder
+            backends["clip"] = CLIPEmbedder(device=device)
             logger.info("✓ CLIP backend loaded")
         except Exception as e:
             logger.warning(f"Failed to load CLIP: {e}")
