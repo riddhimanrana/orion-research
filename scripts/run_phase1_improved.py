@@ -103,26 +103,17 @@ def run_detection(
             break
         
         if frame_idx % sample_interval == 0:
-            # Run detection
-            results = detector.detect(frame)
+            # Run detection - returns list of dicts with bbox, confidence, class_id, label
+            detections = detector.detect(frame)
             
-            frame_detections = 0
-            for r in results:
-                if hasattr(r, 'boxes') and r.boxes is not None:
-                    for i, box in enumerate(r.boxes):
-                        cls_id = int(box.cls[0])
-                        conf = float(box.conf[0])
-                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                        label = r.names.get(cls_id, str(cls_id))
-                        
-                        all_detections.append({
-                            'frame': frame_idx,
-                            'label': label,
-                            'confidence': round(conf, 4),
-                            'bbox': [round(float(x1), 1), round(float(y1), 1), 
-                                    round(float(x2), 1), round(float(y2), 1)]
-                        })
-                        frame_detections += 1
+            frame_detections = len(detections)
+            for det in detections:
+                all_detections.append({
+                    'frame': frame_idx,
+                    'label': det['label'],
+                    'confidence': round(det['confidence'], 4),
+                    'bbox': [round(x, 1) for x in det['bbox']]
+                })
             
             sampled += 1
             if sampled % 50 == 0 or sampled == 1:
