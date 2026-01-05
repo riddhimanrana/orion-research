@@ -55,6 +55,7 @@ For more help: orion <command> --help
     analyze_parser.add_argument("video", help="Path to video file")
     analyze_parser.add_argument("--fast", action="store_true", help="Use fast mode")
     analyze_parser.add_argument("--accurate", action="store_true", help="Use accurate mode")
+    analyze_parser.add_argument("--vjepa", action="store_true", help="Use V-JEPA2 mode (no depth, better Re-ID)")
     analyze_parser.add_argument("-i", "--interactive", action="store_true", help="Start Q&A after processing")
 
     # Stage control

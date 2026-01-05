@@ -36,8 +36,8 @@ class DetectionConfig:
     """YOLO model size (n=fastest, x=most accurate)."""
 
     # Detection thresholds (shared)
-    confidence_threshold: float = 0.25
-    """Minimum detection confidence (0-1, lower = more detections). v2 default: 0.25 for open-vocab."""
+    confidence_threshold: float = 0.10
+    """Minimum detection confidence (0-1). Lowered to 0.10 for YOLO-World open-vocab sensitivity."""
 
     iou_threshold: float = 0.45
     """NMS IoU threshold for overlapping boxes."""
@@ -71,38 +71,76 @@ class DetectionConfig:
     """Upper bound on detections returned per frame when using GroundingDINO."""
 
     # YOLO-World specific options (v2 primary detector)
-    yoloworld_model: str = "yolov8x-worldv2.pt"
-    """YOLO-World model weights file (largest model for best quality)."""
+    yoloworld_model: str = "models/yolov8l-worldv2-general.pt"
+    """YOLO-World model weights file. Pre-baked general indoor model for speed."""
 
     yoloworld_prompt: str = (
-        # People and body parts
-        "person . hand . face . arm . "
-        # Seating furniture
-        "couch . sofa . chair . office chair . stool . ottoman . footrest . "
-        # Tables and surfaces
-        "table . dining table . coffee table . desk . counter . shelf . bookshelf . "
-        # Electronics
-        "tv . television . monitor . laptop . keyboard . mouse . mousepad . phone . remote . "
-        "microphone . speaker . headphones . airpods . webcam . "
-        # Office items
-        "wrist rest . pencil case . notebook . paper . pen . pencil . stapler . "
-        # Art and decor
-        "picture frame . painting . poster . clock . vase . potted plant . plant . "
-        "figurine . sculpture . decoration . wall art . wall hanging . "
-        # Lighting
-        "lamp . floor lamp . table lamp . chandelier . ceiling fan . light . light fixture . "
-        # Flooring and architecture
-        "rug . carpet . floor mat . curtain . drapes . window . door . doorknob . "
-        "wall . ceiling . baseboard . staircase . railing . banister . light switch . "
-        # Kitchen
-        "refrigerator . microwave . oven . sink . cabinet . fridge . dishwasher . toaster . "
-        # Bedroom
-        "bed . pillow . blanket . dresser . mirror . nightstand . wardrobe . closet . "
-        # Containers and objects
-        "cup . mug . glass . bottle . water bottle . plate . bowl . "
-        "backpack . suitcase . bag . box . container . basket . bin . package"
+        # =============================================================
+        # GENERAL INDOOR VOCABULARY (~100 classes)
+        # Comprehensive list for indoor scene understanding
+        # Pre-baked into models/yolov8l-worldv2-general.pt for speed
+        # =============================================================
+        
+        # People
+        "person . "
+        
+        # Furniture - Seating
+        "chair . couch . sofa . armchair . stool . bench . office chair . "
+        
+        # Furniture - Tables & Surfaces
+        "table . desk . coffee table . dining table . counter . shelf . "
+        
+        # Furniture - Storage
+        "cabinet . drawer . dresser . wardrobe . closet . bookshelf . nightstand . "
+        
+        # Furniture - Beds
+        "bed . pillow . blanket . mattress . "
+        
+        # Electronics - Computing
+        "monitor . laptop . keyboard . mouse . computer . tablet . "
+        
+        # Electronics - Entertainment
+        "tv . television . remote . speaker . headphones . game controller . "
+        
+        # Electronics - Communication
+        "phone . cell phone . smartphone . "
+        
+        # Electronics - Other
+        "printer . router . charger . cable . outlet . switch . lamp . "
+        
+        # Kitchen - Appliances
+        "refrigerator . microwave . oven . stove . toaster . blender . coffee maker . "
+        
+        # Kitchen - Items
+        "sink . faucet . plate . bowl . cup . mug . glass . bottle . "
+        "fork . knife . spoon . pan . pot . cutting board . "
+        
+        # Personal Items
+        "backpack . bag . handbag . suitcase . umbrella . wallet . keys . "
+        "glasses . sunglasses . watch . hat . jacket . shoe . "
+        
+        # Decor & Fixtures
+        "picture frame . painting . poster . mirror . clock . vase . plant . "
+        "curtain . rug . carpet . towel . "
+        
+        # Containers & Storage
+        "box . basket . bin . trash can . recycling bin . "
+        
+        # Doors & Windows
+        "door . window . doorknob . handle . "
+        
+        # Misc Common Objects
+        "book . notebook . pen . pencil . paper . magazine . "
+        "toy . ball . doll . stuffed animal . "
+        "food . fruit . apple . banana . orange . sandwich . pizza . "
+        
+        # Animals
+        "dog . cat . bird . "
+        
+        # Background class (improves detection per YOLO-World docs)
+        ""
     )
-    """Dot-separated open-vocabulary prompt for YOLO-World. v2: Comprehensive object vocabulary for home environments."""
+    """Dot-separated prompt for YOLO-World. Comprehensive ~100 class indoor vocabulary."""
 
     yoloworld_use_custom_classes: bool = True
     """If True, constrain YOLO-World via `set_classes(yoloworld_categories())`. If False, run YOLO-World with its default/open vocabulary."""
@@ -164,8 +202,19 @@ class DetectionConfig:
         return [token.strip() for token in self.groundingdino_prompt.split('.') if token.strip()]
 
     def yoloworld_categories(self) -> list[str]:
-        """Return normalized category list for YOLO-World prompts."""
-        return [token.strip() for token in self.yoloworld_prompt.split('.') if token.strip()]
+        """Return normalized category list for YOLO-World prompts.
+        
+        Note: Empty string ('') is preserved as a background class per Ultralytics docs,
+        which can improve detection performance in some scenarios.
+        """
+        categories = []
+        for token in self.yoloworld_prompt.split('.'):
+            stripped = token.strip()
+            categories.append(stripped)  # Keep all including empty string
+        # Remove trailing empties except one (if present for background class)
+        while len(categories) > 1 and categories[-1] == '' and categories[-2] == '':
+            categories.pop()
+        return categories
 
 
 @dataclass
@@ -179,7 +228,7 @@ class EmbeddingConfig:
     embedding_dim: int = 512
     """Output embedding dimension"""
     
-    backend: Literal["clip", "dino", "dinov3", "vjepa2"] = "clip"
+    backend: Literal["clip", "dino", "dinov3", "vjepa2"] = "vjepa2"
     """Embedding backend to use ('clip' for CLIP, 'dino' legacy, 'dinov3' video encoder, 'vjepa2' for 3D-aware video embeddings)."""
 
     # Cluster / memory efficiency settings
@@ -444,12 +493,19 @@ class TrackingConfig:
     max_age: int = 30  # Increased from 1 to 30 for more stable tracking
     min_hits: int = 3
     iou_threshold: float = 0.3
-    appearance_threshold: float = 0.5
+    appearance_threshold: float = 0.65  # Raised for V-JEPA (was 0.5 for CLIP)
     reid_window_frames: int = 90
     class_belief_lr: float = 0.3
     max_distance_pixels: float = 150.0
     max_distance_3d_mm: float = 1500.0
     ttl_frames: int = 30
+    
+    # Per-class threshold file (overrides appearance_threshold for specific classes)
+    use_per_class_thresholds: bool = True
+    """If True, load per-class thresholds from JSON file."""
+    
+    per_class_threshold_file: str = "reid_thresholds_vjepa2.json"
+    """JSON file with per-class Re-ID thresholds (relative to orion/perception/)."""
 
 
 @dataclass
@@ -473,21 +529,21 @@ class PerceptionConfig:
     """Enable intelligent scene change detection for frame sampling"""
     
     # 3D Perception settings
-    enable_3d: bool = True
-    """Enable 3D perception (depth, 3D coordinates, occlusion)"""
+    enable_3d: bool = False
+    """Enable 3D perception (depth, 3D coordinates, occlusion) - DEPRECATED, use V-JEPA for 3D-awareness."""
     
-    enable_depth: bool = True
-    """Enable depth estimation stage (Phase 1 3D)."""
+    enable_depth: bool = False
+    """Enable depth estimation stage (Phase 1 3D) - DEPRECATED, removed in v2."""
     
-    enable_hands: bool = True
-    """Enable hand tracking (MediaPipe)"""
+    enable_hands: bool = False
+    """Enable hand tracking (MediaPipe) - disabled by default in v2."""
     
     # TODO: Hand tracking (future implementation with HOT3D dataset)
     # enable_hands: bool = False
     # """Enable hand tracking (requires HOT3D-trained model, not yet implemented)"""
     
-    enable_occlusion: bool = True
-    """Enable occlusion detection (requires enable_3d=True)"""
+    enable_occlusion: bool = False
+    """Enable occlusion detection - DEPRECATED in v2, requires depth which is removed."""
     
     # Phase 2: Tracking settings
     enable_tracking: bool = False
@@ -668,4 +724,32 @@ def get_accurate_config() -> PerceptionConfig:
         enable_3d=True,
         enable_tracking=True,
         clustering_cluster_selection_epsilon=0.5,
+    )
+
+
+def get_vjepa_config() -> PerceptionConfig:
+    """
+    V-JEPA2 mode: Uses V-JEPA2 for embeddings and disables depth.
+    
+    Best for Re-ID accuracy without 3D overhead.
+    """
+    return PerceptionConfig(
+        detection=DetectionConfig(
+            backend="yolo",
+            model="yolo11x",
+            confidence_threshold=0.25,
+        ),
+        embedding=EmbeddingConfig(
+            backend="vjepa2",
+            embedding_dim=1024,  # V-JEPA2 ViT-L
+            batch_size=16,
+            device="auto",
+        ),
+        description=DescriptionConfig(
+            max_tokens=200,
+        ),
+        target_fps=4.0,
+        enable_3d=False,
+        enable_depth=False,
+        enable_tracking=True,
     )

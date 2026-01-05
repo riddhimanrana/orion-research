@@ -125,12 +125,60 @@ class FrameObserver:
         elif enable_3d:
             logger.warning("3D perception requested but not available")
         
+        # Scene context for early filtering (v2)
+        self.scene_context_classes: Optional[set] = None  # Classes to keep based on scene
+        self.scene_context_suppress: set = set()  # Classes to always suppress (e.g., outdoor objects in indoor scene)
+        
         logger.debug(
             "FrameObserver initialized: backend=%s, target_fps=%s, 3d_enabled=%s",
             self.detector_backend,
             target_fps,
             self.perception_engine is not None,
         )
+    
+    def set_scene_context(
+        self,
+        mentioned_objects: List[str],
+        scene_type: Optional[str] = None,
+    ):
+        """Configure class filtering based on scene context.
+        
+        This allows early filtering of detections that don't make sense
+        in the current scene (e.g., filtering 'car' in an indoor office).
+        
+        Args:
+            mentioned_objects: List of objects mentioned in scene caption.
+            scene_type: Optional scene type (e.g., 'indoor', 'outdoor', 'office').
+        """
+        # Classes that are contextually relevant
+        self.scene_context_classes = set(obj.lower() for obj in mentioned_objects)
+        
+        # Suppress classes that don't fit the scene type
+        if scene_type:
+            scene_lower = scene_type.lower()
+            if 'indoor' in scene_lower or 'office' in scene_lower or 'home' in scene_lower:
+                # Suppress outdoor objects
+                self.scene_context_suppress = {
+                    'car', 'truck', 'bus', 'motorcycle', 'bicycle', 'train',
+                    'airplane', 'boat', 'traffic light', 'fire hydrant', 
+                    'stop sign', 'parking meter', 'bird', 'cow', 'horse',
+                    'sheep', 'elephant', 'bear', 'zebra', 'giraffe',
+                }
+            elif 'outdoor' in scene_lower:
+                # Suppress indoor objects
+                self.scene_context_suppress = {
+                    'bed', 'toilet', 'sink', 'oven', 'refrigerator',
+                    'microwave', 'toaster',
+                }
+        
+        logger.info(f"Scene context set: {len(self.scene_context_classes)} relevant objects, "
+                    f"{len(self.scene_context_suppress)} suppressed classes")
+    
+    def _should_suppress_class(self, class_name: str) -> bool:
+        """Check if a class should be suppressed based on scene context."""
+        if not self.scene_context_suppress:
+            return False
+        return class_name.lower() in self.scene_context_suppress
 
     def update_camera_intrinsics(self, intrinsics: "CameraIntrinsics"):
         """Passes camera intrinsics update to the 3D perception engine."""
@@ -408,6 +456,10 @@ class FrameObserver:
             confidence = float(detection_source["confidence"])
             class_id = int(detection_source.get("class_id", -1))
             class_name = detection_source["class_name"]
+            
+            # Scene context filtering (v2): Skip classes that don't fit the scene
+            if self._should_suppress_class(class_name):
+                continue
 
             bbox = BoundingBox(x1=float(x1), y1=float(y1), x2=float(x2), y2=float(y2))
             centroid = bbox.center

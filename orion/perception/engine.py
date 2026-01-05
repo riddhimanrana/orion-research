@@ -80,6 +80,7 @@ class PerceptionResult:
     fps: float = 0.0
     duration_seconds: float = 0.0
     processing_time_seconds: float = 0.0
+    scene_caption: str = ""
     metrics: Optional[Dict[str, float]] = None
 
     @property
@@ -126,6 +127,15 @@ except ImportError as e:
 from orion.perception.spatial_zones import ZoneManager
 from orion.utils.profiling import profile, Profiler
 
+# Scene Context Manager for v2
+try:
+    from orion.perception.scene_context import SceneContextManager, SceneContextConfig
+    SCENE_CONTEXT_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"SceneContextManager import failed: {e}")
+    SCENE_CONTEXT_AVAILABLE = False
+
+
 class PerceptionEngine:
     """High-level orchestrator for the perception pipeline."""
 
@@ -156,6 +166,9 @@ class PerceptionEngine:
         self.depth_estimator: Optional[DepthEstimator] = None
         self.enhanced_tracker: Optional[TrackerProtocol] = None
         self.slam_engine: Optional[SLAMEngine] = None
+        
+        # Scene context manager for v2 (FastVLM scene captions)
+        self.scene_context: Optional[SceneContextManager] = None
 
         # Tracking history
         self.tracking_history: Dict[int, List[Track]] = {}  # To store track history
@@ -204,27 +217,66 @@ class PerceptionEngine:
             enable_3d=self.config.enable_3d,
             enable_occlusion=self.config.enable_occlusion,
         )
-        # Visual embedder
-        self.embedder = VisualEmbedder(self.model_manager.clip, self.config.embedding)
+        # Visual embedder (V-JEPA2 doesn't need CLIP)
+        if self.config.embedding.backend == "vjepa2":
+            self.embedder = VisualEmbedder(clip_model=None, config=self.config.embedding)
+        else:
+            self.embedder = VisualEmbedder(self.model_manager.clip, self.config.embedding)
         # Entity tracker (optional, can be None)
         self.tracker = EntityTracker(self.config)
         # Entity describer
-        self.describer = None
-        # self.describer = EntityDescriber(
-        #     vlm_model=self.model_manager.fastvlm,
-        #     config=self.config.description,
-        #     enable_class_correction=True,
-        #     enable_spatial_analysis=True,
-        # )
+        self.describer = EntityDescriber(
+            vlm_model=self.model_manager.fastvlm,
+            config=self.config.description,
+            enable_class_correction=True,
+            enable_spatial_analysis=True,
+        )
         # self.reid_model = ReidModel(self.config.reid)
         # self.depth_estimator = DepthEstimator(self.config.depth.model_name)
         self.depth_estimator = None
+        
+        # Load per-class Re-ID thresholds if enabled
+        per_class_thresholds = {}
+        if self.config.tracking.use_per_class_thresholds:
+            threshold_file = Path(__file__).parent / self.config.tracking.per_class_threshold_file
+            if threshold_file.exists():
+                import json
+                with open(threshold_file, 'r') as f:
+                    per_class_thresholds = json.load(f)
+                logger.info(f"✓ Loaded per-class thresholds from {threshold_file.name} ({len(per_class_thresholds)} classes)")
+            else:
+                logger.warning(f"Per-class threshold file not found: {threshold_file}")
+        
         self.enhanced_tracker = EnhancedTracker(
             max_age=self.config.tracking.max_age,
             min_hits=self.config.tracking.min_hits,
             iou_threshold=self.config.tracking.iou_threshold,
             appearance_threshold=self.config.tracking.appearance_threshold,
+            per_class_thresholds=per_class_thresholds,
         )
+        
+        # Scene Context Manager (v2: FastVLM scene captions for context-aware filtering)
+        if SCENE_CONTEXT_AVAILABLE:
+            # Resolve device for scene context
+            import torch
+            device = self.config.embedding.device
+            if device == "auto":
+                if torch.cuda.is_available():
+                    device = "cuda"
+                elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+                    device = "mps"
+                else:
+                    device = "cpu"
+            
+            scene_config = SceneContextConfig(
+                device=device,
+                update_interval_frames=int(self.config.target_fps * 2),  # Every ~2 seconds
+            )
+            self.scene_context = SceneContextManager(config=scene_config)
+            logger.info(f"✓ SceneContextManager initialized (update every {scene_config.update_interval_frames} frames)")
+        else:
+            self.scene_context = None
+            logger.warning("SceneContextManager not available")
 
         logger.info("✓ All components initialized\n")
 
@@ -283,6 +335,43 @@ class PerceptionEngine:
         # Initialize pipeline components
         # self._initialize_components()
         
+        # Step 0: Generate scene context using SceneContextManager (v2)
+        scene_caption = ""
+        scene_snapshot = None
+        if self.scene_context is not None:
+            try:
+                import cv2
+                cap = cv2.VideoCapture(video_path)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret:
+                        # Force initial scene context generation
+                        scene_snapshot = self.scene_context.update(frame, frame_idx=0, force=True)
+                        scene_caption = scene_snapshot.caption
+                        logger.info(f"Scene Context (v2): {scene_caption}")
+                        logger.info(f"  Objects mentioned: {scene_snapshot.objects_mentioned}")
+                cap.release()
+            except Exception as e:
+                logger.warning(f"Failed to generate scene context: {e}")
+        elif self.describer:
+            # Fallback to legacy describer if SceneContextManager unavailable
+            try:
+                import cv2
+                cap = cv2.VideoCapture(video_path)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret:
+                        scene_caption = self.describer.describe_scene(frame)
+                        logger.info(f"Scene Context (legacy): {scene_caption}")
+                cap.release()
+            except Exception as e:
+                logger.warning(f"Failed to generate scene context: {e}")
+
+        # Pass scene context to observer for early-stage filtering
+        if scene_snapshot is not None and hasattr(self.observer, 'set_scene_context'):
+            self.observer.set_scene_context(scene_snapshot.objects_mentioned)
+            logger.info(f"  → Observer scene context filtering enabled for: {scene_snapshot.objects_mentioned}")
+
         # Step 1: Observe & detect
         t0 = time.time()
         detections = self.observer.process_video(video_path)
@@ -390,6 +479,7 @@ class PerceptionEngine:
             fps=fps,
             duration_seconds=duration,
             processing_time_seconds=elapsed_total,
+            scene_caption=scene_caption,
             metrics=result_metrics or None,
         )
 

@@ -147,10 +147,11 @@ class EnhancedTracker:
         max_age: int = 30,  # Max frames without detection before deletion
         min_hits: int = 3,  # Min consecutive hits to confirm track
         iou_threshold: float = 0.3,  # IoU threshold for matching
-        appearance_threshold: float = 0.5,  # Cosine similarity threshold
+        appearance_threshold: float = 0.65,  # Cosine similarity threshold (raised for V-JEPA)
         max_gallery_size: int = 5,  # Max embeddings per track
         ema_alpha: float = 0.9,  # EMA weight for appearance
         clip_model = None,  # For label verification
+        per_class_thresholds: Optional[Dict[str, float]] = None,  # Per-class override
     ):
         self.max_age = max_age
         self.min_hits = min_hits
@@ -159,6 +160,9 @@ class EnhancedTracker:
         self.max_gallery_size = max_gallery_size
         self.ema_alpha = ema_alpha
         self.clip_model = clip_model
+        
+        # Per-class thresholds (loaded from JSON or passed in)
+        self.per_class_thresholds = per_class_thresholds or {}
         
         # Workspace categories for CLIP verification
         self.workspace_categories = [
@@ -173,6 +177,18 @@ class EnhancedTracker:
         
         # Camera motion compensation
         self.last_camera_pose: Optional[np.ndarray] = None
+    
+    def get_threshold_for_class(self, class_name: str) -> float:
+        """Get the appearance threshold for a specific class."""
+        # Normalize class name
+        normalized = self._normalize_label(class_name)
+        # Check per-class thresholds first
+        if normalized in self.per_class_thresholds:
+            return self.per_class_thresholds[normalized]
+        if class_name in self.per_class_thresholds:
+            return self.per_class_thresholds[class_name]
+        # Fall back to default
+        return self.per_class_thresholds.get("_default", self.appearance_threshold)
     
     def _normalize_label(self, class_name: str) -> str:
         """Normalize YOLO label variants to canonical form."""

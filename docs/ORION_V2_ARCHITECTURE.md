@@ -76,12 +76,12 @@ Orion v2 is a memory-centric video understanding system that tracks objects pers
 │           │                         │                          │                        │
 │           │                         ▼                          ▼                        │
 │           │               ┌─────────────────────────────────────────────┐              │
-│           │               │  FILTERING LOGIC:                            │              │
-│           │               │  1. FastVLM describes each object crop       │              │
-│           │               │  2. FastVLM describes scene context          │              │
-│           │               │  3. Sentence embed: object desc + scene desc │              │
-│           │               │  4. Cosine similarity > threshold → KEEP     │              │
-│           │               │  5. Low similarity → FALSE POSITIVE → REMOVE │              │
+│           │               │  FILTERING LOGIC:                           │              │
+│           │               │  1. FastVLM describes each object crop      │              │
+│           │               │  2. FastVLM describes scene context         │              │
+│           │               │  3. Sentence embed: object desc + scene desc│              │
+│           │               │  4. Cosine similarity > threshold → KEEP    │              │
+│           │               │  5. Low similarity → FALSE POSITIVE → REMOVE│              │
 │           │               └─────────────────────────────────────────────┘              │
 │           │                                        │                                    │
 │           ▼                                        ▼                                    │

@@ -91,6 +91,36 @@ class EntityDescriber:
             f"temperature={config.temperature}, describe_once={config.describe_once}, "
             f"class_correction={enable_class_correction}, spatial_analysis={enable_spatial_analysis}"
         )
+
+    def describe_scene(self, frame: np.ndarray, prompt: str = "Describe this scene in detail.") -> str:
+        """
+        Generate a description for the entire scene/frame.
+        
+        Args:
+            frame: Full video frame (BGR numpy array)
+            prompt: Prompt for the VLM
+            
+        Returns:
+            Scene description string
+        """
+        if self.vlm is None:
+            return ""
+            
+        try:
+            # Convert BGR to RGB PIL Image
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pil_image = Image.fromarray(rgb_frame)
+            
+            description = self.vlm.generate_description(
+                pil_image,
+                prompt,
+                max_tokens=self.config.max_tokens,
+                temperature=self.config.temperature
+            )
+            return description.strip()
+        except Exception as e:
+            logger.error(f"Failed to describe scene: {e}")
+            return ""
     
     @profile("describer_describe_entities")
     def describe_entities(

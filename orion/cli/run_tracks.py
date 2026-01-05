@@ -121,18 +121,26 @@ def process_video_to_tracks(
         logger.info(f"Loading YOLO model: {yolo_model}")
         yolo = YOLO(f"{yolo_model}.pt")
     elif detector_backend == "yoloworld":
-        logger.info("Loading YOLO-World model: yolov8m-worldv2.pt")
-        yoloworld = YOLO("yolov8m-worldv2.pt")
+        # Get model from config (default: yolov8l-worldv2.pt)
+        det_config_temp = DetectionConfig(
+            backend="yoloworld",
+            yoloworld_prompt=yoloworld_prompt or DetectionConfig().yoloworld_prompt,
+        )
+        yoloworld_model = det_config_temp.yoloworld_model
+        logger.info(f"Loading YOLO-World model: {yoloworld_model}")
+        yoloworld = YOLO(yoloworld_model)
+        
         if yoloworld_open_vocab:
             logger.info("  YOLO-World mode: default vocabulary (no set_classes)")
+        elif "custom" in yoloworld_model or "general" in yoloworld_model:
+            logger.info("  YOLO-World mode: using pre-baked custom/general vocabulary (skipping set_classes)")
+            # Verify classes match config if possible, but for now trust the file
+            logger.info(f"  Model classes: {yoloworld.names}")
         else:
             # Constrain YOLO-World to our custom household prompt/categories
-            det_config_temp = DetectionConfig(
-                backend="yoloworld",
-                yoloworld_prompt=yoloworld_prompt or DetectionConfig().yoloworld_prompt,
-            )
             custom_classes = det_config_temp.yoloworld_categories()
             logger.info(f"  Setting {len(custom_classes)} custom classes for open-vocab detection")
+            yoloworld.set_classes(custom_classes)
             yoloworld.set_classes(custom_classes)
     elif detector_backend == "groundingdino":
         logger.info("Loading GroundingDINO model...")

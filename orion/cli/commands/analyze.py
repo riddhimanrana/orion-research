@@ -21,7 +21,7 @@ console = Console()
 def handle_analyze(args: argparse.Namespace, settings: OrionSettings) -> None:
     """Handle the analyze command - run perception pipeline and optionally export to graph."""
     from ...perception import PerceptionEngine
-    from ...perception.config import get_fast_config, get_balanced_config, get_accurate_config
+    from ...perception.config import get_fast_config, get_balanced_config, get_accurate_config, get_vjepa_config
 
     # Determine processing mode
     if args.fast:
@@ -30,6 +30,9 @@ def handle_analyze(args: argparse.Namespace, settings: OrionSettings) -> None:
     elif args.accurate:
         config = get_accurate_config()
         mode_name = "accurate"
+    elif args.vjepa:
+        config = get_vjepa_config()
+        mode_name = "vjepa2"
     else:
         config = get_balanced_config()
         mode_name = "balanced"
