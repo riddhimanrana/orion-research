@@ -7,75 +7,9 @@ import numpy as np
 import cv2
 
 from orion.managers.model_manager import ModelManager
+from orion.perception.labels import LABEL_NORMALIZATION, normalize_label
 
 logger = logging.getLogger(__name__)
-
-
-# Label normalization map - group semantic duplicates for better Re-ID
-LABEL_NORMALIZATION = {
-    # Screen/display devices
-    "computer screen": "monitor",
-    "computer monitor": "monitor",
-    "television": "monitor",
-    "tv": "monitor",
-    "screen": "monitor",
-    "display": "monitor",
-    "computer": "monitor",
-    "desktop": "monitor",
-    
-    # Seating
-    "office chair": "chair",
-    "armchair": "chair",
-    "stool": "chair",
-    "seat": "chair",
-    
-    # Bottles
-    "water bottle": "bottle",
-    "plastic bottle": "bottle",
-    
-    # Couches
-    "sofa": "couch",
-    "loveseat": "couch",
-    "settee": "couch",
-    
-    # Plants
-    "houseplant": "plant",
-    "potted plant": "plant",
-    
-    # Tables/surfaces
-    "counter": "table",
-    "countertop": "table",
-    "desk": "table",
-    "dining table": "table",
-    "coffee table": "table",
-    
-    # Lighting
-    "floor lamp": "lamp",
-    "table lamp": "lamp",
-    "desk lamp": "lamp",
-    
-    # Wall art
-    "artwork": "picture",
-    "painting": "picture",
-    "picture frame": "picture",
-    "frame": "picture",
-    "poster": "picture",
-    
-    # Floor coverings
-    "carpet": "rug",
-    "mat": "rug",
-    "floor mat": "rug",
-    
-    # Pillows
-    "cushion": "pillow",
-    "throw pillow": "pillow",
-}
-
-
-def normalize_label(label: str) -> str:
-    """Normalize label to canonical form for better Re-ID clustering."""
-    label_lower = label.lower().strip()
-    return LABEL_NORMALIZATION.get(label_lower, label_lower)
 
 
 def _read_tracks_jsonl(tracks_path: Path) -> List[Dict[str, Any]]:

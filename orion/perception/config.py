@@ -179,8 +179,8 @@ class EmbeddingConfig:
     embedding_dim: int = 512
     """Output embedding dimension"""
     
-    backend: Literal["clip", "dino", "dinov3"] = "clip"
-    """Embedding backend to use ('clip' for CLIP, 'dino' legacy, 'dinov3' for video encoder)."""
+    backend: Literal["clip", "dino", "dinov3", "vjepa2"] = "clip"
+    """Embedding backend to use ('clip' for CLIP, 'dino' legacy, 'dinov3' video encoder, 'vjepa2' for 3D-aware video embeddings)."""
 
     # Cluster / memory efficiency settings
     use_cluster_embeddings: bool = False
@@ -225,10 +225,10 @@ class EmbeddingConfig:
                 f"embedding_dim must be one of {valid_dims}, got {self.embedding_dim}"
             )
         
-        if self.backend not in {"clip", "dino", "dinov3"}:
-            raise ValueError(f"backend must be 'clip', 'dino', or 'dinov3', got {self.backend}")
+        if self.backend not in {"clip", "dino", "dinov3", "vjepa2"}:
+            raise ValueError(f"backend must be 'clip', 'dino', 'dinov3', or 'vjepa2', got {self.backend}")
         
-        if self.backend in {"dino", "dinov3"} and self.use_text_conditioning:
+        if self.backend in {"dino", "dinov3", "vjepa2"} and self.use_text_conditioning:
             # DINO variants are vision-only; disable conditioning
             logger.warning("Text conditioning requested with DINO backend; disabling use_text_conditioning.")
             self.use_text_conditioning = False

@@ -49,31 +49,42 @@ class VisualEmbedder:
     ):
         self.clip = clip_model
         self.config = config
+        self.vjepa2 = None  # V-JEPA2 embedder (lazy loaded)
         backend = config.backend
         mode = "multimodal" if (backend == "clip" and config.use_text_conditioning) else "vision-only"
         logger.debug(
             f"VisualEmbedder initialized: backend={backend}, dim={config.embedding_dim}, "
             f"mode={mode}, batch_size={config.batch_size}, device={config.device}"
         )
-        # DINO model instantiation with device selection
+        
+        # Resolve device
+        device = config.device
+        import torch
+        if device == "auto":
+            if torch.cuda.is_available():
+                device = "cuda"
+            elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+                device = "mps"
+            else:
+                device = "cpu"
+        self._device = device
+        
+        # Backend-specific model instantiation
         if backend in {"dino", "dinov3"}:
             # If model supplied reuse, else create
             if dino_model is not None:
                 self.dino = dino_model
             else:
                 from orion.backends.dino_backend import DINOEmbedder
-                device = config.device
-                import torch
-                if device == "auto":
-                    if torch.cuda.is_available():
-                        device = "cuda"
-                    elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-                        device = "mps"
-                    else:
-                        device = "cpu"
                 # Choose default model name
                 model_name = "facebook/dinov2-base" if backend == "dino" else "facebook/dinov2-base"  # placeholder for dinov3 local
                 self.dino = DINOEmbedder(model_name=model_name, device=device)
+        
+        elif backend == "vjepa2":
+            # V-JEPA2: 3D-aware video encoder for better Re-ID
+            from orion.backends.vjepa2_backend import VJepa2Embedder
+            self.vjepa2 = VJepa2Embedder(device=device)
+            logger.info(f"Initialized V-JEPA2 embedder for Re-ID (device={device})")
     
     @profile("embedder_embed_detections")
     def embed_detections(self, detections: List[dict]) -> List[dict]:
@@ -149,6 +160,17 @@ class VisualEmbedder:
                 for detection in batch:
                     class_name = detection.get("object_class")
                     detection["clip_embedding"] = self._embed_clip(detection["crop"], class_name)
+            return embeddings
+        elif backend == "vjepa2":
+            # V-JEPA2: embed each crop as single-frame "video"
+            embeddings = []
+            for detection in batch:
+                crop = detection["crop"]
+                # V-JEPA2 expects RGB
+                rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+                embedding_tensor = self.vjepa2.embed_single_image(rgb_crop)
+                embedding = embedding_tensor.numpy().flatten()
+                embeddings.append(embedding)
             return embeddings
         elif backend == "dinov3":
             # Should not be called; handled by _embed_dinov3_video

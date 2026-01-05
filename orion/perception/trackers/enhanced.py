@@ -173,28 +173,11 @@ class EnhancedTracker:
         
         # Camera motion compensation
         self.last_camera_pose: Optional[np.ndarray] = None
-        
-        # Label normalization map
-        self.label_normalization = {
-            'laptop keyboard': 'keyboard',
-            'musical keyboard': 'keyboard',
-            'keyboard': 'keyboard',
-            'desktop computer': 'laptop',
-            'laptop': 'laptop',
-            'computer monitor': 'monitor',
-            'monitor': 'monitor',
-            'diaper bag': 'backpack',
-            'backpack': 'backpack',
-            'bag': 'backpack',
-            'water bottle': 'bottle',
-            'thermos': 'bottle',
-            'thermos bottle': 'bottle',
-            'bottle': 'bottle',
-        }
     
     def _normalize_label(self, class_name: str) -> str:
         """Normalize YOLO label variants to canonical form."""
-        return self.label_normalization.get(class_name.lower(), class_name)
+        from orion.perception.labels import normalize_label
+        return normalize_label(class_name)
     
     def _verify_and_correct_label(self, class_name: str, embedding: Optional[np.ndarray]) -> Tuple[str, float, str]:
         """

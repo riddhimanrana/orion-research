@@ -27,6 +27,8 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 from rich.table import Table
 
+from orion.perception.labels import normalize_label
+
 logger = logging.getLogger(__name__)
 console = Console()
 
@@ -63,74 +65,6 @@ SUPPRESS_CLASSES = {
     "curtain", "drapes", "shadow", "reflection", "light", "baseboard",
     "doorknob", "light switch", "outlet"
 }
-
-# Label normalization map - group semantic duplicates
-LABEL_NORMALIZATION = {
-    # Screen/display devices
-    "computer screen": "monitor",
-    "computer monitor": "monitor",
-    "television": "monitor",
-    "tv": "monitor",
-    "screen": "monitor",
-    "display": "monitor",
-    
-    # Seating
-    "office chair": "chair",
-    "armchair": "chair",
-    "stool": "chair",
-    "seat": "chair",
-    
-    # Bottles
-    "water bottle": "bottle",
-    "plastic bottle": "bottle",
-    
-    # Couches
-    "sofa": "couch",
-    "loveseat": "couch",
-    "settee": "couch",
-    
-    # Plants
-    "houseplant": "plant",
-    "potted plant": "plant",
-    
-    # Tables/surfaces
-    "counter": "table",
-    "countertop": "table",
-    "desk": "table",
-    "dining table": "table",
-    "coffee table": "table",
-    
-    # Lighting
-    "floor lamp": "lamp",
-    "table lamp": "lamp",
-    "desk lamp": "lamp",
-    
-    # Wall art
-    "artwork": "picture",
-    "painting": "picture",
-    "picture frame": "picture",
-    "frame": "picture",
-    "poster": "picture",
-    
-    # Floor coverings
-    "carpet": "rug",
-    "mat": "rug",
-    "floor mat": "rug",
-    
-    # Pillows
-    "cushion": "pillow",
-    "throw pillow": "pillow",
-    
-    # Computers
-    "computer": "monitor",  # Often just shows screen
-    "desktop": "monitor",
-}
-
-
-def normalize_label(label: str) -> str:
-    """Normalize label to canonical form for better Re-ID clustering."""
-    label_lower = label.lower().strip()
-    return LABEL_NORMALIZATION.get(label_lower, label_lower)
 
 
 # Per-class similarity thresholds (more strict for people, looser for objects)
