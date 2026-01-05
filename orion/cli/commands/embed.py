@@ -50,13 +50,13 @@ DYNAMIC_CLASSES = {
     "refrigerator", "microwave", "oven", "tv", "television", "monitor",
     # Architecture - doors/windows can appear from multiple angles
     "door", "window", "staircase", "stairs", "railing",
+    # Floor coverings - appear from multiple angles
+    "rug", "carpet", "mat",
 }
 
 STATIC_CLASSES = {
     # Only truly background elements that don't need cross-view matching
     "wall", "ceiling", "floor",
-    # Large uniform surfaces
-    "rug", "carpet", "mat"
 }
 
 SUPPRESS_CLASSES = {
@@ -103,6 +103,11 @@ CLASS_THRESHOLDS = {
     "television": 0.70,
     "monitor": 0.72,
     "refrigerator": 0.70,
+    
+    # Floor coverings - can look different from angles
+    "rug": 0.55,
+    "carpet": 0.55,
+    "mat": 0.55,
     
     # Default for unlisted classes
     "_default": 0.75
