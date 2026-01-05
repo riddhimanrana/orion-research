@@ -130,13 +130,29 @@ class CanonicalLabeler:
         label_to_idx = {lbl: i for i, lbl in enumerate(unique_labels)}
 
         # HDBSCAN clustering
+        #
+        # Note: Some older hdbscan builds do not support metric="cosine".
+        # Since we normalize embeddings to unit length, euclidean distance is
+        # monotonic with cosine distance:
+        #   ||u - v||^2 = 2(1 - cos(u, v))
+        # So we can safely fall back to metric="euclidean" when needed.
         hdb = _ensure_hdbscan()
-        clusterer = hdb.HDBSCAN(
+        cluster_kwargs = dict(
             min_cluster_size=max(2, min(self.hdbscan_min_cluster_size, len(unique_labels))),
             min_samples=self.hdbscan_min_samples,
-            metric="cosine",
         )
-        cluster_ids = clusterer.fit_predict(embs)  # [U]
+        try:
+            clusterer = hdb.HDBSCAN(metric="cosine", **cluster_kwargs)
+            cluster_ids = clusterer.fit_predict(embs)  # [U]
+        except ValueError as e:
+            if "metric" not in str(e).lower():
+                raise
+            logger.warning(
+                "HDBSCAN does not support cosine metric (%s). Falling back to euclidean on normalized embeddings.",
+                e,
+            )
+            clusterer = hdb.HDBSCAN(metric="euclidean", **cluster_kwargs)
+            cluster_ids = clusterer.fit_predict(embs)  # [U]
 
         # Map each candidate occurrence to its cluster
         occurrence_clusters: List[int] = []
