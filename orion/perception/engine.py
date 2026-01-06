@@ -568,20 +568,41 @@ class PerceptionEngine:
         # self._initialize_components()
         
         # Step 0: Generate scene context using SceneContextManager (v2)
+        # Sample multiple frames (0%, 25%, 50%, 75%) to handle multi-room videos
         scene_caption = ""
         scene_snapshot = None
+        all_scene_captions = []
+        
         if self.scene_context is not None:
             try:
                 import cv2
                 cap = cv2.VideoCapture(video_path)
                 if cap.isOpened():
-                    ret, frame = cap.read()
-                    if ret:
-                        # Force initial scene context generation
-                        scene_snapshot = self.scene_context.update(frame, frame_idx=0, force=True)
-                        scene_caption = scene_snapshot.caption
-                        logger.info(f"Scene Context (v2): {scene_caption}")
-                        logger.info(f"  Objects mentioned: {scene_snapshot.objects_mentioned}")
+                    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                    
+                    # Sample frames at 0%, 25%, 50%, 75% of video
+                    sample_positions = [0, int(total_frames * 0.25), int(total_frames * 0.5), int(total_frames * 0.75)]
+                    
+                    for sample_idx, frame_pos in enumerate(sample_positions):
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
+                        ret, frame = cap.read()
+                        if ret:
+                            snapshot = self.scene_context.update(frame, frame_idx=frame_pos, force=True)
+                            if snapshot.caption:
+                                all_scene_captions.append(snapshot.caption)
+                                if sample_idx == 0:
+                                    scene_snapshot = snapshot
+                                    scene_caption = snapshot.caption
+                    
+                    if all_scene_captions:
+                        logger.info(f"Scene Context (v2, {len(all_scene_captions)} samples):")
+                        for i, cap_text in enumerate(all_scene_captions):
+                            logger.info(f"  [{i}] {cap_text[:100]}...")
+                        
+                        # Use first scene for initial context
+                        if scene_snapshot:
+                            logger.info(f"  Objects mentioned: {scene_snapshot.objects_mentioned}")
+                            
                 cap.release()
             except Exception as e:
                 logger.warning(f"Failed to generate scene context: {e}")
@@ -615,17 +636,21 @@ class PerceptionEngine:
         
         # Step 1.25: Scene-based semantic filtering
         # First try SemanticFilterV2 (preferred), fallback to legacy CLIP-based filter
-        if self.semantic_filter_v2 is not None and scene_caption and detections:
-            # Set up v2 filter with scene-type classification
-            self.semantic_filter_v2.set_scene(scene_caption, frame_idx=0)
-            before_count = len(detections)
-            detections = self.semantic_filter_v2.filter_detections(detections, in_place=True)
-            after_count = len(detections)
-            if before_count != after_count:
-                logger.info(f"  SemanticFilterV2: {before_count} → {after_count} detections "
-                           f"({before_count - after_count} removed)")
-                # Log scene type
-                if self.semantic_filter_v2._current_scene:
+        if self.semantic_filter_v2 is not None and detections:
+            # Use multi-scene mode if multiple captions available
+            if all_scene_captions and len(all_scene_captions) > 1:
+                self.semantic_filter_v2.set_multi_scene(all_scene_captions, frame_idx=0)
+            elif scene_caption:
+                self.semantic_filter_v2.set_scene(scene_caption, frame_idx=0)
+            
+            if self.semantic_filter_v2._current_scene:
+                before_count = len(detections)
+                detections = self.semantic_filter_v2.filter_detections(detections, in_place=True)
+                after_count = len(detections)
+                if before_count != after_count:
+                    logger.info(f"  SemanticFilterV2: {before_count} → {after_count} detections "
+                               f"({before_count - after_count} removed)")
+                    # Log scene type
                     scene_type = self.semantic_filter_v2._current_scene.scene_type
                     blacklist = self.semantic_filter_v2._current_scene.blacklist
                     logger.info(f"    Scene type: {scene_type}")

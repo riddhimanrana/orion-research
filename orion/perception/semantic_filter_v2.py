@@ -350,6 +350,77 @@ class SemanticFilterV2:
         
         return state
     
+    def set_multi_scene(self, captions: List[str], frame_idx: int = 0) -> SceneState:
+        """Set scene context from multiple captions (for multi-room videos).
+        
+        This method analyzes multiple scene captions to determine:
+        1. The dominant scene type
+        2. A combined blacklist/expected set that avoids over-filtering
+        
+        Args:
+            captions: List of scene captions from different frames.
+            frame_idx: Current frame index.
+            
+        Returns:
+            Combined SceneState.
+        """
+        if not captions:
+            return self.set_scene("Unknown scene", frame_idx)
+        
+        # Classify each caption
+        scene_types = []
+        all_blacklists: List[Set[str]] = []
+        all_expected: List[Set[str]] = []
+        
+        for caption in captions:
+            scene_type = self.classify_scene_type(caption)
+            if scene_type:
+                scene_types.append(scene_type)
+                info = SCENE_TYPES.get(scene_type, {})
+                all_blacklists.append(set(info.get("blacklist", [])))
+                all_expected.append(set(info.get("expected", [])))
+        
+        logger.info(f"Multi-scene analysis: {len(captions)} captions → types: {scene_types}")
+        
+        # For multi-room videos, use INTERSECTION of blacklists (conservative)
+        # Only blacklist items that are inappropriate in ALL detected scene types
+        if all_blacklists:
+            combined_blacklist = set.intersection(*all_blacklists) if all_blacklists else set()
+        else:
+            combined_blacklist = set()
+        
+        # For expected items, use UNION (allow items from any detected scene)
+        combined_expected = set.union(*all_expected) if all_expected else set()
+        
+        # Combine all captions for embedding
+        combined_caption = " ".join(captions)
+        embedding = self._embed_text(combined_caption)
+        
+        # Determine dominant scene type (most frequent)
+        from collections import Counter
+        dominant_type = Counter(scene_types).most_common(1)[0][0] if scene_types else None
+        
+        state = SceneState(
+            caption=captions[0],  # Use first caption for display
+            scene_type=f"multi:{dominant_type}" if dominant_type else "multi:unknown",
+            embedding=embedding,
+            frame_idx=frame_idx,
+            blacklist=combined_blacklist,
+            expected=combined_expected,
+        )
+        
+        self._current_scene = state
+        self._scene_history.append(state)
+        self._last_scene_change_frame = frame_idx
+        
+        logger.info(f"Multi-scene set: dominant={dominant_type}, types={set(scene_types)}")
+        logger.info(f"  Combined blacklist (intersection): {sorted(combined_blacklist)}")
+        logger.info(f"  Combined expected (union): {sorted(combined_expected)[:10]}...")
+        
+        return state
+        
+        return state
+    
     def should_update_scene(self, new_caption: str, frame_idx: int) -> bool:
         """Check if scene has changed significantly.
         
