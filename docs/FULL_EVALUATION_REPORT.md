@@ -4,7 +4,7 @@
 
 Evaluated Orion v2 perception pipeline on 3 videos with comprehensive Gemini validation.
 
-### Key Findings
+### Key Findings (Initial Evaluation)
 
 | Video | Duration | Detections | Entities | Time | FPS | Status |
 |-------|----------|------------|----------|------|-----|--------|
@@ -12,7 +12,60 @@ Evaluated Orion v2 perception pipeline on 3 videos with comprehensive Gemini val
 | video.mp4 | 66s | 248 | 7 | 75s | 26.29 | ✅ Good filtering |
 | room.mp4 | 38s | 130 | 5 | 50s | 22.83 | ⚠️ False positives |
 
-## Critical Issues Identified
+### After SemanticFilterV2 Improvements (v3)
+
+| Video | Duration | Detections | Entities | Time | FPS | Status |
+|-------|----------|------------|----------|------|-----|--------|
+| video.mp4 | 66s | 621 | 25 | 206s | 9.58 | ✅ No refrigerators |
+| room.mp4 | 38s | 451 | 27 | 195s | 5.87 | ✅ No refrigerators, bed/laptop detected |
+
+**Key Improvements:**
+- **0 refrigerator false positives** (was 94 in room.mp4)
+- **Correct objects now detected**: bed, laptop, keyboard, mouse, tv/monitor
+- **Multi-scene handling**: Samples 4 frames (0%, 25%, 50%, 75%) to understand multi-room videos
+- **Conservative blacklisting**: Only blocks objects inappropriate in ALL detected scene types
+
+---
+
+## SemanticFilterV2: The Solution
+
+### Architecture
+```
+Frame Sampling (4 positions) → FastVLM Scene Captions → Scene Type Classification
+                                                              ↓
+                                                    Multi-scene Analysis
+                                                              ↓
+                                        Intersection of Blacklists (conservative)
+                                        Union of Expected Objects (inclusive)
+                                                              ↓
+                                            SentenceTransformer Similarity
+```
+
+### Scene Types with Blacklists
+
+| Scene Type | Blacklisted Objects |
+|------------|---------------------|
+| bedroom | refrigerator, toilet, sink, oven, microwave, bathtub, shower, stove |
+| office | refrigerator, toilet, bed, oven, microwave, bathtub, shower, stove, sink |
+| kitchen | bed, toilet, bathtub, shower |
+| bathroom | refrigerator, bed, oven, microwave, laptop, keyboard, dining table, couch |
+| living_room | toilet, bathtub, shower, oven, stove |
+| hallway | refrigerator, toilet, bathtub, oven, microwave, bed, couch, dining table, sink |
+
+### Multi-Room Logic
+For videos showing multiple rooms (e.g., room.mp4 shows hallway + bedroom):
+- **Blacklist**: INTERSECTION of all scene blacklists (only truly inappropriate objects)
+- **Expected**: UNION of all scene expected objects (allow objects from any scene)
+
+Example for room.mp4 (hallway + bedroom):
+```
+Intersection blacklist: ['bathtub', 'microwave', 'oven', 'refrigerator', 'sink', 'toilet']
+Union expected: ['bed', 'book', 'cell phone', 'chair', 'clock', 'door', 'lamp', 'laptop', ...]
+```
+
+---
+
+## Critical Issues (Resolved)
 
 ### 1. YOLO-World Label Confusion (High Priority)
 - **Problem**: Doors/closets detected as "refrigerator" (77+ occurrences in room.mp4)
