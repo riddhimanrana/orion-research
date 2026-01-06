@@ -81,6 +81,10 @@ class SceneFilterConfig:
     expand_labels: bool = True
     """Expand labels for better matching (e.g., 'chair' -> 'a chair')."""
     
+    # Semantic aliases for COCO labels that often mismatch scene descriptions
+    use_semantic_aliases: bool = True
+    """Use semantic aliases for better matching (e.g., 'tv' -> 'monitor')."""
+    
     # Caching
     cache_embeddings: bool = True
     """Cache label embeddings to avoid recomputing."""
@@ -88,6 +92,38 @@ class SceneFilterConfig:
     # Device
     device: str = "cuda"
     """Device for CLIP inference."""
+
+
+# Semantic aliases: COCO label -> scene-relevant alternatives
+# These are common COCO labels that may semantically match other scene terms
+SEMANTIC_ALIASES = {
+    # Displays
+    "tv": ["monitor", "screen", "display"],
+    "laptop": ["computer", "notebook"],
+    
+    # Furniture
+    "dining table": ["desk", "table", "work surface"],
+    "couch": ["sofa", "settee"],
+    "bed": ["mattress"],
+    
+    # Office items
+    "keyboard": ["computer keyboard"],
+    "mouse": ["computer mouse"],
+    "cell phone": ["phone", "smartphone", "mobile"],
+    
+    # Storage
+    "refrigerator": ["fridge", "cabinet"],  # Note: cabinet is a common false positive
+    "oven": ["stove", "range"],
+    "microwave": ["microwave oven"],
+    
+    # Containers
+    "bottle": ["water bottle", "drink"],
+    "cup": ["mug", "glass"],
+    "bowl": ["dish"],
+    
+    # Seating
+    "chair": ["office chair", "seat"],
+}
 
 
 class SceneFilter:
@@ -208,6 +244,9 @@ class SceneFilter:
     def compute_similarity(self, label: str) -> float:
         """Compute similarity between a label and the current scene.
         
+        Uses semantic aliases to find the best matching term.
+        For example, "tv" might match better as "monitor" in an office scene.
+        
         Args:
             label: Object label to check.
             
@@ -217,13 +256,23 @@ class SceneFilter:
         if self._scene_embedding is None:
             return 0.5  # No scene context, neutral score
         
+        # Get base similarity for the raw label
         label_emb = self.get_label_embedding(label)
         if label_emb is None:
             return 0.5
         
-        # Cosine similarity (both normalized)
-        sim = float(np.dot(self._scene_embedding, label_emb))
-        return sim
+        best_sim = float(np.dot(self._scene_embedding, label_emb))
+        
+        # Try semantic aliases if enabled
+        if self.config.use_semantic_aliases and label in SEMANTIC_ALIASES:
+            for alias in SEMANTIC_ALIASES[label]:
+                alias_emb = self.get_label_embedding(alias)
+                if alias_emb is not None:
+                    alias_sim = float(np.dot(self._scene_embedding, alias_emb))
+                    if alias_sim > best_sim:
+                        best_sim = alias_sim
+        
+        return best_sim
     
     def check_detection(
         self,
