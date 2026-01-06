@@ -340,16 +340,38 @@ def build_research_scene_graph(
     memory: Dict[str, Any],
     tracks: List[Dict[str, Any]],
     video_id: str = "video",
+    include_cis_edges: bool = False,
+    cis_threshold: float = 0.50,
     **kwargs
 ) -> VideoSceneGraph:
     """
     Build a research-grade Scene Graph using the new schema.
     Wraps the heuristic logic of build_scene_graphs but returns typed objects.
+    
+    Args:
+        memory: Memory dict with clustered objects
+        tracks: List of track observations
+        video_id: Identifier for the video
+        include_cis_edges: Whether to compute Causal Influence Scoring edges
+        cis_threshold: Minimum CIS score to include an edge
+        **kwargs: Additional arguments for build_scene_graphs
+    
+    Returns:
+        VideoSceneGraph with nodes and edges (spatial + optional causal)
     """
     # Reuse existing logic to get raw dicts
     raw_graphs = build_scene_graphs(memory, tracks, **kwargs)
     
     video_sg = VideoSceneGraph(video_id=video_id)
+    
+    # Optionally set up CIS scorer
+    cis_scorer = None
+    if include_cis_edges:
+        try:
+            from orion.analysis.cis_scorer import CausalInfluenceScorer
+            cis_scorer = CausalInfluenceScorer(cis_threshold=cis_threshold)
+        except ImportError:
+            pass
     
     for g in raw_graphs:
         frame_idx = g.get("frame", 0)
@@ -369,7 +391,7 @@ def build_research_scene_graph(
             )
             sg.nodes.append(node)
             
-        # Add edges
+        # Add spatial edges (near, on, held_by)
         for e in g.get("edges", []):
             edge = SGEdge(
                 subject_id=e["subject"],
@@ -378,7 +400,78 @@ def build_research_scene_graph(
                 confidence=e.get("confidence", 1.0)
             )
             sg.edges.append(edge)
+        
+        # Add CIS edges if enabled
+        if cis_scorer and len(sg.nodes) > 1:
+            cis_edges = _compute_cis_edges_for_frame(
+                sg.nodes, g.get("nodes", []), frame_idx, timestamp, cis_scorer
+            )
+            sg.edges.extend(cis_edges)
             
         video_sg.graphs.append(sg)
         
     return video_sg
+
+
+def _compute_cis_edges_for_frame(
+    sg_nodes: List[SGNode],
+    raw_nodes: List[Dict],
+    frame_idx: int,
+    timestamp: float,
+    cis_scorer,
+) -> List[SGEdge]:
+    """
+    Compute CIS-based causal edges for a single frame.
+    
+    Creates 'influences', 'grasps', and 'moves_with' edges between entities.
+    """
+    from dataclasses import dataclass
+    
+    @dataclass
+    class _EntityProxy:
+        """Lightweight entity proxy for CIS computation."""
+        id: str
+        object_class: str
+        bbox: List[float]
+        state: Optional[List[float]] = None  # [x, y, z, vx, vy, vz]
+        bbox_3d: Optional[List[float]] = None
+        observations: List = None
+        
+        def __post_init__(self):
+            if self.observations is None:
+                self.observations = []
+    
+    # Build entity proxies from raw nodes
+    proxies = []
+    for raw in raw_nodes:
+        proxy = _EntityProxy(
+            id=raw["memory_id"],
+            object_class=raw["class"],
+            bbox=raw.get("bbox", [0, 0, 0, 0]),
+            state=raw.get("state_3d"),  # [x, y, z, vx, vy, vz] if available
+            bbox_3d=raw.get("bbox_3d"),
+        )
+        proxies.append(proxy)
+    
+    if len(proxies) < 2:
+        return []
+    
+    # Compute CIS edges
+    cis_edges_raw = cis_scorer.compute_frame_edges(
+        entities=proxies,
+        frame_id=frame_idx,
+        timestamp=timestamp,
+    )
+    
+    # Convert to SGEdge
+    sg_edges = []
+    for ce in cis_edges_raw:
+        edge = SGEdge(
+            subject_id=str(ce.agent_id),
+            predicate=ce.relation_type,  # "influences", "grasps", "moves_with"
+            object_id=str(ce.patient_id),
+            confidence=ce.cis_score,
+        )
+        sg_edges.append(edge)
+    
+    return sg_edges
