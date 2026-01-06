@@ -126,13 +126,21 @@ except ImportError as e:
     logging.warning(f"SceneContextManager import failed: {e}")
     SCENE_CONTEXT_AVAILABLE = False
 
-# Scene-based semantic filter using CLIP embeddings
+# Scene-based semantic filter using CLIP embeddings (legacy)
 try:
     from orion.perception.scene_filter import SceneFilter, SceneFilterConfig
     SCENE_FILTER_AVAILABLE = True
 except ImportError as e:
     logging.warning(f"SceneFilter import failed: {e}")
     SCENE_FILTER_AVAILABLE = False
+
+# v2: Enhanced semantic filter with scene-type classification and VLM verification
+try:
+    from orion.perception.semantic_filter_v2 import SemanticFilterV2, SemanticFilterV2Config
+    SEMANTIC_FILTER_V2_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"SemanticFilterV2 import failed: {e}")
+    SEMANTIC_FILTER_V2_AVAILABLE = False
 
 
 class PerceptionEngine:
@@ -269,7 +277,7 @@ class PerceptionEngine:
             self.scene_context = SceneContextManager(config=scene_config)
             logger.info(f"✓ SceneContextManager initialized (update every {scene_config.update_interval_frames} frames)")
             
-            # Initialize scene filter for CLIP-based semantic filtering
+            # Initialize legacy scene filter for CLIP-based semantic filtering (fallback)
             if SCENE_FILTER_AVAILABLE:
                 scene_filter_cfg = SceneFilterConfig(
                     device=device,
@@ -278,12 +286,31 @@ class PerceptionEngine:
                     soft_min_confidence=0.4,
                 )
                 self.scene_filter = SceneFilter(scene_filter_cfg)
-                logger.info(f"✓ SceneFilter initialized (min_sim={scene_filter_cfg.min_similarity})")
+                logger.info(f"✓ SceneFilter (legacy) initialized (min_sim={scene_filter_cfg.min_similarity})")
             else:
                 self.scene_filter = None
+                
+            # Initialize v2 semantic filter with scene-type classification
+            self.semantic_filter_v2 = None
+            if SEMANTIC_FILTER_V2_AVAILABLE:
+                try:
+                    sf_v2_cfg = SemanticFilterV2Config(
+                        device=device,
+                        min_similarity=0.30,  # SentenceTransformer scale (different from CLIP)
+                        high_confidence_threshold=0.45,
+                        enable_vlm_verification=True,
+                    )
+                    # Pass FastVLM for verification (via scene_context.vlm)
+                    vlm = getattr(self.scene_context, '_vlm', None)
+                    self.semantic_filter_v2 = SemanticFilterV2(config=sf_v2_cfg, vlm=vlm)
+                    logger.info("✓ SemanticFilterV2 initialized (scene-type classification + VLM verification)")
+                except Exception as e:
+                    logger.warning(f"SemanticFilterV2 init failed: {e}")
+                    self.semantic_filter_v2 = None
         else:
             self.scene_context = None
             self.scene_filter = None
+            self.semantic_filter_v2 = None
             logger.warning("SceneContextManager not available")
 
         logger.info("✓ All components initialized\n")
@@ -586,14 +613,31 @@ class PerceptionEngine:
         detections = self.observer.process_video(video_path)
         metrics_timings["detection_seconds"] = time.time() - t0
         
-        # Step 1.25: Scene-based semantic filtering (CLIP)
-        # Filter detections that don't fit the scene context
-        if self.scene_filter is not None and scene_caption and detections:
+        # Step 1.25: Scene-based semantic filtering
+        # First try SemanticFilterV2 (preferred), fallback to legacy CLIP-based filter
+        if self.semantic_filter_v2 is not None and scene_caption and detections:
+            # Set up v2 filter with scene-type classification
+            self.semantic_filter_v2.set_scene(scene_caption, frame_idx=0)
+            before_count = len(detections)
+            detections = self.semantic_filter_v2.filter_detections(detections, in_place=True)
+            after_count = len(detections)
+            if before_count != after_count:
+                logger.info(f"  SemanticFilterV2: {before_count} → {after_count} detections "
+                           f"({before_count - after_count} removed)")
+                # Log scene type
+                if self.semantic_filter_v2._current_scene:
+                    scene_type = self.semantic_filter_v2._current_scene.scene_type
+                    blacklist = self.semantic_filter_v2._current_scene.blacklist
+                    logger.info(f"    Scene type: {scene_type}")
+                    if blacklist:
+                        logger.info(f"    Blacklisted labels: {sorted(blacklist)}")
+        elif self.scene_filter is not None and scene_caption and detections:
+            # Fallback to legacy CLIP-based filter
             before_count = len(detections)
             detections = self.scene_filter.filter_detections(detections, in_place=True)
             after_count = len(detections)
             if before_count != after_count:
-                logger.info(f"  Scene filter: {before_count} → {after_count} detections "
+                logger.info(f"  Scene filter (legacy): {before_count} → {after_count} detections "
                            f"({before_count - after_count} removed)")
 
         # Step 1.5: Attach open-vocab candidate label hypotheses (non-committal)

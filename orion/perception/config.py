@@ -118,8 +118,8 @@ class DetectionConfig:
     """Padding to add around bounding boxes when cropping (percentage of box size)."""
 
     # YOLO-World specific options (v2 primary detector)
-    yoloworld_model: str = "models/yolov8l-worldv2-general.pt"
-    """YOLO-World model weights file. Pre-baked general indoor model for speed."""
+    yoloworld_model: str = "yolov8x-worldv2.pt"
+    """YOLO-World model weights file. Use yolov8x-worldv2.pt for best accuracy."""
 
     yoloworld_prompt_preset: Literal["coarse", "indoor_full", "coco", "custom"] = "coco"
     """Prompt preset for YOLO-World when yoloworld_use_custom_classes=True.
