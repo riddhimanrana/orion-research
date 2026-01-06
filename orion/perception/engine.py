@@ -199,10 +199,16 @@ class PerceptionEngine:
         # Entity tracker (optional, can be None)
         self.tracker = EntityTracker(self.config)
         # Entity describer
+        # NOTE:
+        # - The ClassCorrector is designed around COCO-style class names.
+        # - When using YOLO-World (open-vocab prompts), applying COCO corrections can
+        #   produce nonsensical "corrections" (e.g., bottle → sheep) that hurt quality.
+        #   Keep class correction enabled only for COCO-based YOLO backends.
+        enable_class_correction = self.config.detection.backend == "yolo"
         self.describer = EntityDescriber(
             vlm_model=self.model_manager.fastvlm,
             config=self.config.description,
-            enable_class_correction=True,
+            enable_class_correction=enable_class_correction,
             enable_spatial_analysis=True,
         )
         # self.reid_model = ReidModel(self.config.reid)
