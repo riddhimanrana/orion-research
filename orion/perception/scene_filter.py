@@ -63,12 +63,12 @@ class SceneFilterConfig:
     """Configuration for scene-based semantic filtering."""
     
     # Similarity thresholds
-    min_similarity: float = 0.55
+    min_similarity: float = 0.56
     """Minimum scene-to-label similarity to keep detection.
-    Based on empirical testing: 
-    - 0.55+ = likely fits the scene
-    - 0.50-0.55 = ambiguous
-    - <0.50 = likely doesn't fit
+    Based on empirical testing (validated with Gemini):
+    - 0.56+ = likely fits the scene (monitor=0.698, keyboard=0.638)
+    - 0.50-0.56 = ambiguous (refrigerator=0.549 was false positive)
+    - <0.50 = likely doesn't fit (toothbrush=0.477)
     """
     
     soft_threshold: float = 0.50

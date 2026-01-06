@@ -273,7 +273,7 @@ class PerceptionEngine:
             if SCENE_FILTER_AVAILABLE:
                 scene_filter_cfg = SceneFilterConfig(
                     device=device,
-                    min_similarity=0.55,  # Based on empirical testing with CLIP
+                    min_similarity=0.56,  # Validated: refrigerator@0.549 was false positive
                     soft_threshold=0.50,
                     soft_min_confidence=0.4,
                 )
