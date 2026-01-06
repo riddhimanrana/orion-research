@@ -65,9 +65,13 @@ def draw_bbox(frame, bbox, track_id, label, confidence, color=None):
     )
 
 
-def draw_info_panel(frame, frame_id, detections, gemini_data=None):
+def draw_info_panel(frame, frame_id, detections, gemini_data=None, get_label_fn=None):
     """Draw information panel on the frame."""
     height, width = frame.shape[:2]
+    
+    # Default label getter
+    if get_label_fn is None:
+        get_label_fn = lambda d: d.get('label', d.get('class_name', 'unknown'))
     
     # Create semi-transparent overlay
     overlay = frame.copy()
@@ -103,7 +107,7 @@ def draw_info_panel(frame, frame_id, detections, gemini_data=None):
     
     # Class distribution
     if detections:
-        labels = [d['label'] for d in detections]
+        labels = [get_label_fn(d) for d in detections]
         from collections import Counter
         counts = Counter(labels)
         classes_text = ", ".join([f"{label}({cnt})" for label, cnt in counts.most_common(5)])
@@ -213,6 +217,19 @@ def render_overlay(video_path: str, results_dir: Path, output_path: str,
     
     print(f"  Loaded {len(tracks)} track observations across {len(by_frame)} frames")
     
+    # Detect track format (support both old and new schemas)
+    sample = tracks[0] if tracks else {}
+    use_new_schema = 'bbox_2d' in sample
+    
+    if use_new_schema:
+        print("  Using new schema (bbox_2d, class_name)")
+        def get_bbox(det): return det.get('bbox_2d', [0, 0, 0, 0])
+        def get_label(det): return det.get('class_name', 'unknown')
+    else:
+        print("  Using legacy schema (bbox, label)")
+        def get_bbox(det): return det.get('bbox', [0, 0, 0, 0])
+        def get_label(det): return det.get('label', 'unknown')
+    
     # Load Gemini validation
     gemini_by_frame = {}
     if show_gemini:
@@ -251,15 +268,15 @@ def render_overlay(video_path: str, results_dir: Path, output_path: str,
         for det in detections:
             draw_bbox(
                 frame,
-                det['bbox'],
+                get_bbox(det),
                 det['track_id'],
-                det['label'],
+                get_label(det),
                 det['confidence']
             )
         
         # Draw info panel
         gemini_data = gemini_by_frame.get(frame_idx) if show_gemini else None
-        draw_info_panel(frame, frame_idx, detections, gemini_data)
+        draw_info_panel(frame, frame_idx, detections, gemini_data, get_label)
         
         # Write frame
         out.write(frame)

@@ -133,6 +133,28 @@ PROMPT_GROUPS: Dict[str, List[str]] = {
         "jacket",
         "ring",
     ],
+    "architecture": [
+        "door",
+        "doorway",
+        "archway",
+        "hallway",
+        "staircase",
+        "stairs",
+        "railing",
+        "window",
+        "curtain",
+        "blinds",
+        "wall",
+        "floor",
+        "ceiling",
+        "painting",
+        "picture frame",
+        "wall art",
+        "mirror",
+        "rug",
+        "ottoman",
+        "couch",
+    ],
 }
 
 

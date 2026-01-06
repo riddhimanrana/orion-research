@@ -148,6 +148,9 @@ class EnhancedTracker:
         min_hits: int = 3,  # Min consecutive hits to confirm track
         iou_threshold: float = 0.3,  # IoU threshold for matching
         appearance_threshold: float = 0.65,  # Cosine similarity threshold (raised for V-JEPA)
+        max_distance_pixels: float = 150.0,  # Hard gating for implausible 2D jumps
+        max_distance_3d_mm: float = 1500.0,  # Hard gating when 3D is available
+        match_threshold: float = 0.6,  # Max allowed final cost for a match
         max_gallery_size: int = 5,  # Max embeddings per track
         ema_alpha: float = 0.9,  # EMA weight for appearance
         clip_model = None,  # For label verification
@@ -157,6 +160,9 @@ class EnhancedTracker:
         self.min_hits = min_hits
         self.iou_threshold = iou_threshold
         self.appearance_threshold = appearance_threshold
+        self.max_distance_pixels = float(max_distance_pixels)
+        self.max_distance_3d_mm = float(max_distance_3d_mm)
+        self.match_threshold = float(match_threshold)
         self.max_gallery_size = max_gallery_size
         self.ema_alpha = ema_alpha
         self.clip_model = clip_model
@@ -177,6 +183,14 @@ class EnhancedTracker:
         
         # Camera motion compensation
         self.last_camera_pose: Optional[np.ndarray] = None
+
+        # Coarse→fine semantic compatibility for YOLO-World prompt presets.
+        # This reduces fragmentation while still preventing wild cross-category switches.
+        self._coarse_children = {
+            "electronic device": {"laptop", "phone", "monitor", "keyboard", "mouse", "remote", "tablet"},
+            "container": {"bottle", "cup", "mug", "glass", "thermos", "food container", "tupperware"},
+            "furniture": {"chair", "table", "desk", "couch", "sofa", "bed", "ottoman"},
+        }
     
     def get_threshold_for_class(self, class_name: str) -> float:
         """Get the appearance threshold for a specific class."""
@@ -351,6 +365,40 @@ class EnhancedTracker:
         )
         
         return matches, unmatched_dets, unmatched_tracks
+
+    def _labels_compatible(self, det_label_norm: str, track_label_norm: str) -> bool:
+        """Return True if labels are identical or compatible via coarse→fine mapping."""
+        if det_label_norm == track_label_norm:
+            return True
+
+        # Allow either side to be a coarse parent of the other.
+        det_children = self._coarse_children.get(det_label_norm)
+        if det_children and track_label_norm in det_children:
+            return True
+        track_children = self._coarse_children.get(track_label_norm)
+        if track_children and det_label_norm in track_children:
+            return True
+
+        return False
+
+    @staticmethod
+    def _bbox_iou_xyxy(a: List[float], b: List[float]) -> float:
+        """IoU for xyxy bboxes."""
+        ax1, ay1, ax2, ay2 = a
+        bx1, by1, bx2, by2 = b
+        inter_x1 = max(ax1, bx1)
+        inter_y1 = max(ay1, by1)
+        inter_x2 = min(ax2, bx2)
+        inter_y2 = min(ay2, by2)
+        iw = max(0.0, inter_x2 - inter_x1)
+        ih = max(0.0, inter_y2 - inter_y1)
+        inter = iw * ih
+        if inter <= 0.0:
+            return 0.0
+        area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+        area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+        union = area_a + area_b - inter
+        return float(inter / union) if union > 0.0 else 0.0
     
     def _compute_cost_matrix(
         self,
@@ -358,11 +406,13 @@ class EnhancedTracker:
         embeddings: Optional[List[np.ndarray]],
     ) -> np.ndarray:
         """
-        Compute cost matrix using spatial-semantic matching.
-        Cost = 0.5*spatial + 0.2*size + 0.25*semantic + 0.05*appearance
+        Compute cost matrix using balanced spatial-semantic-appearance matching.
         
-        This addresses CLIP embedding limitations (0.78 avg similarity for different objects).
-        Spatial and semantic consistency are more reliable than appearance for egocentric video.
+        V-JEPA2 embeddings are 3D-aware and more discriminative than CLIP,
+        so we give appearance stronger weight while still using spatial/semantic
+        as hard gates to prevent implausible matches.
+        
+        Cost = 0.30*spatial + 0.10*size + 0.15*semantic + 0.45*appearance
         """
         def get_bbox(det: Dict) -> List[float]:
             """Get bbox from detection, handling both bbox_2d and bbox keys."""
@@ -399,6 +449,11 @@ class EnhancedTracker:
                 
                 spatial_dist = np.linalg.norm(det_center - track_center)
                 spatial_cost = min(1.0, spatial_dist / frame_diag)
+
+                # Hard gate: implausible 2D jump
+                if self.max_distance_pixels > 0 and spatial_dist > self.max_distance_pixels:
+                    cost_matrix[t_idx, d_idx] = 999.0
+                    continue
                 
                 # 2. Size cost: bbox area change (use 2D bbox)
                 det_area = (det_bbox[2] - det_bbox[0]) * (det_bbox[3] - det_bbox[1])
@@ -419,7 +474,13 @@ class EnhancedTracker:
                 det_label = det.get('class_name', det.get('category', 'unknown'))
                 det_normalized = self._normalize_label(det_label)
                 track_normalized = self._normalize_label(track.class_name)
-                semantic_cost = 0.0 if det_normalized == track_normalized else 1.0
+
+                if not self._labels_compatible(det_normalized, track_normalized):
+                    cost_matrix[t_idx, d_idx] = 999.0
+                    continue
+
+                # Compatible but not identical: add a small semantic penalty
+                semantic_cost = 0.0 if det_normalized == track_normalized else 0.25
                 
                 # 4. Appearance cost: weak signal (CLIP not discriminative enough)
                 appearance_cost = 0.5  # Neutral default
@@ -428,15 +489,23 @@ class EnhancedTracker:
                         track.avg_appearance, embeddings[d_idx]
                     )
                     appearance_cost = 1.0 - similarity
+
+                    # Hard gate: appearance must clear per-class threshold (prevents ID switches)
+                    thresh = self.get_threshold_for_class(track.class_name)
+                    if similarity < float(thresh):
+                        # If boxes overlap strongly, allow a little more leeway (occlusion / motion blur)
+                        iou = self._bbox_iou_xyxy(track.bbox_2d.tolist(), det_bbox)
+                        if iou < float(self.iou_threshold):
+                            cost_matrix[t_idx, d_idx] = 999.0
+                            continue
                 
-                # Combined cost with spatial-semantic priority
-                # In egocentric video: semantic + size more reliable than spatial
-                # (camera moves a lot, making spatial unreliable)
+                # Combined cost with balanced weights for V-JEPA2
+                # V-JEPA2 is more discriminative than CLIP, so appearance gets higher weight
                 cost_matrix[t_idx, d_idx] = (
-                    0.3 * spatial_cost +      # Reduced (camera moves)
-                    0.2 * size_cost +          # Same
-                    0.45 * semantic_cost +     # Increased (normalized labels reliable)
-                    0.05 * appearance_cost     # Same (CLIP not discriminative)
+                    0.30 * spatial_cost +
+                    0.10 * size_cost +
+                    0.15 * semantic_cost +
+                    0.45 * appearance_cost
                 )
         
         return cost_matrix
@@ -450,14 +519,10 @@ class EnhancedTracker:
         # Find optimal assignment
         track_indices, det_indices = linear_sum_assignment(cost_matrix)
         
-        # Filter by threshold (VERY lenient - egocentric video has lots of motion)
+        # Filter by threshold (configurable; lowered to prevent cross-room ID switches)
         matches = []
         for t_idx, d_idx in zip(track_indices, det_indices):
-            # Very lenient: if same class (semantic=0), allow high spatial cost
-            # Cost = 0.3*spatial + 0.2*size + 0.45*semantic + 0.05*appearance
-            # Same class worst case: 0.3*1 + 0.2*1 + 0.45*0 + 0.05*1 = 0.55
-            # Different class: always > 0.45, so max threshold 0.8
-            if cost_matrix[t_idx, d_idx] < 0.8:
+            if cost_matrix[t_idx, d_idx] < self.match_threshold:
                 matches.append((t_idx, d_idx))
         
         # Unmatched detections and tracks

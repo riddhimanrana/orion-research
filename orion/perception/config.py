@@ -88,15 +88,27 @@ class DetectionConfig:
     """YOLO model size (n=fastest, x=most accurate)."""
 
     # Detection thresholds (shared)
-    confidence_threshold: float = 0.10
-    """Minimum detection confidence (0-1). Lowered to 0.10 for YOLO-World open-vocab sensitivity."""
+    confidence_threshold: float = 0.15
+    """Minimum detection confidence (0-1). Balanced for recall without excessive noise."""
 
-    iou_threshold: float = 0.45
-    """NMS IoU threshold for overlapping boxes."""
+    iou_threshold: float = 0.40
+    """NMS IoU threshold for overlapping boxes. 0.40 is a good balance for general indoor scenes."""
 
     # Filtering
     min_object_size: int = 32
     """Minimum object size in pixels (smaller ignored)."""
+
+    max_bbox_area_ratio: float = 0.75
+    """If bbox area / frame area exceeds this ratio, treat as suspicious background-like box."""
+
+    max_bbox_area_lowconf_threshold: float = 0.35
+    """Drop very large boxes when their confidence is below this threshold."""
+
+    max_aspect_ratio: float = 5.0
+    """If aspect ratio exceeds this (wide or tall) AND confidence is low, treat as likely false positive."""
+
+    aspect_ratio_lowconf_threshold: float = 0.30
+    """Confidence cutoff for the aspect-ratio filter; only drop extreme aspect boxes below this conf."""
 
     # Cropping
     bbox_padding_percent: float = 0.1
@@ -128,7 +140,7 @@ class DetectionConfig:
     yoloworld_candidate_top_k: int = 5
     """Top-k candidate labels to store per detection."""
 
-    yoloworld_candidate_prompt_groups: str = "electronics,containers,kitchen,office,personal_items"
+    yoloworld_candidate_prompt_groups: str = "electronics,containers,kitchen,office,personal_items,architecture"
     """Comma-separated prompt groups used for candidate labeling (see orion/perception/open_vocab.py)."""
 
     yoloworld_candidate_rotate_every_frames: int = 4
@@ -154,6 +166,16 @@ class DetectionConfig:
         # Size validation
         if self.min_object_size < 1:
             raise ValueError(f"min_object_size must be >= 1, got {self.min_object_size}")
+
+        if not (0.0 < float(self.max_bbox_area_ratio) <= 1.0):
+            raise ValueError(
+                f"max_bbox_area_ratio must be in (0, 1], got {self.max_bbox_area_ratio}"
+            )
+        if not (0.0 <= float(self.max_bbox_area_lowconf_threshold) <= 1.0):
+            raise ValueError(
+                "max_bbox_area_lowconf_threshold must be in [0, 1], "
+                f"got {self.max_bbox_area_lowconf_threshold}"
+            )
 
         # Padding validation
         if self.bbox_padding_percent < 0:
@@ -471,14 +493,17 @@ class CameraConfig:
 class TrackingConfig:
     """Configuration for the enhanced tracker."""
     max_age: int = 30  # Increased from 1 to 30 for more stable tracking
-    min_hits: int = 3
-    iou_threshold: float = 0.3
-    appearance_threshold: float = 0.65  # Raised for V-JEPA (was 0.5 for CLIP)
+    min_hits: int = 2  # Reduced from 3 for faster track confirmation
+    iou_threshold: float = 0.25  # Slightly lower for better occlusion handling
+    appearance_threshold: float = 0.60  # Balanced for V-JEPA (neither too strict nor too loose)
     reid_window_frames: int = 90
     class_belief_lr: float = 0.3
-    max_distance_pixels: float = 150.0
-    max_distance_3d_mm: float = 1500.0
+    max_distance_pixels: float = 120.0  # Balanced gating for reasonable motion
+    max_distance_3d_mm: float = 2000.0  # More permissive for depth uncertainty
     ttl_frames: int = 30
+
+    match_threshold: float = 0.55
+    """Max allowed match cost in EnhancedTracker assignment (lower = stricter)."""
     
     # Per-class threshold file (overrides appearance_threshold for specific classes)
     use_per_class_thresholds: bool = True
@@ -740,7 +765,7 @@ def get_yoloworld_coarse_config() -> PerceptionConfig:
         yoloworld_use_custom_classes=True,
         yoloworld_enable_candidate_labels=True,
         yoloworld_candidate_top_k=5,
-        confidence_threshold=0.15,
+        confidence_threshold=0.25,  # Balanced for recall + precision
     )
     return PerceptionConfig(
         detection=det,

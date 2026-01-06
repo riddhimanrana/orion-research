@@ -414,6 +414,23 @@ class FrameObserver:
             confidence = float(detection_source["confidence"])
             class_id = int(detection_source.get("class_id", -1))
             class_name = detection_source["class_name"]
+
+            # Suppress huge, low-confidence boxes (common YOLO-World failure mode on static backgrounds)
+            frame_area = float(frame_width * frame_height) if frame_width > 0 and frame_height > 0 else 0.0
+            bbox_area = float(max(0, width) * max(0, height))
+            if frame_area > 0:
+                area_ratio = bbox_area / frame_area
+                if (
+                    area_ratio >= float(getattr(self.config, "max_bbox_area_ratio", 1.0))
+                    and confidence < float(getattr(self.config, "max_bbox_area_lowconf_threshold", 0.0))
+                ):
+                    continue
+            
+            # Drop extreme aspect-ratio boxes when confidence is low (e.g., walls/strips)
+            if width > 0 and height > 0:
+                aspect = max(width / height, height / width)
+                if aspect >= self.config.max_aspect_ratio and confidence < self.config.aspect_ratio_lowconf_threshold:
+                    continue
             
             # Scene context filtering (v2): Skip classes that don't fit the scene
             if self._should_suppress_class(class_name):
@@ -465,6 +482,9 @@ class FrameObserver:
 
             detections.append(detection)
         
+        # Post-NMS deduplication: merge highly overlapping same-class detections
+        detections = self._post_nms_dedup(detections, iou_threshold=0.55)
+        
         return detections
     
     def _crop_with_padding(
@@ -505,6 +525,73 @@ class FrameObserver:
         )
         
         return crop, padded_bbox
+
+    def _post_nms_dedup(
+        self,
+        detections: List[Dict],
+        iou_threshold: float = 0.55,
+    ) -> List[Dict]:
+        """
+        Post-NMS deduplication: merge highly overlapping boxes of the same class.
+        
+        This catches cases where NMS allows slightly offset duplicates through.
+        Keeps the detection with highest confidence.
+        
+        Args:
+            detections: List of detection dicts with 'bbox' and 'class_name'
+            iou_threshold: IoU threshold for merging (0.55 = 55% overlap)
+            
+        Returns:
+            Deduplicated list of detections
+        """
+        if len(detections) <= 1:
+            return detections
+        
+        # Sort by confidence descending (keep highest first)
+        sorted_dets = sorted(detections, key=lambda d: d.get('confidence', 0), reverse=True)
+        keep = []
+        
+        for det in sorted_dets:
+            det_bbox = det.get('bbox', [0, 0, 0, 0])
+            det_class = det.get('class_name', det.get('object_class', ''))
+            
+            # Check if this detection overlaps too much with any already-kept detection
+            should_keep = True
+            for kept_det in keep:
+                kept_bbox = kept_det.get('bbox', [0, 0, 0, 0])
+                kept_class = kept_det.get('class_name', kept_det.get('object_class', ''))
+                
+                # Only merge same-class detections
+                if det_class.lower() != kept_class.lower():
+                    continue
+                
+                # Compute IoU
+                iou = self._compute_iou(det_bbox, kept_bbox)
+                if iou >= iou_threshold:
+                    should_keep = False
+                    break
+            
+            if should_keep:
+                keep.append(det)
+        
+        return keep
+
+    def _compute_iou(self, box1: List[float], box2: List[float]) -> float:
+        """Compute IoU between two [x1, y1, x2, y2] boxes."""
+        x1_inter = max(box1[0], box2[0])
+        y1_inter = max(box1[1], box2[1])
+        x2_inter = min(box1[2], box2[2])
+        y2_inter = min(box1[3], box2[3])
+        
+        inter_width = max(0.0, x2_inter - x1_inter)
+        inter_height = max(0.0, y2_inter - y1_inter)
+        inter_area = inter_width * inter_height
+        
+        area1 = max(0.0, box1[2] - box1[0]) * max(0.0, box1[3] - box1[1])
+        area2 = max(0.0, box2[2] - box2[0]) * max(0.0, box2[3] - box2[1])
+        
+        union = area1 + area2 - inter_area
+        return inter_area / union if union > 0 else 0.0
     
     def _compute_spatial_zone(
         self,

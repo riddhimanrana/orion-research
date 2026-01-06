@@ -232,6 +232,9 @@ class PerceptionEngine:
             min_hits=self.config.tracking.min_hits,
             iou_threshold=self.config.tracking.iou_threshold,
             appearance_threshold=self.config.tracking.appearance_threshold,
+            max_distance_pixels=self.config.tracking.max_distance_pixels,
+            max_distance_3d_mm=self.config.tracking.max_distance_3d_mm,
+            match_threshold=self.config.tracking.match_threshold,
             per_class_thresholds=per_class_thresholds,
         )
         
