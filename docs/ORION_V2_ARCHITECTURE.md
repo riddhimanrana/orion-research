@@ -671,12 +671,24 @@ orion analyze --episode test
 orion query "What objects are in the video?"
 ```
 
+### Optional: FastVLM semantic verification (labels-as-hypotheses)
+
+When running the **PerceptionEngine**-based pipeline (used by several scripts under `scripts/`), you can enable a lightweight FastVLM verifier that:
+
+- generates a short description for a *small subset* of crops
+- re-ranks `candidate_labels` using description↔label similarity
+- attaches audit metadata (`vlm_description`, `vlm_similarity`, `vlm_is_valid`) for debugging/tuning
+
+This is intentionally low-frequency so it improves open-vocab label quality **without destabilizing tracking**.
+
+Note: the full Orion pipeline (models + GPU) should be run **on `lambda-orion`** (SSH in and execute there).
+
 ---
 
 ## Summary of Changes from v1
 
 | Component | v1 | v2 |
-|-----------|----|----|
+| --------- | -- | -- |
 | Detection | YOLO11x (closed vocab) | YOLO-World v2 (open vocab) |
 | Re-ID Embedder | CLIP/DINO (2D) | V-JEPA2 (3D video) |
 | Depth | Depth Anything V3 | REMOVED |

@@ -223,6 +223,23 @@ class Observation:
 
     candidate_group: Optional[str] = None
     """Prompt group name used for candidate labeling (for debugging/analysis)."""
+
+    # Optional: FastVLM semantic verifier metadata (Phase 1.75)
+    vlm_description: Optional[str] = None
+    """FastVLM description of the crop used for semantic verification (if enabled)."""
+
+    vlm_similarity: Optional[float] = None
+    """Cosine similarity between label text and VLM description embedding (if computed)."""
+
+    vlm_is_valid: Optional[bool] = None
+    """Whether the semantic verifier considered the detection label plausible."""
+    
+    # Optional: CLIP scene filter metadata (Phase 1.25)
+    scene_similarity: Optional[float] = None
+    """Cosine similarity between detection label and scene caption embedding (CLIP)."""
+    
+    scene_filter_reason: Optional[str] = None
+    """Reason from scene filter (fits_scene, does_not_fit_scene, etc.)."""
     
     def __post_init__(self):
         """Validate observation"""

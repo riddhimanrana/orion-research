@@ -210,6 +210,16 @@ class ModelManager:
             
             # YOLO-World models auto-download from Ultralytics
             model = YOLO(model_name)
+
+            # IMPORTANT: Move model to the active device *before* setting classes.
+            # Ultralytics WorldModel.set_classes() caches a CLIP text model. If
+            # set_classes() is run on CPU and the model is later moved to CUDA/MPS,
+            # subsequent set_classes() calls can fail with CPU/CUDA tensor mismatch.
+            try:
+                if getattr(self, "device", None):
+                    model.to(self.device)
+            except Exception as e:
+                logger.warning(f"Failed to move YOLO-World to device '{self.device}': {e}")
             
             # Set custom classes if provided
             if self.yoloworld_classes:

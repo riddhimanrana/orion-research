@@ -20,7 +20,7 @@ import math
 import time
 from pathlib import Path
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import json
 from dataclasses import dataclass, field
 
@@ -126,6 +126,14 @@ except ImportError as e:
     logging.warning(f"SceneContextManager import failed: {e}")
     SCENE_CONTEXT_AVAILABLE = False
 
+# Scene-based semantic filter using CLIP embeddings
+try:
+    from orion.perception.scene_filter import SceneFilter, SceneFilterConfig
+    SCENE_FILTER_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"SceneFilter import failed: {e}")
+    SCENE_FILTER_AVAILABLE = False
+
 
 class PerceptionEngine:
     """High-level orchestrator for the perception pipeline."""
@@ -159,6 +167,9 @@ class PerceptionEngine:
         
         # Scene context manager for v2 (FastVLM scene captions)
         self.scene_context: Optional[SceneContextManager] = None
+        
+        # Scene-based semantic filter (CLIP embeddings)
+        self.scene_filter: Optional[SceneFilter] = None
 
         # Optional: open-vocab candidate labeler (non-committal hypotheses)
         self._open_vocab_labeler = None
@@ -257,8 +268,22 @@ class PerceptionEngine:
             )
             self.scene_context = SceneContextManager(config=scene_config)
             logger.info(f"✓ SceneContextManager initialized (update every {scene_config.update_interval_frames} frames)")
+            
+            # Initialize scene filter for CLIP-based semantic filtering
+            if SCENE_FILTER_AVAILABLE:
+                scene_filter_cfg = SceneFilterConfig(
+                    device=device,
+                    min_similarity=0.55,  # Based on empirical testing with CLIP
+                    soft_threshold=0.50,
+                    soft_min_confidence=0.4,
+                )
+                self.scene_filter = SceneFilter(scene_filter_cfg)
+                logger.info(f"✓ SceneFilter initialized (min_sim={scene_filter_cfg.min_similarity})")
+            else:
+                self.scene_filter = None
         else:
             self.scene_context = None
+            self.scene_filter = None
             logger.warning("SceneContextManager not available")
 
         logger.info("✓ All components initialized\n")
@@ -308,6 +333,157 @@ class PerceptionEngine:
         except Exception as e:
             logger.warning("Open-vocab candidate labeling disabled (init failed): %s", e)
             self._open_vocab_labeler = False
+
+    def _run_semantic_verification(
+        self,
+        detections: List[dict],
+        *,
+        scene_context: str = "",
+    ) -> None:
+        """Optionally run FastVLM semantic verification on a small subset of detections.
+
+        This is designed to improve open-vocab label quality without destabilizing
+        tracking: it re-ranks candidate label hypotheses and attaches audit metadata.
+        """
+        cfg = getattr(self.config, "semantic_verification", None)
+        if not cfg or not getattr(cfg, "enabled", False):
+            return
+
+        if not detections:
+            return
+
+        # FastVLM is already managed/loaded by ModelManager.
+        vlm = getattr(self.model_manager, "fastvlm", None)
+        if vlm is None:
+            logger.warning("Semantic verification enabled, but FastVLM is unavailable; skipping")
+            return
+
+        try:
+            # Local import to avoid hard dependency at module import time.
+            from orion.perception.filters import SemanticFilter, SemanticFilterConfig
+        except Exception as e:
+            logger.warning("Semantic verification unavailable (filters import failed): %s", e)
+            return
+
+        # Build filter config from verification config (bridge two config types).
+        filter_cfg = SemanticFilterConfig(
+            similarity_threshold=float(getattr(cfg, "similarity_threshold", 0.25)),
+            description_prompt=str(getattr(cfg, "description_prompt", "Describe this object in one sentence.")),
+            max_tokens=int(getattr(cfg, "max_tokens", 50)),
+            temperature=float(getattr(cfg, "temperature", 0.1)),
+            # If we have no scene context, do not spend cycles on scene embedding.
+            use_scene_context=bool(scene_context.strip()),
+        )
+        sem_filter = SemanticFilter(filter_cfg, vlm_model=vlm)
+
+        # Group by sampled frame id and run periodically on the sampled frame index.
+        by_frame: Dict[int, List[dict]] = {}
+        for det in detections:
+            try:
+                by_frame.setdefault(int(det.get("frame_number", 0)), []).append(det)
+            except Exception:
+                by_frame.setdefault(0, []).append(det)
+
+        verified = 0
+        reranked = 0
+        attempted = 0
+
+        # Heavy deps only if we actually run.
+        try:
+            import cv2
+            from PIL import Image
+        except Exception as e:
+            logger.warning("Semantic verification unavailable (cv2/PIL import failed): %s", e)
+            return
+
+        for sample_idx, frame_id in enumerate(sorted(by_frame.keys())):
+            if (sample_idx % int(getattr(cfg, "every_n_sampled_frames", 10))) != 0:
+                continue
+
+            frame_dets = by_frame[frame_id]
+
+            # Choose candidates to verify.
+            mode = str(getattr(cfg, "mode", "candidates_only"))
+            selected: List[dict] = []
+            for det in frame_dets:
+                crop = det.get("crop")
+                if crop is None:
+                    continue
+
+                has_candidates = bool(det.get("candidate_labels"))
+                conf = float(det.get("confidence", 0.0) or 0.0)
+
+                if mode == "candidates_only":
+                    if not has_candidates:
+                        continue
+                elif mode == "low_confidence":
+                    if not has_candidates and conf >= float(getattr(cfg, "low_confidence_threshold", 0.35)):
+                        continue
+                elif mode == "all":
+                    pass
+                else:
+                    # Unknown mode: default to candidates_only.
+                    if not has_candidates:
+                        continue
+
+                selected.append(det)
+
+            if not selected:
+                continue
+
+            selected.sort(key=lambda d: float(d.get("confidence", 0.0) or 0.0), reverse=True)
+            selected = selected[: int(getattr(cfg, "max_detections_per_frame", 6))]
+
+            for det in selected:
+                attempted += 1
+
+                crop = det.get("crop")
+                if crop is None:
+                    continue
+
+                # Convert crop (BGR np.ndarray) -> PIL Image (RGB)
+                try:
+                    crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB) if getattr(crop, "shape", None) is not None else crop
+                    pil = Image.fromarray(crop_rgb)
+                except Exception:
+                    continue
+
+                label = str(det.get("object_class", det.get("label", "unknown")))
+                res = sem_filter.filter_single(
+                    pil,
+                    label,
+                    track_id=int(det.get("track_id", det.get("temp_id", -1)) if str(det.get("track_id", "")).isdigit() else -1),
+                    confidence=float(det.get("confidence", 0.0) or 0.0),
+                    scene_context=scene_context or None,
+                )
+                verified += 1
+
+                if bool(getattr(cfg, "attach_metadata", True)):
+                    det["vlm_description"] = res.description
+                    det["vlm_similarity"] = float(res.similarity)
+                    det["vlm_is_valid"] = bool(res.is_valid)
+                    if res.reason:
+                        det["vlm_reason"] = str(res.reason)
+
+                if bool(getattr(cfg, "rerank_candidates", True)) and det.get("candidate_labels"):
+                    before = det.get("candidate_labels")
+                    det["candidate_labels"] = sem_filter.rerank_candidate_labels(
+                        res.description,
+                        before,
+                        blend=float(getattr(cfg, "rerank_blend", 0.6)),
+                        top_k=None,
+                    )
+                    reranked += 1
+
+        if attempted:
+            logger.info(
+                "  ✓ Semantic verification: attempted=%d verified=%d reranked=%d (every_n_sampled_frames=%s, max_per_frame=%s)",
+                attempted,
+                verified,
+                reranked,
+                getattr(cfg, "every_n_sampled_frames", 10),
+                getattr(cfg, "max_detections_per_frame", 6),
+            )
 
     @profile("engine_process_video")
     def process_video(self, video_path: str, save_visualizations: bool = False, output_dir: str = "results") -> PerceptionResult:
@@ -400,11 +576,25 @@ class PerceptionEngine:
         if scene_snapshot is not None and hasattr(self.observer, 'set_scene_context'):
             self.observer.set_scene_context(scene_snapshot.objects_mentioned)
             logger.info(f"  → Observer scene context filtering enabled for: {scene_snapshot.objects_mentioned}")
+        
+        # Set up scene filter with CLIP embeddings
+        if self.scene_filter is not None and scene_caption:
+            self.scene_filter.set_scene(scene_caption)
 
         # Step 1: Observe & detect
         t0 = time.time()
         detections = self.observer.process_video(video_path)
         metrics_timings["detection_seconds"] = time.time() - t0
+        
+        # Step 1.25: Scene-based semantic filtering (CLIP)
+        # Filter detections that don't fit the scene context
+        if self.scene_filter is not None and scene_caption and detections:
+            before_count = len(detections)
+            detections = self.scene_filter.filter_detections(detections, in_place=True)
+            after_count = len(detections)
+            if before_count != after_count:
+                logger.info(f"  Scene filter: {before_count} → {after_count} detections "
+                           f"({before_count - after_count} removed)")
 
         # Step 1.5: Attach open-vocab candidate label hypotheses (non-committal)
         self._ensure_open_vocab_labeler()
@@ -430,6 +620,12 @@ class PerceptionEngine:
                 )
             except Exception as e:
                 logger.warning("Candidate labeling failed: %s", e)
+
+        # Step 1.75: Optional FastVLM semantic verification / candidate reranking
+        try:
+            self._run_semantic_verification(detections, scene_context=scene_caption)
+        except Exception as e:
+            logger.warning("Semantic verification failed: %s", e)
         
         # NOTE: SLAM is intentionally disabled/removed from the perception engine.
         # Depth-only 3D lifting can still be enabled via Perception3DEngine.
@@ -1102,6 +1298,11 @@ class PerceptionEngine:
                 frame_height=det.get("frame_height"),
                 candidate_labels=det.get("candidate_labels"),
                 candidate_group=det.get("candidate_group"),
+                vlm_description=det.get("vlm_description"),
+                vlm_similarity=det.get("vlm_similarity"),
+                vlm_is_valid=det.get("vlm_is_valid"),
+                scene_similarity=det.get("scene_similarity"),
+                scene_filter_reason=det.get("scene_filter_reason"),
             )
             
             observations.append(obs)
@@ -1183,8 +1384,9 @@ class PerceptionEngine:
                 'depth_mm': depth_mm,
             })
 
-            # Prefer CLIP embeddings for EnhancedTracker's semantic checks
-            emb = det.get("clip_embedding", det.get("embedding"))
+            # Prefer V-JEPA2 embeddings for appearance/Re-ID consistency.
+            # (CLIP embeddings may exist for candidate label scoring but are not the identity backbone.)
+            emb = det.get("embedding", det.get("clip_embedding"))
             embeddings.append(emb if emb is not None else None)
 
         return converted, embeddings

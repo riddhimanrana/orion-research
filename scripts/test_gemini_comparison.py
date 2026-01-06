@@ -140,7 +140,8 @@ def compare_with_gemini(model, orion_result, sample_frames, output_dir: Path):
     all_classes = []
     if isinstance(orion_result, list):
         # Loaded from file (list of track dicts)
-        all_classes = [t.get('class_name', 'unknown') for t in orion_result]
+        # Support both legacy 'class_name' and new 'object_class' keys
+        all_classes = [t.get('object_class') or t.get('class_name', 'unknown') for t in orion_result]
     elif hasattr(orion_result, 'entities'):
         # Live result (PerceptionResult)
         all_classes = [
@@ -157,11 +158,12 @@ def compare_with_gemini(model, orion_result, sample_frames, output_dir: Path):
         # Get frame-specific detections
         frame_detections = []
         if isinstance(orion_result, list):
-            # Filter tracks for this frame (+/- 2 frames window)
+            # Filter tracks for this frame (+/- 10 frames window)
+            # Support both 'frame_id' and 'frame_number' keys
             frame_detections = [
-                t.get('class_name', 'unknown') 
+                t.get('object_class') or t.get('class_name', 'unknown') 
                 for t in orion_result 
-                if abs(t.get('frame_id', -1) - frame_idx) <= 2
+                if abs((t.get('frame_number') or t.get('frame_id', -1000)) - frame_idx) <= 10
             ]
         
         frame_summary = f"Orion detected in this frame: {dict(Counter(frame_detections))}"

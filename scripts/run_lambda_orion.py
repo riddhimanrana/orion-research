@@ -15,6 +15,9 @@ Notes
 - Assumes `lambda-orion` is a working SSH host alias.
 - Assumes the repo exists on the remote machine at `--remote-repo`.
 - Assumes the remote shell can run the `--remote-prefix` snippet to activate env.
+
+This script defaults to the shared Lambda NFS layout used by Orion:
+`~/orion-core-fs/orion-research` (a symlink to `/lambda/nfs/orion-core-fs/orion-research`).
 """
 
 from __future__ import annotations
@@ -42,12 +45,30 @@ def _scp_dir(host: str, remote_path: str, local_dir: Path) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description="SSH-run Orion pipeline on lambda-orion and pull results")
     ap.add_argument("--host", type=str, default="lambda-orion", help="SSH host (alias or user@host)")
-    ap.add_argument("--remote-repo", type=str, default="~/orion-research", help="Remote repo path")
+    ap.add_argument(
+        "--remote-repo",
+        type=str,
+        default="~/orion-core-fs/orion-research",
+        help="Remote repo path (default matches Lambda NFS layout)",
+    )
     ap.add_argument(
         "--remote-prefix",
         type=str,
-        default="source ~/miniconda3/etc/profile.d/conda.sh && conda activate orion",
-        help="Shell snippet to activate env on remote",
+        default=(
+            # Run after `cd <remote_repo>`.
+            "(" \
+            "if [ -f venv/bin/activate ]; then source venv/bin/activate; " \
+            "elif [ -f .venv/bin/activate ]; then source .venv/bin/activate; " \
+            "elif [ -f $HOME/miniconda3/etc/profile.d/conda.sh ]; then " \
+            "  source $HOME/miniconda3/etc/profile.d/conda.sh && conda activate orion; " \
+            "elif command -v conda >/dev/null 2>&1; then conda activate orion; " \
+            "fi" \
+            ")"
+        ),
+        help=(
+            "Shell snippet to activate env on remote (executed after cd into repo). "
+            "Defaults to auto-detect venv/.venv/conda."
+        ),
     )
 
     ap.add_argument("--episode", type=str, required=True, help="Episode id (results/<episode>)")
@@ -76,7 +97,8 @@ def main() -> None:
     cd_repo = f"cd {shlex.quote(remote_repo)}"
 
     def runcmd(cmd: str) -> None:
-        full = f"{prefix} && {cd_repo} && {cmd}"
+        # Run activation after we are in the repo so relative venv paths work.
+        full = f"{cd_repo} && {prefix} && {cmd}" if prefix else f"{cd_repo} && {cmd}"
         _ssh(args.host, full)
 
     if not args.no_showcase:

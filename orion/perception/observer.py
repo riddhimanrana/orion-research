@@ -21,6 +21,8 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 
+from orion.perception.taxonomy import COARSE_TO_FINE_PROMPTS
+
 from orion.perception.types import ObjectClass, BoundingBox
 from orion.perception.config import DetectionConfig
 from orion.utils.profiling import profile
@@ -79,6 +81,11 @@ class FrameObserver:
         self.yolo = yolo_model if detector_backend == "yolo" else None
         self.yoloworld = yoloworld_model if detector_backend == "yoloworld" else None
 
+        # YOLO-World can internally keep text feature tensors (e.g., txt_feats) on CPU
+        # even when the model runs on CUDA/MPS. We track a preferred device and
+        # synchronize text tensors after set_classes() to avoid device-mismatch errors.
+        self._yoloworld_device: Optional[str] = None
+
         if self.detector_backend == "yolo" and self.yolo is None:
             raise ValueError("YOLO backend selected but yolo_model was not provided")
         if self.detector_backend == "yoloworld" and self.yoloworld is None:
@@ -130,6 +137,110 @@ class FrameObserver:
             target_fps,
             self.perception_engine is not None,
         )
+
+    def _preferred_torch_device(self) -> str:
+        """Pick the best available torch device for YOLO/YOLO-World."""
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                return "cuda:0"
+            if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+                return "mps"
+        except Exception:
+            pass
+        return "cpu"
+
+    def _sync_yoloworld_text_tensors(self) -> None:
+        """Ensure YOLO-World text feature tensors live on the same device as model params.
+
+        Ultralytics YOLOWorld stores text features under attributes like `txt_feats`.
+        After calling `set_classes()`, those tensors are often created on CPU.
+        If inference happens on CUDA/MPS, this can trigger device mismatch errors.
+        """
+        if self.yoloworld is None:
+            return
+
+        try:
+            import torch
+
+            # Ultralytics may keep both a base model (self.yoloworld.model) and a predictor
+            # model (self.yoloworld.predictor.model). We need to sync text tensors in both.
+            base_model = getattr(self.yoloworld, "model", None)
+            predictor = getattr(self.yoloworld, "predictor", None)
+            pred_model = getattr(predictor, "model", None) if predictor is not None else None
+
+            model_objs = [m for m in (base_model, pred_model) if m is not None]
+            for model in model_objs:
+                try:
+                    param_dev = next(model.parameters()).device
+                except Exception:
+                    continue
+
+                candidates = [model, getattr(model, "model", None)]
+                for obj in candidates:
+                    if obj is None:
+                        continue
+                    for attr in (
+                        "txt_feats",
+                        "text_feats",
+                        "text_features",
+                        "text_embeds",
+                        "text_embeddings",
+                    ):
+                        t = getattr(obj, attr, None)
+                        if isinstance(t, torch.Tensor) and getattr(t, "device", None) != param_dev:
+                            try:
+                                setattr(obj, attr, t.to(param_dev))
+                            except Exception:
+                                # Best-effort: if ultralytics changes internals, avoid crashing.
+                                pass
+        except Exception:
+            return
+
+    def _ensure_yoloworld_device(self) -> None:
+        """Move YOLO-World to the preferred device once and sync its text tensors."""
+        if self.detector_backend != "yoloworld" or self.yoloworld is None:
+            return
+
+        if self._yoloworld_device is None:
+            self._yoloworld_device = self._preferred_torch_device()
+            try:
+                # Ultralytics provides a .to() on the wrapper.
+                self.yoloworld.to(self._yoloworld_device)
+            except Exception as e:
+                logger.warning(f"Failed to move YOLO-World to {self._yoloworld_device}: {e}")
+                self._yoloworld_device = "cpu"
+
+        # If a predictor is already initialized, keep it on the same device too.
+        try:
+            predictor = getattr(self.yoloworld, "predictor", None)
+            pred_model = getattr(predictor, "model", None) if predictor is not None else None
+            if pred_model is not None and hasattr(pred_model, "to"):
+                pred_model.to(self._yoloworld_device)
+        except Exception:
+            pass
+
+        # Ultralytics WorldModel caches a CLIP text model on first set_classes(). If
+        # that cache was created on CPU and we later move the model to CUDA/MPS,
+        # subsequent set_classes() calls can crash due to mixed-device tensors.
+        # Clearing forces a rebuild on the current device at the next set_classes().
+        try:
+            base_world = getattr(self.yoloworld, "model", None)
+            if base_world is not None and hasattr(base_world, "clip_model"):
+                base_world.clip_model = None
+        except Exception:
+            pass
+        try:
+            predictor = getattr(self.yoloworld, "predictor", None)
+            pred_world = getattr(predictor, "model", None) if predictor is not None else None
+            if pred_world is not None and hasattr(pred_world, "clip_model"):
+                pred_world.clip_model = None
+        except Exception:
+            pass
+
+        # Even if model is already on device, text tensors may still be on CPU.
+        self._sync_yoloworld_text_tensors()
     
     def set_scene_context(
         self,
@@ -260,6 +371,7 @@ class FrameObserver:
                         timestamp=timestamp,
                         frame_width=frame_width,
                         frame_height=frame_height,
+                        sample_index=sampled_count,
                     )
                     
                     detections.extend(frame_detections)
@@ -290,6 +402,9 @@ class FrameObserver:
         if self.yoloworld is None:
             return []
 
+        # Ensure model + text tensors are on a consistent device.
+        self._ensure_yoloworld_device()
+
         # YOLO-World uses the same inference API as standard YOLO
         results = self.yoloworld(
             frame,
@@ -305,7 +420,13 @@ class FrameObserver:
                 bbox_xyxy = boxes.xyxy[i].cpu().numpy().astype(float).tolist()
                 class_id = int(boxes.cls[i])
                 # YOLO-World uses the custom class names we set
-                class_name = result.names.get(class_id, f"class_{class_id}")
+                names = getattr(result, "names", None)
+                if isinstance(names, dict):
+                    class_name = names.get(class_id, f"class_{class_id}")
+                elif isinstance(names, (list, tuple)) and 0 <= class_id < len(names):
+                    class_name = names[class_id]
+                else:
+                    class_name = f"class_{class_id}"
                 detections.append(
                     {
                         "bbox": bbox_xyxy,
@@ -352,6 +473,7 @@ class FrameObserver:
         timestamp: float,
         frame_width: int,
         frame_height: int,
+        sample_index: Optional[int] = None,
     ) -> List[Dict]:
         """
         Detect objects in a single frame.
@@ -481,6 +603,9 @@ class FrameObserver:
                 detection["hands"] = [h.to_dict() for h in perception_3d.hands]
 
             detections.append(detection)
+
+        # Optional: crop-level refinement with YOLO-World on selected coarse classes
+        detections = self._refine_with_yoloworld(detections, sample_index=sample_index)
         
         # Post-NMS deduplication: merge highly overlapping same-class detections
         detections = self._post_nms_dedup(detections, iou_threshold=0.55)
@@ -525,6 +650,139 @@ class FrameObserver:
         )
         
         return crop, padded_bbox
+
+    def _refine_with_yoloworld(self, detections: List[Dict], *, sample_index: Optional[int] = None) -> List[Dict]:
+        """
+        Run YOLO-World on crops of selected coarse detections to attach fine-grained
+        candidate labels. This preserves the original coarse class and only adds
+        non-committal hypotheses in `candidate_labels`.
+        """
+        if not getattr(self.config, "yoloworld_enable_crop_refinement", False):
+            return detections
+        if self.yoloworld is None:
+            return detections
+
+        # Optional throttling: run refinement only every N sampled frames.
+        every_n = int(getattr(self.config, "yoloworld_refinement_every_n_sampled_frames", 1) or 1)
+        if sample_index is not None and every_n > 1:
+            if (int(sample_index) % every_n) != 0:
+                return detections
+
+        # Ensure model + text tensors are on a consistent device before any set_classes().
+        self._ensure_yoloworld_device()
+
+        # Build lookup of coarse class -> prompt list (lowercased keys)
+        coarse_map = {k.lower(): v for k, v in COARSE_TO_FINE_PROMPTS.items() if v}
+        if not coarse_map:
+            return detections
+
+        # Group candidate detections by coarse class
+        groups: Dict[str, List[int]] = {}
+        for idx, det in enumerate(detections):
+            cls_name = str(det.get("class_name") or det.get("object_class", "")).lower()
+            if cls_name in coarse_map and det.get("crop") is not None and getattr(det.get("crop"), "size", 0) > 0:
+                groups.setdefault(cls_name, []).append(idx)
+
+        if not groups:
+            return detections
+
+        # Preserve original classes to restore after refinement
+        original_classes = None
+        try:
+            names_attr = getattr(self.yoloworld, "names", None)
+            if isinstance(names_attr, dict):
+                original_classes = list(names_attr.values())
+        except Exception:
+            original_classes = None
+        if not original_classes:
+            original_classes = self.detector_classes
+
+        for coarse_class, indices in groups.items():
+            prompts = coarse_map.get(coarse_class, [])
+            if not prompts:
+                continue
+
+            # Cap refinement workload per coarse class.
+            max_crops = int(getattr(self.config, "yoloworld_refinement_max_crops_per_class", 1000000) or 1000000)
+            if max_crops > 0 and len(indices) > max_crops:
+                indices = sorted(
+                    indices,
+                    key=lambda i: float(detections[i].get("confidence", 0.0) or 0.0),
+                    reverse=True,
+                )[:max_crops]
+
+            # Collect crops in order
+            crops = []
+            valid_indices = []
+            for idx in indices:
+                crop = detections[idx].get("crop")
+                if crop is None or getattr(crop, "size", 0) == 0:
+                    continue
+                crops.append(crop)
+                valid_indices.append(idx)
+
+            if not crops:
+                continue
+
+            try:
+                self.yoloworld.set_classes(prompts)
+                # set_classes() often rebuilds text tensors on CPU; sync them back to model device.
+                self._sync_yoloworld_text_tensors()
+            except Exception as e:
+                logger.warning(f"Failed to set refinement prompts for '{coarse_class}': {e}")
+                continue
+
+            try:
+                results = self.yoloworld(
+                    crops,
+                    conf=self.config.yoloworld_refinement_confidence,
+                    iou=self.config.iou_threshold,
+                    verbose=False,
+                )
+            except Exception as e:
+                logger.warning(f"Refinement inference failed for '{coarse_class}': {e}")
+                continue
+
+            if not isinstance(results, list):
+                results = [results]
+
+            for det_idx, res in zip(valid_indices, results):
+                if res is None or getattr(res, "boxes", None) is None:
+                    continue
+                boxes = res.boxes
+                candidates: List[Dict[str, Any]] = []
+                for j in range(len(boxes)):
+                    cls_id = int(boxes.cls[j])
+                    names = getattr(res, "names", None)
+                    label = None
+                    if isinstance(names, dict):
+                        label = names.get(cls_id)
+                    elif isinstance(names, (list, tuple)):
+                        if 0 <= cls_id < len(names):
+                            label = names[cls_id]
+                    if not label:
+                        label = prompts[cls_id] if cls_id < len(prompts) else f"class_{cls_id}"
+                    candidates.append(
+                        {
+                            "label": label,
+                            "score": float(boxes.conf[j]),
+                            "source": "yoloworld_refine",
+                        }
+                    )
+                candidates = sorted(candidates, key=lambda c: c.get("score", 0.0), reverse=True)
+                if candidates:
+                    detections[det_idx]["candidate_labels"] = candidates[: self.config.yoloworld_refinement_top_k]
+                    detections[det_idx]["candidate_group"] = coarse_class
+
+        # Restore original class set
+        if original_classes:
+            try:
+                self.yoloworld.set_classes(original_classes)
+                self._sync_yoloworld_text_tensors()
+            except Exception as e:
+                logger.warning(f"Failed to restore YOLO-World classes after refinement: {e}")
+
+        return detections
 
     def _post_nms_dedup(
         self,

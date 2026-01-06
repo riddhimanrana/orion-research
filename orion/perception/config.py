@@ -16,7 +16,7 @@ from typing import Literal, Optional
 
 import logging
 
-from .types import DEFAULT_INTRINSICS_PRESET, INTRINSICS_PRESETS
+from .types import DEFAULT_INTRINSICS_PRESET, INTRINSICS_PRESETS, ObjectClass
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,9 @@ YOLOWORLD_PROMPT_COARSE = (
     "door . window . "
     ""  # background class marker; empty string handled by yoloworld_categories()
 )
+
+# Full COCO-80 vocabulary (from ObjectClass enum) for high-recall Stage-1 runs.
+YOLOWORLD_PROMPT_COCO = " . ".join([cls.value for cls in ObjectClass]) + " . "
 
 # The previous default (~100 class indoor vocabulary) is kept as a preset for
 # research/ablation runs.
@@ -88,27 +91,27 @@ class DetectionConfig:
     """YOLO model size (n=fastest, x=most accurate)."""
 
     # Detection thresholds (shared)
-    confidence_threshold: float = 0.15
-    """Minimum detection confidence (0-1). Balanced for recall without excessive noise."""
+    confidence_threshold: float = 0.18
+    """Minimum detection confidence (0-1). Slightly higher to balance full-COCO recall with precision."""
 
-    iou_threshold: float = 0.40
-    """NMS IoU threshold for overlapping boxes. 0.40 is a good balance for general indoor scenes."""
+    iou_threshold: float = 0.45
+    """NMS IoU threshold for overlapping boxes."""
 
     # Filtering
-    min_object_size: int = 32
+    min_object_size: int = 24
     """Minimum object size in pixels (smaller ignored)."""
 
-    max_bbox_area_ratio: float = 0.75
-    """If bbox area / frame area exceeds this ratio, treat as suspicious background-like box."""
+    max_bbox_area_ratio: float = 1.0
+    """If bbox area / frame area exceeds this ratio, treat as suspicious background-like box (disabled at 1.0)."""
 
-    max_bbox_area_lowconf_threshold: float = 0.35
-    """Drop very large boxes when their confidence is below this threshold."""
+    max_bbox_area_lowconf_threshold: float = 0.0
+    """Drop very large boxes when their confidence is below this threshold (disabled)."""
 
-    max_aspect_ratio: float = 5.0
-    """If aspect ratio exceeds this (wide or tall) AND confidence is low, treat as likely false positive."""
+    max_aspect_ratio: float = 10.0
+    """If aspect ratio exceeds this (wide or tall) AND confidence is low, treat as likely false positive (relaxed)."""
 
-    aspect_ratio_lowconf_threshold: float = 0.30
-    """Confidence cutoff for the aspect-ratio filter; only drop extreme aspect boxes below this conf."""
+    aspect_ratio_lowconf_threshold: float = 0.0
+    """Confidence cutoff for the aspect-ratio filter; set to 0 to effectively disable."""
 
     # Cropping
     bbox_padding_percent: float = 0.1
@@ -118,10 +121,11 @@ class DetectionConfig:
     yoloworld_model: str = "models/yolov8l-worldv2-general.pt"
     """YOLO-World model weights file. Pre-baked general indoor model for speed."""
 
-    yoloworld_prompt_preset: Literal["coarse", "indoor_full", "custom"] = "coarse"
+    yoloworld_prompt_preset: Literal["coarse", "indoor_full", "coco", "custom"] = "coco"
     """Prompt preset for YOLO-World when yoloworld_use_custom_classes=True.
 
-    - coarse: small, stable super-categories (recommended default)
+    - coco: full COCO-80 vocabulary for high recall
+    - coarse: small, stable super-categories
     - indoor_full: legacy ~100 class indoor vocabulary (ablation/research)
     - custom: use yoloworld_prompt as provided
     """
@@ -134,8 +138,24 @@ class DetectionConfig:
 
     # Candidate open-vocab labeling (non-committal hypotheses, stored in detections)
     # NOTE: This is CLIP-based and can be used with ANY detector backend.
-    yoloworld_enable_candidate_labels: bool = True
-    """If True, attach top-k candidate open-vocab labels to each detection (does NOT affect detection)."""
+    yoloworld_enable_candidate_labels: bool = False
+    """If True, attach top-k CLIP-based candidate labels (unused by default when crop refinement is enabled)."""
+
+    # Crop-level refinement using YOLO-World on selected detections
+    yoloworld_enable_crop_refinement: bool = True
+    """If True, run YOLO-World on crops of generic/coarse detections with fine-grained prompts (taxonomy-driven)."""
+
+    yoloworld_refinement_confidence: float = 0.15
+    """Confidence threshold for crop refinement detections."""
+
+    yoloworld_refinement_every_n_sampled_frames: int = 4
+    """Run crop refinement every N sampled frames (not raw video frames)."""
+
+    yoloworld_refinement_max_crops_per_class: int = 3
+    """Maximum number of detection crops to refine per coarse class per sampled frame."""
+
+    yoloworld_refinement_top_k: int = 5
+    """Top-k candidate labels to keep from crop refinement."""
 
     yoloworld_candidate_top_k: int = 5
     """Top-k candidate labels to store per detection."""
@@ -193,6 +213,14 @@ class DetectionConfig:
             if self.yoloworld_candidate_rotate_every_frames < 1:
                 raise ValueError("yoloworld_candidate_rotate_every_frames must be >= 1")
 
+            if self.yoloworld_refinement_top_k < 1:
+                raise ValueError("yoloworld_refinement_top_k must be >= 1")
+
+            if self.yoloworld_refinement_every_n_sampled_frames < 1:
+                raise ValueError("yoloworld_refinement_every_n_sampled_frames must be >= 1")
+            if self.yoloworld_refinement_max_crops_per_class < 1:
+                raise ValueError("yoloworld_refinement_max_crops_per_class must be >= 1")
+
         # Validate candidate prompt groups early (applies for any backend).
         if self.yoloworld_enable_candidate_labels:
             try:
@@ -221,6 +249,8 @@ class DetectionConfig:
             prompt = YOLOWORLD_PROMPT_COARSE
         elif self.yoloworld_prompt_preset == "indoor_full":
             prompt = YOLOWORLD_PROMPT_INDOOR_FULL
+        elif self.yoloworld_prompt_preset == "coco":
+            prompt = YOLOWORLD_PROMPT_COCO
         else:
             prompt = self.yoloworld_prompt
 
@@ -385,6 +415,72 @@ class DescriptionConfig:
 
 
 @dataclass
+class SemanticVerificationConfig:
+    """FastVLM-based semantic verification for detections (optional).
+
+    This stage is meant to be:
+    - low-frequency (run on a small subset of detections)
+    - non-destructive by default (do not drop detections)
+    - used primarily to re-rank open-vocab candidate label hypotheses
+      and attach audit metadata (description + similarity).
+    """
+
+    enabled: bool = False
+    """Enable FastVLM semantic verification/reranking."""
+
+    mode: Literal["candidates_only", "low_confidence", "all"] = "candidates_only"
+    """Which detections to verify:
+
+    - candidates_only: only detections that already have candidate_labels
+    - low_confidence: candidate_labels OR confidence below `low_confidence_threshold`
+    - all: verify the top-N detections per frame
+    """
+
+    every_n_sampled_frames: int = 10
+    """Run verification every N sampled frames (not raw video frames)."""
+
+    max_detections_per_frame: int = 6
+    """Cap number of detections verified per sampled frame."""
+
+    similarity_threshold: float = 0.25
+    """Similarity threshold used for the verifier's `is_valid` flag."""
+
+    low_confidence_threshold: float = 0.35
+    """Confidence cutoff used when mode='low_confidence'."""
+
+    rerank_candidates: bool = True
+    """If True, re-rank `candidate_labels` using the VLM description."""
+
+    rerank_blend: float = 0.6
+    """Blend factor for candidate reranking (see SemanticFilter.rerank_candidate_labels)."""
+
+    attach_metadata: bool = True
+    """If True, attach `vlm_description` / `vlm_similarity` / `vlm_is_valid` to detections."""
+
+    description_prompt: str = "Describe this object in one sentence. Be specific about what it is."
+    """Prompt used for VLM description generation."""
+
+    max_tokens: int = 50
+    temperature: float = 0.1
+
+    def __post_init__(self):
+        if self.every_n_sampled_frames < 1:
+            raise ValueError("every_n_sampled_frames must be >= 1")
+        if self.max_detections_per_frame < 1:
+            raise ValueError("max_detections_per_frame must be >= 1")
+        if not (0.0 <= float(self.similarity_threshold) <= 1.0):
+            raise ValueError("similarity_threshold must be in [0,1]")
+        if not (0.0 <= float(self.low_confidence_threshold) <= 1.0):
+            raise ValueError("low_confidence_threshold must be in [0,1]")
+        if not (0.0 <= float(self.rerank_blend) <= 1.0):
+            raise ValueError("rerank_blend must be in [0,1]")
+        if self.max_tokens < 1:
+            raise ValueError("max_tokens must be >= 1")
+        if not (0.0 <= float(self.temperature) <= 2.0):
+            raise ValueError("temperature must be in [0,2]")
+
+
+@dataclass
 class DepthConfig:
     """Depth estimation configuration for Phase 1 3D perception."""
 
@@ -520,6 +616,7 @@ class PerceptionConfig:
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     description: DescriptionConfig = field(default_factory=DescriptionConfig)
+    semantic_verification: SemanticVerificationConfig = field(default_factory=SemanticVerificationConfig)
     depth: DepthConfig = field(default_factory=DepthConfig)
     hand_tracking: HandTrackingConfig = field(default_factory=HandTrackingConfig)
     occlusion: OcclusionConfig = field(default_factory=OcclusionConfig)
