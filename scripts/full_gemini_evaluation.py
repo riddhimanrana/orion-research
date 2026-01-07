@@ -360,6 +360,20 @@ def run_perception(
     )
     elapsed = time.time() - start_time
     
+    # Save observations as tracks.jsonl for Gemini validation
+    tracks_path = output_dir / "tracks.jsonl"
+    with open(tracks_path, "w") as f:
+        for obs in result.raw_observations:
+            track = {
+                "frame_idx": obs.frame_number,
+                "category": obs.object_class.value if hasattr(obs.object_class, 'value') else str(obs.object_class),
+                "confidence": obs.confidence,
+                "bbox": [obs.bounding_box.x1, obs.bounding_box.y1, obs.bounding_box.x2, obs.bounding_box.y2],
+                "track_id": obs.entity_id,
+            }
+            f.write(json.dumps(track) + "\n")
+    logger.info(f"Saved {len(result.raw_observations)} observations to {tracks_path}")
+    
     return result, elapsed
 
 
@@ -411,7 +425,7 @@ def run_full_evaluation(
         eval_result = EvaluationResult(
             video_path=str(video_path),
             total_frames=perception_result.total_frames if perception_result else 0,
-            sampled_frames=perception_result.sampled_frames if perception_result else 0,
+            sampled_frames=len(set(obs.frame_number for obs in perception_result.raw_observations)) if perception_result else 0,
             total_detections=perception_result.total_detections if perception_result else 0,
             unique_entities=perception_result.unique_entities if perception_result else 0,
             processing_time=elapsed,
