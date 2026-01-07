@@ -323,6 +323,9 @@ class EnhancedTracker:
             if t.time_since_update < self.max_age
         ]
         
+        # 6.5. Deduplicate overlapping tracks (Gemini audit: merge tracks with >70% IoU)
+        self._deduplicate_tracks(iou_threshold=0.70)
+        
         # 7. Return confirmed tracks
         return [t for t in self.tracks if t.hits >= self.min_hits]
     
@@ -660,6 +663,70 @@ class EnhancedTracker:
         
         self.tracks.append(track)
         self.next_id += 1
+    
+    def _compute_iou_2d(self, box1: np.ndarray, box2: np.ndarray) -> float:
+        """Compute 2D IoU between two boxes in [x1, y1, x2, y2] format."""
+        x1 = max(box1[0], box2[0])
+        y1 = max(box1[1], box2[1])
+        x2 = min(box1[2], box2[2])
+        y2 = min(box1[3], box2[3])
+        
+        inter_w = max(0.0, x2 - x1)
+        inter_h = max(0.0, y2 - y1)
+        inter_area = inter_w * inter_h
+        
+        area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
+        area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
+        union_area = area1 + area2 - inter_area
+        
+        if union_area <= 0:
+            return 0.0
+        return inter_area / union_area
+    
+    def _deduplicate_tracks(self, iou_threshold: float = 0.70):
+        """Merge tracks with high spatial overlap (Gemini audit recommendation).
+        
+        Addresses: "Multiple track IDs are assigned to the same spatial regions for both
+        'box' and 'hand' classes, suggesting issues with NMS or track merging logic."
+        
+        Strategy: Keep the track with more hits (longer confirmation history).
+        """
+        if len(self.tracks) < 2:
+            return
+        
+        # Find pairs with high IoU
+        tracks_to_remove = set()
+        for i in range(len(self.tracks)):
+            if i in tracks_to_remove:
+                continue
+            for j in range(i + 1, len(self.tracks)):
+                if j in tracks_to_remove:
+                    continue
+                
+                bbox_i = self.tracks[i].bbox_2d
+                bbox_j = self.tracks[j].bbox_2d
+                
+                if bbox_i is None or bbox_j is None:
+                    continue
+                    
+                iou = self._compute_iou_2d(
+                    np.array(bbox_i) if not isinstance(bbox_i, np.ndarray) else bbox_i,
+                    np.array(bbox_j) if not isinstance(bbox_j, np.ndarray) else bbox_j,
+                )
+                
+                if iou >= iou_threshold:
+                    # Keep track with more hits; if equal, keep older (lower ID)
+                    if self.tracks[i].hits > self.tracks[j].hits:
+                        tracks_to_remove.add(j)
+                    elif self.tracks[j].hits > self.tracks[i].hits:
+                        tracks_to_remove.add(i)
+                    else:
+                        # Equal hits: keep lower ID (older track)
+                        tracks_to_remove.add(j)
+        
+        # Remove duplicate tracks
+        if tracks_to_remove:
+            self.tracks = [t for idx, t in enumerate(self.tracks) if idx not in tracks_to_remove]
     
     def _compute_iou_3d(
         self,

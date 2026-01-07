@@ -119,6 +119,12 @@ class DetectionConfig:
     Detections exceeding their class-specific limit are filtered out.
     Falls back to max_bbox_area_ratio if class not specified."""
 
+    class_confidence_thresholds: dict = None
+    """Per-class minimum confidence thresholds. Keys are lowercase class names (e.g., 'hand': 0.60).
+    Detections below their class-specific threshold are filtered out.
+    Falls back to confidence_threshold if class not specified.
+    Added per Gemini audit: 'hand' and 'laptop' often hallucinated on background features."""
+
     class_agnostic_nms: bool = False
     """If True, apply class-agnostic NMS to suppress overlapping boxes of different classes.
     This eliminates duplicate tracks (e.g., 'box' + 'laptop' + 'notebook' for same object)."""
@@ -954,9 +960,16 @@ def get_yoloworld_precision_config() -> PerceptionConfig:
             "phone": 0.15,     # Phone max 15% of frame
             "hand": 0.20,      # Hand max 20% of frame
         },
+        # Per-class confidence thresholds (higher for noisy classes per Gemini audit)
+        class_confidence_thresholds={
+            "hand": 0.60,      # Higher threshold - often hallucinated on door handles
+            "laptop": 0.60,    # Higher threshold - often hallucinated on beds/surfaces
+            "person": 0.55,    # Standard threshold
+        },
         # Enable class-agnostic NMS to eliminate duplicate tracks (box + laptop + notebook)
         class_agnostic_nms=True,
-        class_agnostic_nms_iou=0.65,
+        # Lowered from 0.65 to 0.50 per Gemini recommendation for stricter suppression
+        class_agnostic_nms_iou=0.50,
     )
     return PerceptionConfig(
         detection=det,

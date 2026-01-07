@@ -537,6 +537,13 @@ class FrameObserver:
             class_id = int(detection_source.get("class_id", -1))
             class_name = detection_source["class_name"]
 
+            # Per-class confidence threshold filtering (Gemini audit: hand/laptop hallucinate on backgrounds)
+            class_conf_thresholds = getattr(self.config, "class_confidence_thresholds", {}) or {}
+            class_key = class_name.lower()
+            min_conf = class_conf_thresholds.get(class_key, float(self.config.confidence_threshold))
+            if confidence < min_conf:
+                continue
+
             # Suppress huge, low-confidence boxes (common YOLO-World failure mode on static backgrounds)
             frame_area = float(frame_width * frame_height) if frame_width > 0 and frame_height > 0 else 0.0
             bbox_area = float(max(0, width) * max(0, height))
