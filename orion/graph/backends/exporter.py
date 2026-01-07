@@ -58,6 +58,8 @@ def export_results_to_memgraph(
     video_path: Optional[Path] = None,
     host: str = "127.0.0.1",
     port: int = 7687,
+    username: str = "memgraph",
+    password: str = "memgraph",
     *,
     clear_existing: bool = False,
 ) -> MemgraphExportResult:
@@ -88,7 +90,7 @@ def export_results_to_memgraph(
             if tid is not None:
                 track_to_mem[int(tid)] = mem_id
 
-    mg = MemgraphBackend(host=host, port=port)
+    mg = MemgraphBackend(host=host, port=port, username=username, password=password)
     if clear_existing:
         mg.clear_all()
 

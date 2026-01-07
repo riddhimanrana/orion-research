@@ -76,7 +76,7 @@ def run_perception_with_cis(video_path: str, episode_id: str, memgraph_host: str
     # Initialize Memgraph backend
     try:
         from orion.graph.backends.memgraph import MemgraphBackend
-        db = MemgraphBackend(host=memgraph_host, port=7687)
+        db = MemgraphBackend(host=memgraph_host, port=7687, username="memgraph", password="memgraph")
         db.clear_all()  # Start fresh
         logger.info(f"✓ Connected to Memgraph at {memgraph_host}:7687")
         
@@ -262,7 +262,7 @@ def main():
         # Just connect to Memgraph for audit
         try:
             from orion.graph.backends.memgraph import MemgraphBackend
-            db = MemgraphBackend(host=args.memgraph_host, port=7687)
+            db = MemgraphBackend(host=args.memgraph_host, port=7687, username="memgraph", password="memgraph")
             logger.info(f"✓ Connected to Memgraph for audit")
         except Exception as e:
             logger.error(f"Memgraph connection failed: {e}")

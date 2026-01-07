@@ -71,13 +71,16 @@ class MemgraphBackend:
     - (Frame)-[IN_ZONE]->(Zone)
     """
     
-    def __init__(self, host: str = "127.0.0.1", port: int = 7687):
+    def __init__(self, host: str = "127.0.0.1", port: int = 7687, 
+                 username: str = "memgraph", password: str = "memgraph"):
         """
         Initialize Memgraph connection
         
         Args:
             host: Memgraph host (default: localhost)
             port: Memgraph port (default: 7687)
+            username: Memgraph username (default: memgraph)
+            password: Memgraph password (default: memgraph)
         """
         if mgclient is None:
             raise ImportError(
@@ -86,6 +89,8 @@ class MemgraphBackend:
         
         self.host = host
         self.port = port
+        self.username = username
+        self.password = password
         self.connection = None
         self._connect()
         self._initialize_schema()
@@ -96,6 +101,8 @@ class MemgraphBackend:
             self.connection = mgclient.connect(
                 host=self.host,
                 port=self.port,
+                username=self.username,
+                password=self.password,
                 lazy=False
             )
             logger.info(f"✓ Connected to Memgraph at {self.host}:{self.port}")
