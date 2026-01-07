@@ -718,6 +718,33 @@ class PerceptionConfig:
     
     memgraph_port: int = 7687
     """Memgraph port"""
+    
+    # Stage 4: CIS (Causal Influence Scoring) configuration
+    enable_cis: bool = False
+    """Enable Causal Influence Scoring for hand-object and object-object relationships"""
+    
+    cis_threshold: float = 0.50
+    """Minimum CIS score to persist an influence edge to Memgraph"""
+    
+    cis_compute_every_n_frames: int = 5
+    """Compute CIS edges every N frames (1 = every frame, 5 = every 5 frames)"""
+    
+    cis_temporal_buffer_size: int = 30
+    """Number of frames to buffer for temporal CIS analysis (sliding window)"""
+    
+    cis_depth_gate_mm: float = 2000.0
+    """Maximum depth disparity (mm) for valid causal relationships. 
+    Objects on different depth planes cannot causally influence each other."""
+    
+    # Stage 5: Batch sync configuration
+    memgraph_batch_size: int = 10
+    """Number of frames to buffer before atomic commit to Memgraph"""
+    
+    memgraph_sync_observations: bool = True
+    """Enable syncing observations to Memgraph"""
+    
+    memgraph_sync_cis: bool = True
+    """Enable syncing CIS edges to Memgraph"""
 
     def __post_init__(self):
         """Validate perception config"""

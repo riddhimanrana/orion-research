@@ -6,13 +6,19 @@ Stores:
 - Entity observations (frame_idx, bbox, zone_id, class, confidence)
 - Spatial relationships (NEAR, IN_ZONE, FOLLOWS)
 - Temporal relationships (APPEARS_AFTER, COEXISTS_WITH)
-- Semantic metadata (captions, attributes)
+- Causal Influence relationships (INFLUENCES, GRASPS, MOVES_WITH)
+- Semantic metadata (captions, attributes, VLM descriptions)
 
 Key advantages over SQLite:
 - 1000+ TPS on reads/writes (C++ native)
 - Graph queries in Cypher (natural for relationships)
 - Real-time path finding and pattern matching
-- Vector search for semantic similarity
+- Vector search for semantic similarity (1024-dim V-JEPA2 embeddings)
+
+CIS Edge Types (Stage 4):
+- INFLUENCES: Generic causal influence between entities
+- GRASPS: Hand-object grasping interaction (high confidence)
+- MOVES_WITH: Correlated motion between objects
 """
 
 import logging
@@ -109,8 +115,12 @@ class MemgraphBackend:
             cursor.execute("CREATE INDEX ON :Zone(id);")
             cursor.execute("CREATE INDEX ON :Entity(class_name);")
             
+            # CIS relationship indexes (Stage 4)
+            cursor.execute("CREATE INDEX ON :Entity(first_seen);")
+            cursor.execute("CREATE INDEX ON :Entity(last_seen);")
+            
             self.connection.commit()
-            logger.info("✓ Memgraph schema initialized")
+            logger.info("✓ Memgraph schema initialized (with CIS indexes)")
         except Exception as e:
             # Indexes may already exist
             logger.debug(f"Schema initialization: {e}")
@@ -694,3 +704,353 @@ class MemgraphBackend:
         except Exception as e:
             logger.error(f"Vector search failed: {e}")
             return []
+
+    # ==========================================================================
+    # STAGE 4: CIS (Causal Influence Scoring) EDGE METHODS
+    # ==========================================================================
+
+    def add_cis_relationship(
+        self,
+        agent_id: int,
+        patient_id: int,
+        relationship_type: str,
+        cis_score: float,
+        frame_idx: int,
+        timestamp: float = 0.0,
+        influence_type: str = "generic",
+        components: Optional[Dict[str, float]] = None,
+    ):
+        """
+        Add a Causal Influence Scoring (CIS) relationship between two entities.
+        
+        CIS edges represent causal interactions:
+        - INFLUENCES: Generic causal influence
+        - GRASPS: Hand-object grasping (high confidence)
+        - MOVES_WITH: Correlated motion
+        
+        Args:
+            agent_id: Entity causing the influence (e.g., person/hand)
+            patient_id: Entity being influenced (e.g., object)
+            relationship_type: INFLUENCES, GRASPS, or MOVES_WITH
+            cis_score: Overall CIS score [0, 1]
+            frame_idx: Frame where interaction occurred
+            timestamp: Frame timestamp in seconds
+            influence_type: Detailed interaction type (grasping, touching, etc.)
+            components: Optional CIS component breakdown (temporal, spatial, motion, etc.)
+        """
+        cursor = self.connection.cursor()
+        
+        props = {
+            "agent_id": agent_id,
+            "patient_id": patient_id,
+            "cis_score": cis_score,
+            "frame_idx": frame_idx,
+            "timestamp": timestamp,
+            "influence_type": influence_type,
+        }
+        
+        # Build property string for optional components
+        component_sets = ""
+        if components:
+            for key, val in components.items():
+                props[f"c_{key}"] = val
+                component_sets += f", rel.{key} = $c_{key}"
+        
+        query = f"""
+        MATCH (a:Entity {{id: $agent_id}})
+        MATCH (p:Entity {{id: $patient_id}})
+        MERGE (a)-[rel:{relationship_type}]->(p)
+        SET rel.cis_score = $cis_score,
+            rel.frame_idx = $frame_idx,
+            rel.timestamp = $timestamp,
+            rel.influence_type = $influence_type
+            {component_sets}
+        """
+        
+        try:
+            cursor.execute(query, props)
+            self.connection.commit()
+        except Exception as e:
+            logger.error(f"Failed to add CIS relationship: {e}")
+            raise
+
+    def add_cis_relationships_batch(
+        self,
+        cis_edges: List[Dict[str, Any]],
+    ) -> int:
+        """
+        Add multiple CIS relationships in a single transaction.
+        
+        High-performance batch insert for CIS edges computed by CausalInfluenceScorer.
+        
+        Args:
+            cis_edges: List of dicts with keys:
+                - agent_id: int
+                - patient_id: int
+                - relationship_type: str (INFLUENCES, GRASPS, MOVES_WITH)
+                - cis_score: float [0, 1]
+                - frame_idx: int
+                - timestamp: float (optional)
+                - influence_type: str (optional)
+                - components: dict (optional, CIS component breakdown)
+                
+        Returns:
+            Number of CIS edges inserted.
+        """
+        if not cis_edges:
+            return 0
+            
+        try:
+            cursor = self.connection.cursor()
+            
+            # Group by relationship type for efficiency
+            by_type: Dict[str, List] = {}
+            for edge in cis_edges:
+                rel_type = edge.get('relationship_type', 'INFLUENCES').upper()
+                by_type.setdefault(rel_type, []).append(edge)
+            
+            total = 0
+            for rel_type, edges in by_type.items():
+                edge_data = []
+                for e in edges:
+                    components = e.get('components', {})
+                    edge_data.append({
+                        'agent': e['agent_id'],
+                        'patient': e['patient_id'],
+                        'score': e['cis_score'],
+                        'fidx': e['frame_idx'],
+                        'ts': e.get('timestamp', 0.0),
+                        'itype': e.get('influence_type', 'generic'),
+                        # Flatten components
+                        'temporal': components.get('temporal', 0.0),
+                        'spatial': components.get('spatial', 0.0),
+                        'motion': components.get('motion', 0.0),
+                        'semantic': components.get('semantic', 0.0),
+                        'hand_bonus': components.get('hand_bonus', 0.0),
+                        'distance_3d_mm': components.get('distance_3d_mm', 0.0),
+                    })
+                
+                # Dynamic relationship type with all properties
+                query = f"""
+                UNWIND $edges AS e
+                MATCH (a:Entity {{id: e.agent}})
+                MATCH (p:Entity {{id: e.patient}})
+                MERGE (a)-[rel:{rel_type}]->(p)
+                SET rel.cis_score = e.score,
+                    rel.frame_idx = e.fidx,
+                    rel.timestamp = e.ts,
+                    rel.influence_type = e.itype,
+                    rel.temporal = e.temporal,
+                    rel.spatial = e.spatial,
+                    rel.motion = e.motion,
+                    rel.semantic = e.semantic,
+                    rel.hand_bonus = e.hand_bonus,
+                    rel.distance_3d_mm = e.distance_3d_mm
+                """
+                
+                cursor.execute(query, {'edges': edge_data})
+                total += len(edges)
+            
+            self.connection.commit()
+            logger.debug(f"Batch inserted {total} CIS relationships")
+            return total
+            
+        except Exception as e:
+            logger.error(f"Batch CIS insert failed: {e}")
+            raise
+
+    def query_cis_relationships(
+        self,
+        entity_id: Optional[int] = None,
+        relationship_type: Optional[str] = None,
+        min_score: float = 0.5,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """
+        Query CIS relationships from the graph.
+        
+        Args:
+            entity_id: Optional entity to filter by (as agent or patient)
+            relationship_type: Optional filter (INFLUENCES, GRASPS, MOVES_WITH)
+            min_score: Minimum CIS score to include
+            limit: Maximum results to return
+            
+        Returns:
+            List of CIS relationship dicts.
+        """
+        cursor = self.connection.cursor()
+        
+        # Build query based on filters
+        rel_filter = ""
+        if relationship_type:
+            rel_filter = f":{relationship_type.upper()}"
+        
+        if entity_id is not None:
+            query = f"""
+            MATCH (a:Entity)-[r{rel_filter}]->(p:Entity)
+            WHERE (a.id = $entity_id OR p.id = $entity_id)
+              AND r.cis_score >= $min_score
+            RETURN a.id as agent_id,
+                   a.class_name as agent_class,
+                   type(r) as relationship_type,
+                   r.cis_score as cis_score,
+                   r.frame_idx as frame_idx,
+                   r.influence_type as influence_type,
+                   p.id as patient_id,
+                   p.class_name as patient_class
+            ORDER BY r.cis_score DESC
+            LIMIT $limit
+            """
+            params = {"entity_id": entity_id, "min_score": min_score, "limit": limit}
+        else:
+            query = f"""
+            MATCH (a:Entity)-[r{rel_filter}]->(p:Entity)
+            WHERE r.cis_score >= $min_score
+            RETURN a.id as agent_id,
+                   a.class_name as agent_class,
+                   type(r) as relationship_type,
+                   r.cis_score as cis_score,
+                   r.frame_idx as frame_idx,
+                   r.influence_type as influence_type,
+                   p.id as patient_id,
+                   p.class_name as patient_class
+            ORDER BY r.cis_score DESC
+            LIMIT $limit
+            """
+            params = {"min_score": min_score, "limit": limit}
+        
+        try:
+            cursor.execute(query, params)
+            
+            results = []
+            for row in cursor.fetchall():
+                results.append({
+                    "agent_id": row[0],
+                    "agent_class": row[1],
+                    "relationship_type": row[2],
+                    "cis_score": row[3],
+                    "frame_idx": row[4],
+                    "influence_type": row[5],
+                    "patient_id": row[6],
+                    "patient_class": row[7],
+                })
+            return results
+        except Exception as e:
+            logger.error(f"CIS query failed: {e}")
+            return []
+
+    def get_cis_statistics(self) -> Dict[str, Any]:
+        """Get CIS relationship statistics."""
+        cursor = self.connection.cursor()
+        
+        stats = {}
+        
+        # Count CIS edges by type
+        for rel_type in ['INFLUENCES', 'GRASPS', 'MOVES_WITH']:
+            try:
+                cursor.execute(
+                    f"MATCH ()-[r:{rel_type}]->() RETURN count(r) as count"
+                )
+                stats[f"cis_{rel_type.lower()}"] = cursor.fetchone()[0]
+            except:
+                stats[f"cis_{rel_type.lower()}"] = 0
+        
+        # Average CIS score
+        try:
+            cursor.execute("""
+                MATCH ()-[r]->()
+                WHERE type(r) IN ['INFLUENCES', 'GRASPS', 'MOVES_WITH']
+                  AND r.cis_score IS NOT NULL
+                RETURN avg(r.cis_score) as avg_score, 
+                       max(r.cis_score) as max_score,
+                       count(r) as total
+            """)
+            row = cursor.fetchone()
+            if row:
+                stats["avg_cis_score"] = row[0] or 0.0
+                stats["max_cis_score"] = row[1] or 0.0
+                stats["total_cis_edges"] = row[2] or 0
+        except:
+            stats["avg_cis_score"] = 0.0
+            stats["max_cis_score"] = 0.0
+            stats["total_cis_edges"] = 0
+        
+        return stats
+
+    def add_observations_batch_with_vlm(
+        self,
+        observations: List[Dict[str, Any]],
+    ) -> int:
+        """
+        Add multiple entity observations with VLM descriptions and embedding IDs.
+        
+        Extended version of add_observations_batch that includes:
+        - vlm_description: FastVLM description of the object
+        - embedding_id: V-JEPA2 embedding reference for Re-ID
+        - depth_mm: 3D depth for spatial queries
+        
+        Args:
+            observations: List of dicts with extended keys:
+                - entity_id, frame_idx, timestamp, bbox, class_name, confidence
+                - vlm_description: Optional[str]
+                - embedding_id: Optional[str]
+                - depth_mm: Optional[float]
+                - embedding: Optional[List[float]] (1024-dim V-JEPA2)
+                
+        Returns:
+            Number of observations inserted.
+        """
+        if not observations:
+            return 0
+            
+        try:
+            cursor = self.connection.cursor()
+            
+            # Prepare data for UNWIND with extended properties
+            obs_data = []
+            for obs in observations:
+                bbox = obs.get('bbox', [0, 0, 0, 0])
+                obs_data.append({
+                    'entity_id': obs['entity_id'],
+                    'frame_idx': obs['frame_idx'],
+                    'timestamp': obs.get('timestamp', 0.0),
+                    'class_name': obs['class_name'],
+                    'confidence': obs.get('confidence', 0.0),
+                    'bbox_x1': bbox[0] if len(bbox) > 0 else 0,
+                    'bbox_y1': bbox[1] if len(bbox) > 1 else 0,
+                    'bbox_x2': bbox[2] if len(bbox) > 2 else 0,
+                    'bbox_y2': bbox[3] if len(bbox) > 3 else 0,
+                    'zone_id': obs.get('zone_id'),
+                    'caption': obs.get('caption'),
+                    'vlm_description': obs.get('vlm_description'),
+                    'embedding_id': obs.get('embedding_id'),
+                    'depth_mm': obs.get('depth_mm'),
+                })
+            
+            # Batch insert with extended properties
+            batch_query = """
+            UNWIND $observations AS obs
+            MERGE (e:Entity {id: obs.entity_id})
+            SET e.class_name = obs.class_name
+            MERGE (f:Frame {idx: obs.frame_idx})
+            SET f.timestamp = obs.timestamp
+            MERGE (e)-[r:OBSERVED_IN]->(f)
+            SET r.bbox_x1 = obs.bbox_x1,
+                r.bbox_y1 = obs.bbox_y1,
+                r.bbox_x2 = obs.bbox_x2,
+                r.bbox_y2 = obs.bbox_y2,
+                r.confidence = obs.confidence,
+                r.vlm_description = obs.vlm_description,
+                r.embedding_id = obs.embedding_id,
+                r.depth_mm = obs.depth_mm
+            """
+            
+            cursor.execute(batch_query, {'observations': obs_data})
+            self.connection.commit()
+            
+            logger.debug(f"Batch inserted {len(observations)} observations (with VLM metadata)")
+            return len(observations)
+            
+        except Exception as e:
+            logger.error(f"Batch insert with VLM failed: {e}")
+            raise

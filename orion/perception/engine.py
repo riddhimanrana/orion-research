@@ -115,6 +115,14 @@ except ImportError as e:
     logging.warning(f"MemgraphBackend import failed: {e}")
     MEMGRAPH_AVAILABLE = False
 
+# CIS Scorer for Stage 4 causal relationships
+try:
+    from orion.analysis.cis_scorer import CausalInfluenceScorer, CISEdge
+    CIS_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"CausalInfluenceScorer import failed: {e}")
+    CIS_AVAILABLE = False
+
 from orion.perception.spatial_zones import ZoneManager
 from orion.utils.profiling import profile, Profiler
 
@@ -184,6 +192,16 @@ class PerceptionEngine:
 
         # Tracking history
         self.tracking_history: Dict[int, List[Track]] = {}  # To store track history
+        
+        # Stage 4: CIS scorer and temporal buffer
+        self.cis_scorer = None
+        self._cis_buffer: Dict[int, List[Track]] = {}  # Sliding window of recent tracks
+        self._cis_edges: List = []  # Buffered CIS edges for batch commit
+        
+        # Stage 5: Memgraph batch buffers
+        self._observation_buffer: List[Dict] = []
+        self._relation_buffer: List[Dict] = []
+        
         self._initialize_components()
 
     def _initialize_components(self):
@@ -312,6 +330,21 @@ class PerceptionEngine:
             self.scene_filter = None
             self.semantic_filter_v2 = None
             logger.warning("SceneContextManager not available")
+
+        # Stage 4: Initialize CIS scorer if enabled
+        if getattr(self.config, 'enable_cis', False) and CIS_AVAILABLE:
+            try:
+                self.cis_scorer = CausalInfluenceScorer(
+                    cis_threshold=getattr(self.config, 'cis_threshold', 0.50),
+                    depth_gate_mm=getattr(self.config, 'cis_depth_gate_mm', 2000.0),
+                    enable_depth_gating=True,
+                )
+                logger.info(f"✓ CausalInfluenceScorer initialized (threshold={self.config.cis_threshold})")
+            except Exception as e:
+                logger.warning(f"CIS scorer init failed: {e}")
+                self.cis_scorer = None
+        elif getattr(self.config, 'enable_cis', False) and not CIS_AVAILABLE:
+            logger.warning("CIS enabled but CausalInfluenceScorer not available")
 
         logger.info("✓ All components initialized\n")
 
@@ -1379,7 +1412,10 @@ class PerceptionEngine:
         return observations
 
     def _run_enhanced_tracking(self, detections: List[dict]) -> None:
-        """Run EnhancedTracker over detections grouped by frame."""
+        """Run EnhancedTracker over detections grouped by frame.
+        
+        Also computes CIS edges if enabled and buffers for batch Memgraph sync.
+        """
         if self.enhanced_tracker is None:
             return
 
@@ -1388,7 +1424,14 @@ class PerceptionEngine:
         for det in detections:
             by_frame.setdefault(int(det["frame_number"]), []).append(det)
 
+        # CIS computation settings
+        cis_compute_every = getattr(self.config, 'cis_compute_every_n_frames', 5)
+        cis_buffer_size = getattr(self.config, 'cis_temporal_buffer_size', 30)
+        memgraph_batch_size = getattr(self.config, 'memgraph_batch_size', 10)
+        
         last_stats = {}
+        frames_since_memgraph_sync = 0
+        
         for fidx in sorted(by_frame.keys()):
             frame_dets = by_frame[fidx]
             # Build arrays for tracker
@@ -1398,13 +1441,120 @@ class PerceptionEngine:
             active_tracks = self.enhanced_tracker.update(converted, embs, camera_pose=None, frame_idx=fidx)
             if active_tracks:
                 self.tracking_history[fidx] = active_tracks
+                
+                # Update CIS temporal buffer (sliding window)
+                self._cis_buffer[fidx] = active_tracks
+                # Trim buffer to size
+                if len(self._cis_buffer) > cis_buffer_size:
+                    oldest = min(self._cis_buffer.keys())
+                    del self._cis_buffer[oldest]
+                
+                # Compute CIS edges if enabled and on schedule
+                if self.cis_scorer is not None and (fidx % cis_compute_every) == 0:
+                    try:
+                        fps = self.config.target_fps or 30.0
+                        timestamp = fidx / fps
+                        cis_edges = self.cis_scorer.compute_frame_edges(
+                            entities=active_tracks,
+                            frame_id=fidx,
+                            timestamp=timestamp,
+                        )
+                        if cis_edges:
+                            self._cis_edges.extend(cis_edges)
+                            logger.debug(f"Frame {fidx}: computed {len(cis_edges)} CIS edges")
+                    except Exception as e:
+                        logger.warning(f"CIS computation failed at frame {fidx}: {e}")
+                
+                # Buffer observations for batch Memgraph sync
+                if self.memgraph and getattr(self.config, 'memgraph_sync_observations', True):
+                    for track in active_tracks:
+                        obs_dict = self._track_to_observation_dict(track, fidx)
+                        self._observation_buffer.append(obs_dict)
+            
             last_stats = self.enhanced_tracker.get_statistics()
+            frames_since_memgraph_sync += 1
+            
+            # Batch commit to Memgraph
+            if frames_since_memgraph_sync >= memgraph_batch_size:
+                self._flush_memgraph_buffers()
+                frames_since_memgraph_sync = 0
+
+        # Final flush
+        self._flush_memgraph_buffers()
 
         if last_stats:
+            cis_count = len(self._cis_edges) if hasattr(self, '_cis_edges') else 0
             logger.info(
                 f"  EnhancedTracker: total_tracks={last_stats.get('total_tracks', 0)}, "
-                f"confirmed={last_stats.get('confirmed_tracks', 0)}"
+                f"confirmed={last_stats.get('confirmed_tracks', 0)}, cis_edges={cis_count}"
             )
+
+    def _track_to_observation_dict(self, track: Track, frame_idx: int) -> Dict:
+        """Convert a Track to an observation dict for Memgraph batch insert."""
+        fps = self.config.target_fps or 30.0
+        timestamp = frame_idx / fps
+        
+        bbox = track.bbox_2d.tolist() if isinstance(track.bbox_2d, np.ndarray) else track.bbox_2d
+        
+        return {
+            'entity_id': int(track.id),
+            'frame_idx': frame_idx,
+            'timestamp': timestamp,
+            'class_name': str(track.class_name),
+            'confidence': float(track.confidence),
+            'bbox': bbox,
+            'depth_mm': float(track.depth_mm) if track.depth_mm is not None else None,
+            'vlm_description': getattr(track, 'vlm_description', None),
+            'embedding_id': getattr(track, 'embedding_id', None),
+        }
+
+    def _flush_memgraph_buffers(self) -> None:
+        """Flush buffered observations and CIS edges to Memgraph."""
+        if not self.memgraph:
+            return
+        
+        # Flush observations
+        if self._observation_buffer:
+            try:
+                # Use enhanced batch method if available
+                if hasattr(self.memgraph, 'add_observations_batch_with_vlm'):
+                    self.memgraph.add_observations_batch_with_vlm(self._observation_buffer)
+                else:
+                    self.memgraph.add_observations_batch(self._observation_buffer)
+                logger.debug(f"Flushed {len(self._observation_buffer)} observations to Memgraph")
+            except Exception as e:
+                logger.warning(f"Memgraph observation flush failed: {e}")
+            self._observation_buffer = []
+        
+        # Flush CIS edges
+        if self._cis_edges and getattr(self.config, 'memgraph_sync_cis', True):
+            try:
+                if hasattr(self.memgraph, 'add_cis_relationships_batch'):
+                    # Convert CISEdge objects to dicts
+                    cis_dicts = []
+                    for edge in self._cis_edges:
+                        cis_dicts.append({
+                            'agent_id': edge.agent_id,
+                            'patient_id': edge.patient_id,
+                            'relationship_type': edge.relation_type.upper(),
+                            'cis_score': edge.cis_score,
+                            'frame_idx': edge.frame_id,
+                            'timestamp': edge.timestamp,
+                            'influence_type': edge.components.interaction_type,
+                            'components': {
+                                'temporal': edge.components.temporal,
+                                'spatial': edge.components.spatial,
+                                'motion': edge.components.motion,
+                                'semantic': edge.components.semantic,
+                                'hand_bonus': edge.components.hand_bonus,
+                                'distance_3d_mm': edge.components.distance_3d_mm,
+                            }
+                        })
+                    self.memgraph.add_cis_relationships_batch(cis_dicts)
+                    logger.debug(f"Flushed {len(cis_dicts)} CIS edges to Memgraph")
+            except Exception as e:
+                logger.warning(f"Memgraph CIS flush failed: {e}")
+            self._cis_edges = []
 
     def _convert_for_enhanced_tracker(self, frame_dets: List[dict]) -> Tuple[List[dict], List[Optional[np.ndarray]]]:
         """Convert observer/embedder detections to EnhancedTracker format.

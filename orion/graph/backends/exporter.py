@@ -25,6 +25,7 @@ class MemgraphExportResult:
     output_host: str
     output_port: int
     scene_graph_edges: int
+    cis_edges_written: int = 0  # Stage 4: CIS edges
 
 
 def _require_backend() -> None:
@@ -165,6 +166,43 @@ def export_results_to_memgraph(
                 except Exception as exc:  # pragma: no cover - network failure
                     raise RuntimeError(f"Failed to write relation {subj}->{obj}: {exc}")
 
+    # Stage 4: Export CIS edges if present
+    cis_edges_written = 0
+    cis_path = results_dir / "cis_edges.jsonl"
+    if cis_path.exists():
+        try:
+            cis_edges = []
+            with open(cis_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    edge = json.loads(line)
+                    # Map to entity IDs
+                    agent_id = entity_ids.get(str(edge.get('agent_id')))
+                    patient_id = entity_ids.get(str(edge.get('patient_id')))
+                    if agent_id is None or patient_id is None:
+                        # Try numeric lookup
+                        agent_id = edge.get('agent_id')
+                        patient_id = edge.get('patient_id')
+                    if agent_id is not None and patient_id is not None:
+                        cis_edges.append({
+                            'agent_id': int(agent_id),
+                            'patient_id': int(patient_id),
+                            'relationship_type': edge.get('relation_type', 'INFLUENCES').upper(),
+                            'cis_score': float(edge.get('cis_score', 0.5)),
+                            'frame_idx': int(edge.get('frame_id', 0)),
+                            'timestamp': float(edge.get('timestamp', 0.0)),
+                            'influence_type': edge.get('components', {}).get('interaction_type', 'generic'),
+                            'components': edge.get('components', {}),
+                        })
+            
+            if cis_edges and hasattr(mg, 'add_cis_relationships_batch'):
+                cis_edges_written = mg.add_cis_relationships_batch(cis_edges)
+        except Exception as exc:
+            # CIS export is optional; don't fail the whole export
+            pass
+
     mg.close()
 
     return MemgraphExportResult(
@@ -174,4 +212,5 @@ def export_results_to_memgraph(
         output_host=host,
         output_port=port,
         scene_graph_edges=scene_graph_edges,
+        cis_edges_written=cis_edges_written,
     )
