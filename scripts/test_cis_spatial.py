@@ -172,7 +172,7 @@ def test_hand_interaction():
     assert bonus == scorer.hand_grasping_bonus
     
     # Test 2: Hand keypoint near object (touching)
-    hand_kps_near = [(150, 900, 1000)]  # 50mm away
+    hand_kps_near = [(130, 900, 1000)]  # ~30mm away from cup center
     bonus, dist, interaction = scorer._hand_bonus_3d(person, cup, hand_kps_near)
     print(f"Hand near object ({dist:.1f}mm): bonus={bonus:.3f}, type={interaction}")
     assert interaction == "touching", f"Expected touching, got {interaction}"
