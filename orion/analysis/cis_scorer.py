@@ -93,6 +93,9 @@ class CausalInfluenceScorer:
     
     Formula:
     CIS = w_t * T + w_s * S + w_m * M + w_se * Se + H
+    
+    With 3D depth gating: if |Z_a - Z_b| > depth_gate_mm, CIS is zeroed
+    to prevent foreground-background hallucinations.
     """
     
     def __init__(
@@ -107,6 +110,8 @@ class CausalInfluenceScorer:
         hand_touching_bonus: float = 0.15,
         hand_near_bonus: float = 0.05,
         cis_threshold: float = 0.50,
+        depth_gate_mm: float = 200.0,  # 3D depth gating threshold (200mm = 20cm)
+        enable_depth_gating: bool = True,  # Whether to apply depth gating
     ):
         self.weight_temporal = weight_temporal
         self.weight_spatial = weight_spatial
@@ -118,6 +123,8 @@ class CausalInfluenceScorer:
         self.hand_touching_bonus = hand_touching_bonus
         self.hand_near_bonus = hand_near_bonus
         self.cis_threshold = cis_threshold
+        self.depth_gate_mm = depth_gate_mm
+        self.enable_depth_gating = enable_depth_gating
         
         # Type compatibility table (heuristic)
         self.type_compatibility = self._build_type_compatibility()
@@ -143,6 +150,19 @@ class CausalInfluenceScorer:
         Returns:
             (cis_score, components) tuple
         """
+        # === 0. DEPTH GATING (early exit) ===
+        # If objects are on different depth planes, they cannot causally influence each other
+        depth_disparity = self._compute_depth_disparity(agent_entity, patient_entity)
+        if self.enable_depth_gating and depth_disparity is not None:
+            if depth_disparity > self.depth_gate_mm:
+                # Objects are on different depth planes - zero CIS
+                return 0.0, CISComponents(
+                    temporal=0.0, spatial=0.0, motion=0.0, semantic=0.0,
+                    hand_bonus=0.0, total=0.0, distance_3d_mm=depth_disparity,
+                    velocity_alignment=0.0, hand_distance_mm=float('inf'),
+                    interaction_type="depth_gated"
+                )
+        
         # === 1. TEMPORAL SCORE ===
         T = self._temporal_score(time_delta)
         
@@ -190,6 +210,49 @@ class CausalInfluenceScorer:
         )
         
         return cis, components
+    
+    def _compute_depth_disparity(self, agent: Any, patient: Any) -> Optional[float]:
+        """
+        Compute absolute depth disparity between two entities.
+        
+        Used for depth gating: if objects are on different depth planes
+        (e.g., foreground vs background), they cannot causally influence each other.
+        
+        Returns:
+            Absolute depth difference in mm, or None if depth not available.
+        """
+        agent_depth = self._get_depth(agent)
+        patient_depth = self._get_depth(patient)
+        
+        if agent_depth is None or patient_depth is None:
+            return None  # Cannot compute, skip depth gating
+        
+        return abs(agent_depth - patient_depth)
+    
+    def _get_depth(self, entity: Any) -> Optional[float]:
+        """Extract depth (Z coordinate) from entity."""
+        # Direct depth attribute
+        if hasattr(entity, 'depth_mm') and entity.depth_mm is not None:
+            return float(entity.depth_mm)
+        
+        # From 3D state [x, y, z, ...]
+        if hasattr(entity, 'state') and entity.state is not None:
+            state = entity.state
+            if len(state) >= 3:
+                return float(state[2])  # Z component
+        
+        # From 3D bbox [cx, cy, cz, ...]
+        if hasattr(entity, 'bbox_3d') and entity.bbox_3d is not None:
+            bbox = entity.bbox_3d
+            if len(bbox) >= 3:
+                return float(bbox[2])  # Z component
+        
+        # From centroid_3d_mm
+        centroid = self._get_centroid_3d(entity)
+        if centroid is not None and len(centroid) >= 3:
+            return float(centroid[2])
+        
+        return None
     
     def _temporal_score(self, time_delta: float) -> float:
         """Exponential temporal decay."""
@@ -315,19 +378,36 @@ class CausalInfluenceScorer:
         return None
     
     def _semantic_score(self, agent: Any, patient: Any) -> float:
-        """Semantic similarity + type compatibility."""
+        """Semantic similarity + type compatibility.
+        
+        Handles missing embeddings gracefully by using neutral score.
+        """
         # Embedding similarity
-        emb_sim = 0.5
-        if agent.average_embedding is not None and patient.average_embedding is not None:
-             # Cosine similarityz
-            dot = np.dot(agent.average_embedding, patient.average_embedding)
-            norm = np.linalg.norm(agent.average_embedding) * np.linalg.norm(patient.average_embedding)
-            if norm > 1e-6:
-                emb_sim = (dot / norm + 1.0) / 2.0
+        emb_sim = 0.5  # Neutral default when embeddings unavailable
+        
+        agent_emb = getattr(agent, 'average_embedding', None)
+        patient_emb = getattr(patient, 'average_embedding', None)
+        
+        if agent_emb is not None and patient_emb is not None:
+            try:
+                # Ensure numpy arrays
+                if not isinstance(agent_emb, np.ndarray):
+                    agent_emb = np.array(agent_emb)
+                if not isinstance(patient_emb, np.ndarray):
+                    patient_emb = np.array(patient_emb)
+                    
+                # Cosine similarity
+                dot = np.dot(agent_emb, patient_emb)
+                norm = np.linalg.norm(agent_emb) * np.linalg.norm(patient_emb)
+                if norm > 1e-6:
+                    emb_sim = (dot / norm + 1.0) / 2.0
+            except Exception:
+                # Fall back to neutral on any error
+                emb_sim = 0.5
                 
         # Type compatibility
-        agent_cls = str(agent.object_class)
-        patient_cls = str(patient.object_class)
+        agent_cls = str(getattr(agent, 'object_class', 'unknown'))
+        patient_cls = str(getattr(patient, 'object_class', 'unknown'))
         type_compat = self._check_type_compatibility(agent_cls, patient_cls)
         
         return 0.6 * emb_sim + 0.4 * type_compat

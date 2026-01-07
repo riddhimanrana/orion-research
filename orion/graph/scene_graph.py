@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import math
+import numpy as np
 
 from orion.graph.types import SceneGraph, SGNode, SGEdge, VideoSceneGraph
 
@@ -427,17 +428,23 @@ def _compute_cis_edges_for_frame(
     
     Creates 'influences', 'grasps', and 'moves_with' edges between entities.
     """
-    from dataclasses import dataclass
+    from dataclasses import dataclass, field
     
     @dataclass
     class _EntityProxy:
-        """Lightweight entity proxy for CIS computation."""
+        """Lightweight entity proxy for CIS computation.
+        
+        Must expose `average_embedding` and `object_class` for semantic scoring.
+        """
         id: str
         object_class: str
         bbox: List[float]
         state: Optional[List[float]] = None  # [x, y, z, vx, vy, vz]
         bbox_3d: Optional[List[float]] = None
         observations: List = None
+        # Embedding for semantic scoring (optional, CIS will use neutral if None)
+        average_embedding: Optional[np.ndarray] = None
+        depth_mm: Optional[float] = None  # Depth for 3D gating
         
         def __post_init__(self):
             if self.observations is None:
@@ -446,12 +453,28 @@ def _compute_cis_edges_for_frame(
     # Build entity proxies from raw nodes
     proxies = []
     for raw in raw_nodes:
+        # Extract embedding if available (prototype or observation embedding)
+        emb = raw.get("average_embedding") or raw.get("embedding")
+        if emb is not None and not isinstance(emb, np.ndarray):
+            emb = np.array(emb)
+        
+        # Extract depth from 3D state or bbox_3d
+        depth = None
+        if raw.get("state_3d") and len(raw.get("state_3d", [])) >= 3:
+            depth = raw["state_3d"][2]  # Z component
+        elif raw.get("bbox_3d") and len(raw.get("bbox_3d", [])) >= 3:
+            depth = raw["bbox_3d"][2]  # Z component
+        elif raw.get("depth_mm"):
+            depth = raw["depth_mm"]
+            
         proxy = _EntityProxy(
             id=raw["memory_id"],
             object_class=raw["class"],
             bbox=raw.get("bbox", [0, 0, 0, 0]),
             state=raw.get("state_3d"),  # [x, y, z, vx, vy, vz] if available
             bbox_3d=raw.get("bbox_3d"),
+            average_embedding=emb,
+            depth_mm=depth,
         )
         proxies.append(proxy)
     

@@ -95,8 +95,21 @@ class FastVLMTorchWrapper:
         temperature: float = 0.2,
         top_p: Optional[float] = None,
         num_beams: int = 1,
+        repetition_penalty: float = 1.15,
+        no_repeat_ngram_size: int = 3,
     ) -> str:
-        """Generate description for a single image."""
+        """Generate description for a single image.
+        
+        Args:
+            image: Input image (path, PIL Image, or numpy array)
+            prompt: Text prompt for the VLM
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature (0 = greedy)
+            top_p: Nucleus sampling threshold
+            num_beams: Number of beams for beam search
+            repetition_penalty: Penalty for repeating tokens (>1.0 discourages repetition)
+            no_repeat_ngram_size: Prevent repeating N-grams of this size (0 = disabled)
+        """
         if isinstance(image, (str, Path)):
             image = Image.open(image).convert("RGB")
         elif isinstance(image, Image.Image):
@@ -132,7 +145,7 @@ class FastVLMTorchWrapper:
         px = image_processor(images=image, return_tensors="pt")["pixel_values"]
         px = px.to(self.model.device, dtype=self.model.dtype)
 
-        # Generate
+        # Generate with repetition penalty to prevent loops (e.g., "Honor, Honor, Honor...")
         with torch.no_grad():
             out = self.model.generate(
                 inputs=input_ids,
@@ -143,6 +156,8 @@ class FastVLMTorchWrapper:
                 top_p=top_p,
                 num_beams=num_beams,
                 do_sample=temperature > 0,
+                repetition_penalty=repetition_penalty,
+                no_repeat_ngram_size=no_repeat_ngram_size,
             )
 
         return self.tokenizer.decode(out[0], skip_special_tokens=True)
@@ -156,6 +171,8 @@ class FastVLMTorchWrapper:
         temperature: float = 0.2,
         top_p: Optional[float] = None,
         num_beams: int = 1,
+        repetition_penalty: float = 1.15,
+        no_repeat_ngram_size: int = 3,
     ) -> List[str]:
         """Generate descriptions for multiple images with the same prompt."""
         results: List[str] = []
@@ -167,6 +184,8 @@ class FastVLMTorchWrapper:
                 temperature=temperature,
                 top_p=top_p,
                 num_beams=num_beams,
+                repetition_penalty=repetition_penalty,
+                no_repeat_ngram_size=no_repeat_ngram_size,
             )
             results.append(result)
         return results

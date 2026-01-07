@@ -113,6 +113,19 @@ class DetectionConfig:
     aspect_ratio_lowconf_threshold: float = 0.0
     """Confidence cutoff for the aspect-ratio filter; set to 0 to effectively disable."""
 
+    # Class-specific area constraints (added per Gemini audit feedback)
+    class_max_area_ratios: dict = None
+    """Per-class max bbox area ratios. Keys are lowercase class names (e.g., 'person': 0.50).
+    Detections exceeding their class-specific limit are filtered out.
+    Falls back to max_bbox_area_ratio if class not specified."""
+
+    class_agnostic_nms: bool = False
+    """If True, apply class-agnostic NMS to suppress overlapping boxes of different classes.
+    This eliminates duplicate tracks (e.g., 'box' + 'laptop' + 'notebook' for same object)."""
+
+    class_agnostic_nms_iou: float = 0.65
+    """IoU threshold for class-agnostic NMS. Higher = more aggressive suppression."""
+
     # Cropping
     bbox_padding_percent: float = 0.1
     """Padding to add around bounding boxes when cropping (percentage of box size)."""
@@ -200,6 +213,16 @@ class DetectionConfig:
         # Padding validation
         if self.bbox_padding_percent < 0:
             raise ValueError(f"bbox_padding_percent must be >= 0, got {self.bbox_padding_percent}")
+
+        # Initialize class_max_area_ratios if None (default per-class limits)
+        if self.class_max_area_ratios is None:
+            object.__setattr__(self, 'class_max_area_ratios', {})
+        
+        # Validate class-agnostic NMS threshold
+        if not (0.0 <= self.class_agnostic_nms_iou <= 1.0):
+            raise ValueError(
+                f"class_agnostic_nms_iou must be in [0, 1], got {self.class_agnostic_nms_iou}"
+            )
 
         if self.backend == "yoloworld":
             if self.yoloworld_use_custom_classes:
@@ -352,6 +375,25 @@ class DescriptionConfig:
 
     sentence_model_name: str = "all-MiniLM-L6-v2"
     """Sentence-transformer model for semantic class correction (e.g., 'sentence-transformers/all-mpnet-base-v2')."""
+    
+    # Repetition control (addresses FastVLM loop bug)
+    repetition_penalty: float = 1.15
+    """Penalty for repeating tokens (1.0 = no penalty, >1.0 = discourage repetition).
+    Higher values prevent the 'Honor, Honor, Honor...' loop bug in FastVLM."""
+    
+    no_repeat_ngram_size: int = 3
+    """Prevent repeating N-grams of this size (0 = disabled).
+    Set to 3 to prevent repeating 3-word phrases."""
+    
+    # VLM voting for robustness
+    enable_voting: bool = False
+    """If True, generate multiple descriptions and keep consensus (centroid)."""
+    
+    num_votes: int = 3
+    """Number of descriptions to generate when voting is enabled."""
+    
+    voting_similarity_threshold: float = 0.7
+    """Minimum cosine similarity for a description to be considered part of consensus."""
     
     # Optimization
     describe_once: bool = True
@@ -882,6 +924,8 @@ def get_yoloworld_precision_config() -> PerceptionConfig:
     - Stricter aspect ratio filtering (max 8.0, threshold 0.45) to reject sliver detections
     - Lower max bbox area ratio (0.85) to reject full-frame hallucinations
     - Tighter NMS IoU (0.40) for class-agnostic suppression of redundant boxes
+    - Class-specific area constraints for person/door (prevent full-frame hallucinations)
+    - Class-agnostic NMS enabled to eliminate duplicate tracks
     
     Trade-off: May miss some objects but greatly reduces false positives.
     """
@@ -901,6 +945,18 @@ def get_yoloworld_precision_config() -> PerceptionConfig:
         # Stricter aspect ratio filtering to reject sliver detections
         max_aspect_ratio=8.0,
         aspect_ratio_lowconf_threshold=0.45,
+        # Per-class area constraints (prevent person/door from covering whole frame)
+        class_max_area_ratios={
+            "person": 0.50,    # Person max 50% of frame
+            "door": 0.60,      # Door max 60% of frame
+            "window": 0.50,    # Window max 50% of frame
+            "laptop": 0.30,    # Laptop max 30% of frame
+            "phone": 0.15,     # Phone max 15% of frame
+            "hand": 0.20,      # Hand max 20% of frame
+        },
+        # Enable class-agnostic NMS to eliminate duplicate tracks (box + laptop + notebook)
+        class_agnostic_nms=True,
+        class_agnostic_nms_iou=0.65,
     )
     return PerceptionConfig(
         detection=det,

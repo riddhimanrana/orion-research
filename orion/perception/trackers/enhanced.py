@@ -147,14 +147,17 @@ class EnhancedTracker:
         max_age: int = 30,  # Max frames without detection before deletion
         min_hits: int = 3,  # Min consecutive hits to confirm track
         iou_threshold: float = 0.3,  # IoU threshold for matching
-        appearance_threshold: float = 0.65,  # Cosine similarity threshold (raised for V-JEPA)
+        appearance_threshold: float = 0.70,  # Cosine similarity threshold (raised for V-JEPA)
         max_distance_pixels: float = 150.0,  # Hard gating for implausible 2D jumps
         max_distance_3d_mm: float = 1500.0,  # Hard gating when 3D is available
-        match_threshold: float = 0.6,  # Max allowed final cost for a match
+        max_distance_frame_ratio: float = 0.15,  # Max distance as fraction of frame diagonal
+        match_threshold: float = 0.55,  # Max allowed final cost for a match (tightened)
         max_gallery_size: int = 5,  # Max embeddings per track
         ema_alpha: float = 0.9,  # EMA weight for appearance
         clip_model = None,  # For label verification
         per_class_thresholds: Optional[Dict[str, float]] = None,  # Per-class override
+        frame_width: int = 1920,  # Frame width for adaptive distance gating
+        frame_height: int = 1080,  # Frame height for adaptive distance gating
     ):
         self.max_age = max_age
         self.min_hits = min_hits
@@ -162,10 +165,16 @@ class EnhancedTracker:
         self.appearance_threshold = appearance_threshold
         self.max_distance_pixels = float(max_distance_pixels)
         self.max_distance_3d_mm = float(max_distance_3d_mm)
+        self.max_distance_frame_ratio = float(max_distance_frame_ratio)
         self.match_threshold = float(match_threshold)
         self.max_gallery_size = max_gallery_size
         self.ema_alpha = ema_alpha
         self.clip_model = clip_model
+        
+        # Frame dimensions for adaptive spatial gating
+        self.frame_width = frame_width
+        self.frame_height = frame_height
+        self._frame_diagonal = np.sqrt(frame_width**2 + frame_height**2)
         
         # Per-class thresholds (loaded from JSON or passed in)
         self.per_class_thresholds = per_class_thresholds or {}
@@ -423,8 +432,13 @@ class EnhancedTracker:
         
         cost_matrix = np.zeros((num_tracks, num_dets))
         
-        # Frame diagonal for normalizing distances
-        frame_diag = np.sqrt(1920**2 + 1080**2)  # Assuming 1080p
+        # Frame diagonal for normalizing distances (use actual frame dims or default)
+        frame_diag = self._frame_diagonal if hasattr(self, '_frame_diagonal') else np.sqrt(1920**2 + 1080**2)
+        
+        # Adaptive max distance: 15% of frame diagonal (prevents cross-room ID switches)
+        adaptive_max_dist = frame_diag * self.max_distance_frame_ratio
+        # Use the more restrictive of adaptive and fixed thresholds
+        effective_max_dist = min(self.max_distance_pixels, adaptive_max_dist) if self.max_distance_pixels > 0 else adaptive_max_dist
         
         for t_idx, track in enumerate(self.tracks):
             for d_idx, det in enumerate(detections):
@@ -443,15 +457,16 @@ class EnhancedTracker:
                     (track.bbox_2d[1] + track.bbox_2d[3]) / 2.0
                 ], dtype=np.float64)
                 
-                # Add velocity prediction if available
+                # Add velocity prediction if available (Kalman-predicted location)
                 if hasattr(track, 'velocity') and track.velocity is not None:
                     track_center = track_center + track.velocity[:2].astype(np.float64)
                 
                 spatial_dist = np.linalg.norm(det_center - track_center)
                 spatial_cost = min(1.0, spatial_dist / frame_diag)
 
-                # Hard gate: implausible 2D jump
-                if self.max_distance_pixels > 0 and spatial_dist > self.max_distance_pixels:
+                # Hard gate: implausible 2D jump (prevents identity drift across frame)
+                # Uses adaptive threshold based on frame size (15% of diagonal)
+                if spatial_dist > effective_max_dist:
                     cost_matrix[t_idx, d_idx] = 999.0
                     continue
                 

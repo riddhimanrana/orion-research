@@ -542,6 +542,17 @@ class FrameObserver:
             bbox_area = float(max(0, width) * max(0, height))
             if frame_area > 0:
                 area_ratio = bbox_area / frame_area
+                
+                # Per-class area filtering (e.g., person < 50%, door < 60%)
+                class_area_ratios = getattr(self.config, "class_max_area_ratios", {}) or {}
+                class_key = class_name.lower()
+                class_max_ratio = class_area_ratios.get(class_key, float(getattr(self.config, "max_bbox_area_ratio", 1.0)))
+                
+                # Reject if bbox exceeds class-specific limit
+                if area_ratio >= class_max_ratio:
+                    continue
+                    
+                # Also apply original logic for low-confidence large boxes
                 if (
                     area_ratio >= float(getattr(self.config, "max_bbox_area_ratio", 1.0))
                     and confidence < float(getattr(self.config, "max_bbox_area_lowconf_threshold", 0.0))
@@ -607,10 +618,61 @@ class FrameObserver:
         # Optional: crop-level refinement with YOLO-World on selected coarse classes
         detections = self._refine_with_yoloworld(detections, sample_index=sample_index)
         
+        # Class-agnostic NMS: suppress overlapping boxes of different classes (e.g., box + laptop + notebook)
+        if getattr(self.config, "class_agnostic_nms", False):
+            ca_nms_iou = float(getattr(self.config, "class_agnostic_nms_iou", 0.65))
+            detections = self._class_agnostic_nms(detections, iou_threshold=ca_nms_iou)
+        
         # Post-NMS deduplication: merge highly overlapping same-class detections
         detections = self._post_nms_dedup(detections, iou_threshold=0.55)
         
         return detections
+    
+    def _class_agnostic_nms(
+        self,
+        detections: List[Dict],
+        iou_threshold: float = 0.65,
+    ) -> List[Dict]:
+        """
+        Class-agnostic NMS: suppress overlapping boxes regardless of class.
+        
+        This eliminates duplicate tracks where the same object is detected as
+        multiple classes (e.g., 'box' + 'laptop' + 'notebook' for a notebook).
+        Keeps the detection with highest confidence.
+        
+        Args:
+            detections: List of detection dicts with 'bbox' and 'confidence'
+            iou_threshold: IoU threshold for suppression (0.65 = 65% overlap)
+            
+        Returns:
+            Filtered list with overlapping multi-class duplicates removed
+        """
+        if len(detections) <= 1:
+            return detections
+        
+        # Sort by confidence descending (keep highest first)
+        sorted_dets = sorted(detections, key=lambda d: d.get('confidence', 0), reverse=True)
+        keep = []
+        
+        for det in sorted_dets:
+            det_bbox = det.get('bbox', [0, 0, 0, 0])
+            
+            # Check if this detection overlaps too much with any already-kept detection
+            # (regardless of class)
+            should_keep = True
+            for kept_det in keep:
+                kept_bbox = kept_det.get('bbox', [0, 0, 0, 0])
+                
+                # Compute IoU (class-agnostic)
+                iou = self._compute_iou(det_bbox, kept_bbox)
+                if iou >= iou_threshold:
+                    should_keep = False
+                    break
+            
+            if should_keep:
+                keep.append(det)
+        
+        return keep
     
     def _crop_with_padding(
         self,
