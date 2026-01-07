@@ -872,3 +872,41 @@ def get_yoloworld_coarse_config() -> PerceptionConfig:
         enable_tracking=True,
         use_memgraph=False,
     )
+
+
+def get_yoloworld_precision_config() -> PerceptionConfig:
+    """YOLO-World precision-focused config based on Gemini validation feedback.
+    
+    Key changes from coarse config:
+    - Higher confidence threshold (0.55) to reduce hallucinations on walls/architectural surfaces
+    - Stricter aspect ratio filtering (max 8.0, threshold 0.45) to reject sliver detections
+    - Lower max bbox area ratio (0.85) to reject full-frame hallucinations
+    - Tighter NMS IoU (0.40) for class-agnostic suppression of redundant boxes
+    
+    Trade-off: May miss some objects but greatly reduces false positives.
+    """
+    det = DetectionConfig(
+        backend="yoloworld",
+        yoloworld_prompt_preset="coarse",
+        yoloworld_use_custom_classes=True,
+        yoloworld_enable_candidate_labels=True,
+        yoloworld_candidate_top_k=5,
+        # Higher confidence to reduce wall hallucinations
+        confidence_threshold=0.55,
+        # Tighter NMS to reduce redundant boxes on same object
+        iou_threshold=0.40,
+        # Reject very large boxes (often false positives)
+        max_bbox_area_ratio=0.85,
+        max_bbox_area_lowconf_threshold=0.50,
+        # Stricter aspect ratio filtering to reject sliver detections
+        max_aspect_ratio=8.0,
+        aspect_ratio_lowconf_threshold=0.45,
+    )
+    return PerceptionConfig(
+        detection=det,
+        embedding=EmbeddingConfig(batch_size=16, device="auto"),
+        description=DescriptionConfig(max_tokens=200, temperature=0.3),
+        target_fps=5.0,
+        enable_tracking=True,
+        use_memgraph=False,
+    )

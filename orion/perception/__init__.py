@@ -45,6 +45,8 @@ from .config import (
     get_fast_config,
     get_balanced_config,
     get_accurate_config,
+    get_yoloworld_coarse_config,
+    get_yoloworld_precision_config,
 )
 
 # IMPORTANT: keep module import lightweight.
