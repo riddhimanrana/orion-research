@@ -951,19 +951,35 @@ def get_yoloworld_precision_config() -> PerceptionConfig:
         # Stricter aspect ratio filtering to reject sliver detections
         max_aspect_ratio=8.0,
         aspect_ratio_lowconf_threshold=0.45,
-        # Per-class area constraints (prevent person/door from covering whole frame)
+        # Per-class area constraints (prevent oversized hallucinations)
+        # Based on Gemini audits: many false positives are oversized boxes
         class_max_area_ratios={
             "person": 0.50,    # Person max 50% of frame
             "door": 0.60,      # Door max 60% of frame
             "window": 0.50,    # Window max 50% of frame
-            "laptop": 0.30,    # Laptop max 30% of frame
-            "phone": 0.15,     # Phone max 15% of frame
-            "hand": 0.20,      # Hand max 20% of frame
+            "laptop": 0.25,    # Laptop max 25% of frame (reduced)
+            "keyboard": 0.20,  # Keyboard max 20% of frame
+            "phone": 0.10,     # Phone max 10% of frame (reduced)
+            "cell phone": 0.10, # Cell phone max 10%
+            "hand": 0.15,      # Hand max 15% of frame (reduced)
+            "remote": 0.10,    # Remote max 10%
+            "mouse": 0.08,     # Mouse max 8%
+            "book": 0.30,      # Book max 30%
+            "bottle": 0.15,    # Bottle max 15%
         },
         # Per-class confidence thresholds (higher for noisy classes per Gemini audit)
+        # These classes are often hallucinated on background features
         class_confidence_thresholds={
-            "hand": 0.60,      # Higher threshold - often hallucinated on door handles
-            "laptop": 0.60,    # Higher threshold - often hallucinated on beds/surfaces
+            "hand": 0.65,      # Higher threshold - often hallucinated on door handles
+            "laptop": 0.65,    # Higher threshold - often hallucinated on beds/surfaces
+            "keyboard": 0.70,  # Very high - often hallucinated on text/lines
+            "bed": 0.70,       # Very high - often hallucinated on flat surfaces
+            "sink": 0.75,      # Very high - rare, often misdetected
+            "remote": 0.65,    # Higher threshold - often hallucinated on small objects
+            "mouse": 0.65,     # Higher threshold - often hallucinated
+            "window": 0.65,    # Higher threshold - often hallucinated on edges
+            "door": 0.65,      # Higher threshold - often hallucinated on edges
+            "cell phone": 0.65, # Higher threshold
             "person": 0.55,    # Standard threshold
         },
         # Enable class-agnostic NMS to eliminate duplicate tracks (box + laptop + notebook)
