@@ -59,8 +59,8 @@ SCENE_TYPES = {
     },
     "office": {
         "keywords": ["desk", "office", "computer", "monitor", "work", "keyboard", "mouse", "chair", "workspace"],
-        "blacklist": ["refrigerator", "toilet", "bed", "oven", "microwave", "bathtub", "shower", "stove", "sink"],
-        "expected": ["laptop", "keyboard", "mouse", "monitor", "tv", "chair", "book", "cell phone", "clock", "bottle", "cup"],
+        "blacklist": ["refrigerator", "toilet", "bed", "oven", "bathtub", "shower", "stove"],
+        "expected": ["laptop", "keyboard", "mouse", "tv", "chair", "book", "cell phone", "clock", "bottle", "cup", "person"],
     },
     "kitchen": {
         "keywords": ["kitchen", "stove", "oven", "refrigerator", "fridge", "cook", "cooking", "cabinet", "counter", "sink"],
@@ -73,19 +73,20 @@ SCENE_TYPES = {
         "expected": ["toilet", "sink", "toothbrush", "bottle", "cup"],
     },
     "living_room": {
-        "keywords": ["living room", "couch", "sofa", "tv", "television", "coffee table", "living", "lounge"],
+        "keywords": ["living room", "couch", "sofa", "tv", "television", "coffee table", "living", "lounge", "fireplace"],
         "blacklist": ["toilet", "bathtub", "shower", "oven", "stove"],
-        "expected": ["couch", "chair", "tv", "remote", "book", "clock", "vase", "potted plant", "bottle"],
+        "expected": ["couch", "chair", "tv", "remote", "book", "clock", "vase", "potted plant", "bottle", "person"],
     },
     "hallway": {
-        "keywords": ["hallway", "corridor", "door", "entrance", "hall", "doorway", "passage"],
-        "blacklist": ["refrigerator", "toilet", "bathtub", "oven", "microwave", "bed", "couch", "dining table", "sink"],
-        "expected": ["door", "person", "clock", "vase", "potted plant"],
+        "keywords": ["hallway", "corridor", "door", "entrance", "hall", "doorway", "passage", "staircase", "stairs"],
+        "blacklist": ["refrigerator", "toilet", "bathtub", "oven", "microwave", "bed", "couch", "dining table", "sink", 
+                      "laptop", "keyboard", "mouse", "tv"],
+        "expected": ["door", "person", "clock", "vase", "potted plant", "handbag", "backpack", "umbrella"],
     },
     "dining": {
         "keywords": ["dining", "table", "eat", "meal", "dinner", "lunch", "breakfast"],
         "blacklist": ["toilet", "bathtub", "shower", "bed"],
-        "expected": ["dining table", "chair", "bottle", "cup", "bowl", "wine glass", "fork", "knife", "spoon", "vase"],
+        "expected": ["dining table", "chair", "bottle", "cup", "bowl", "wine glass", "fork", "knife", "spoon", "vase", "person"],
     },
 }
 
@@ -95,31 +96,84 @@ SUSPICIOUS_LABELS = {
         "min_scene_similarity": 0.60,  # Higher threshold than default
         "requires_vlm_verification": True,
         "vlm_check_keywords": ["refrigerator", "fridge", "appliance", "kitchen"],
-        "common_confusions": ["door", "closet", "cabinet", "wardrobe"],
+        "common_confusions": ["door", "closet", "cabinet", "wardrobe", "wall"],
+        "min_confidence": 0.35,  # Require higher detection confidence
     },
     "toilet": {
         "min_scene_similarity": 0.55,
         "requires_vlm_verification": True,
         "vlm_check_keywords": ["toilet", "bathroom"],
         "common_confusions": ["chair", "vase", "bowl"],
+        "min_confidence": 0.35,
+    },
+    "sink": {
+        "min_scene_similarity": 0.50,
+        "requires_vlm_verification": True,
+        "vlm_check_keywords": ["sink", "basin", "faucet", "tap", "kitchen", "bathroom"],
+        "common_confusions": ["door", "window", "whiteboard", "wall"],
+        "min_confidence": 0.30,
+    },
+    "microwave": {
+        "min_scene_similarity": 0.50,
+        "requires_vlm_verification": True,
+        "vlm_check_keywords": ["microwave", "oven", "kitchen", "appliance"],
+        "common_confusions": ["doorway", "door", "window", "dark opening", "tv"],
+        "min_confidence": 0.30,
+    },
+    "hair drier": {
+        "min_scene_similarity": 0.60,
+        "requires_vlm_verification": True,
+        "vlm_check_keywords": ["hair dryer", "hairdryer", "blow dryer", "bathroom"],
+        "common_confusions": ["remote", "phone", "brush", "handheld object"],
+        "min_confidence": 0.40,  # High threshold - very common false positive
+    },
+    "bird": {
+        "min_scene_similarity": 0.55,
+        "requires_vlm_verification": True,
+        "vlm_check_keywords": ["bird", "pet bird", "parrot", "cage"],
+        "common_confusions": ["plant", "decoration", "toy", "sculpture"],
+        "min_confidence": 0.35,
     },
     "airplane": {
         "min_scene_similarity": 0.70,  # Very unlikely indoors
         "requires_vlm_verification": True,
         "vlm_check_keywords": ["airplane", "plane", "aircraft", "toy plane", "model"],
         "common_confusions": ["ceiling fan", "light fixture"],
+        "min_confidence": 0.50,
     },
     "boat": {
         "min_scene_similarity": 0.70,
         "requires_vlm_verification": True,
         "vlm_check_keywords": ["boat", "ship", "vessel", "toy boat", "model"],
         "common_confusions": ["bowl", "container"],
+        "min_confidence": 0.50,
     },
     "sports ball": {
         "min_scene_similarity": 0.55,
         "requires_vlm_verification": False,
         "vlm_check_keywords": ["ball", "sports ball", "soccer", "basketball", "football"],
         "common_confusions": ["round object", "globe", "vase"],
+    },
+    "teddy bear": {
+        "min_scene_similarity": 0.55,
+        "requires_vlm_verification": True,
+        "vlm_check_keywords": ["teddy bear", "stuffed animal", "plush", "toy"],
+        "common_confusions": ["pillow", "cushion", "blanket", "clothing"],
+        "min_confidence": 0.35,
+    },
+    "kite": {
+        "min_scene_similarity": 0.65,
+        "requires_vlm_verification": True,
+        "vlm_check_keywords": ["kite", "toy kite", "decoration"],
+        "common_confusions": ["poster", "art", "flag", "fabric"],
+        "min_confidence": 0.40,
+    },
+    "tie": {
+        "min_scene_similarity": 0.50,
+        "requires_vlm_verification": False,
+        "vlm_check_keywords": ["tie", "necktie", "clothing"],
+        "common_confusions": ["strap", "belt", "cable", "cord"],
+        "min_confidence": 0.35,
     },
 }
 
@@ -553,6 +607,12 @@ class SemanticFilterV2:
         # Check blacklist first (hard rejection)
         if self._current_scene and label in self._current_scene.blacklist:
             return False, 0.0, f"blacklisted_for_{self._current_scene.scene_type}"
+        
+        # Check min_confidence for suspicious labels (hard reject if too low)
+        if label in SUSPICIOUS_LABELS:
+            min_conf = SUSPICIOUS_LABELS[label].get("min_confidence", 0.0)
+            if confidence < min_conf:
+                return False, 0.0, f"suspicious_low_confidence_{label}"
         
         # Check if expected (easy pass)
         if self._current_scene and label in self._current_scene.expected:
