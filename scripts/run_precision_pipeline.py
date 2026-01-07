@@ -53,11 +53,11 @@ def run_pipeline(video_path: str, episode_id: str, device: str = "cuda") -> dict
     config.embedding.device = device
     
     # Override tracker settings for stricter spatial gating
-    # These prevent track drift during camera pans
-    config.tracking.max_age = 15  # Faster track death when object leaves view
-    config.tracking.max_distance_pixels = 100.0  # Tighter spatial gate
-    config.tracking.match_threshold = 0.45  # Stricter matching
-    config.tracking.appearance_threshold = 0.70  # Higher Re-ID threshold
+    # These prevent track drift during camera pans (Gemini v4 recommendations)
+    config.tracking.max_age = 10  # Even faster track death when object leaves view
+    config.tracking.max_distance_pixels = 80.0  # Tighter spatial gate (was 100)
+    config.tracking.match_threshold = 0.40  # Stricter matching (was 0.45)
+    config.tracking.appearance_threshold = 0.75  # Higher Re-ID threshold (was 0.70)
     
     logger.info("\n--- Precision Configuration ---")
     logger.info(f"Detection backend: {config.detection.backend}")

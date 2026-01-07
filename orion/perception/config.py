@@ -941,16 +941,16 @@ def get_yoloworld_precision_config() -> PerceptionConfig:
         yoloworld_use_custom_classes=True,
         yoloworld_enable_candidate_labels=True,
         yoloworld_candidate_top_k=5,
-        # Higher confidence to reduce wall hallucinations
-        confidence_threshold=0.55,
+        # Higher confidence to reduce background clutter (Gemini v4: suggests 0.75-0.8)
+        confidence_threshold=0.60,
         # Tighter NMS to reduce redundant boxes on same object
         iou_threshold=0.40,
         # Reject very large boxes (often false positives)
-        max_bbox_area_ratio=0.85,
-        max_bbox_area_lowconf_threshold=0.50,
+        max_bbox_area_ratio=0.80,
+        max_bbox_area_lowconf_threshold=0.55,
         # Stricter aspect ratio filtering to reject sliver detections
-        max_aspect_ratio=8.0,
-        aspect_ratio_lowconf_threshold=0.45,
+        max_aspect_ratio=6.0,
+        aspect_ratio_lowconf_threshold=0.50,
         # Per-class area constraints (prevent oversized hallucinations)
         # Based on Gemini audits: many false positives are oversized boxes
         class_max_area_ratios={
