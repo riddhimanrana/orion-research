@@ -175,6 +175,27 @@ SUSPICIOUS_LABELS = {
         "common_confusions": ["strap", "belt", "cable", "cord"],
         "min_confidence": 0.35,
     },
+    "bed": {
+        "min_scene_similarity": 0.45,
+        "requires_vlm_verification": False,
+        "vlm_check_keywords": ["bed", "mattress", "bedding", "bedroom"],
+        "common_confusions": ["couch", "floor", "rug", "carpet", "table"],
+        "min_confidence": 0.28,  # Common false positive on floors/surfaces
+    },
+    "toaster": {
+        "min_scene_similarity": 0.55,
+        "requires_vlm_verification": True,
+        "vlm_check_keywords": ["toaster", "kitchen", "appliance"],
+        "common_confusions": ["box", "container", "storage"],
+        "min_confidence": 0.32,
+    },
+    "broccoli": {
+        "min_scene_similarity": 0.60,
+        "requires_vlm_verification": True,
+        "vlm_check_keywords": ["broccoli", "vegetable", "food", "plant"],
+        "common_confusions": ["plant", "potted plant", "decoration"],
+        "min_confidence": 0.40,
+    },
 }
 
 # Semantic aliases for better matching

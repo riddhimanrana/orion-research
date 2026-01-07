@@ -91,26 +91,26 @@ class DetectionConfig:
     """YOLO model size (n=fastest, x=most accurate)."""
 
     # Detection thresholds (shared)
-    confidence_threshold: float = 0.22
-    """Minimum detection confidence (0-1). Raised from 0.18 to reduce hallucinations."""
+    confidence_threshold: float = 0.20
+    """Minimum detection confidence (0-1). Balanced for recall vs precision."""
 
     iou_threshold: float = 0.45
     """NMS IoU threshold for overlapping boxes."""
 
     # Filtering
-    min_object_size: int = 28
-    """Minimum object size in pixels (smaller ignored). Raised from 24 to reduce noise."""
+    min_object_size: int = 24
+    """Minimum object size in pixels (smaller ignored)."""
 
-    max_bbox_area_ratio: float = 0.85
+    max_bbox_area_ratio: float = 0.90
     """If bbox area / frame area exceeds this ratio, treat as suspicious background-like box."""
 
-    max_bbox_area_lowconf_threshold: float = 0.30
+    max_bbox_area_lowconf_threshold: float = 0.25
     """Drop very large boxes when their confidence is below this threshold."""
 
-    max_aspect_ratio: float = 8.0
+    max_aspect_ratio: float = 9.0
     """If aspect ratio exceeds this (wide or tall) AND confidence is low, treat as likely false positive."""
 
-    aspect_ratio_lowconf_threshold: float = 0.25
+    aspect_ratio_lowconf_threshold: float = 0.22
     """Confidence cutoff for the aspect-ratio filter."""
 
     # Class-specific area constraints (added per Gemini audit feedback)
