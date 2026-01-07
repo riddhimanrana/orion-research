@@ -107,10 +107,12 @@ def build_scene_graphs(
         mem_id = emb_to_mem.get(emb)
         if not mem_id:
             continue
+        # Support both bbox and bbox_2d field names
+        bbox = r.get("bbox") or r.get("bbox_2d")
         item = {
             "memory_id": mem_id,
             "class": mem_to_class.get(mem_id, r.get("category", "object")),
-            "bbox": r.get("bbox"),
+            "bbox": bbox,
             "frame_width": int(r.get("frame_width", 0)),
             "frame_height": int(r.get("frame_height", 0)),
         }
