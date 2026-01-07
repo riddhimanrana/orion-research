@@ -347,11 +347,8 @@ def run_perception(
     
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    config = PerceptionConfig(
-        mode=mode,
-        enable_memgraph=False,
-        enable_cis=False,
-    )
+    # Create config - no mode parameter, just use defaults
+    config = PerceptionConfig()
     
     engine = PerceptionEngine(config=config, verbose=True)
     
