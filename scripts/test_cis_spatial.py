@@ -23,6 +23,7 @@ class MockEntity:
     state: Optional[np.ndarray] = None  # [x, y, z, vx, vy, vz]
     bbox_3d: Optional[np.ndarray] = None  # [x, y, z, w, h, d]
     observations: List = None
+    average_embedding: Optional[np.ndarray] = None  # For semantic score
     
     def __post_init__(self):
         if self.observations is None:
