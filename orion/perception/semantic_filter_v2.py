@@ -80,13 +80,13 @@ SCENE_TYPES = {
     "hallway": {
         "keywords": ["hallway", "corridor", "door", "entrance", "hall", "doorway", "passage"],
         "blacklist": ["refrigerator", "toilet", "bathtub", "oven", "microwave", "bed", "couch", "dining table", "sink", 
-                      "laptop", "keyboard", "mouse", "tv", "book", "bird", "surfboard", "knife", "remote"],
+                      "laptop", "keyboard", "mouse", "tv", "book", "bird", "surfboard", "knife", "remote", "hair drier"],
         "expected": ["door", "person", "clock", "vase", "potted plant", "handbag", "backpack", "umbrella"],
     },
     "staircase": {
         "keywords": ["staircase", "stairs", "stairway", "steps", "railing", "banister"],
         "blacklist": ["refrigerator", "toilet", "bathtub", "oven", "microwave", "bed", "couch", "dining table", "sink", 
-                      "laptop", "keyboard", "mouse", "tv", "book", "bird", "surfboard", "knife", "remote", "umbrella"],
+                      "laptop", "keyboard", "mouse", "tv", "book", "bird", "surfboard", "knife", "remote", "umbrella", "hair drier"],
         "expected": ["person", "handbag", "backpack", "cell phone"],
     },
     "dining": {
@@ -221,8 +221,8 @@ SUSPICIOUS_LABELS = {
         "min_scene_similarity": 0.45,
         "requires_vlm_verification": False,
         "vlm_check_keywords": ["book", "notebook", "reading", "pages"],
-        "common_confusions": ["curtain", "railing", "stairs", "wall", "scarf"],
-        "min_confidence": 0.32,  # Increased - often confused with walls/stairs/scarves
+        "common_confusions": ["curtain", "railing", "stairs", "wall", "scarf", "blanket", "floor"],
+        "min_confidence": 0.40,  # Significantly increased - 226 detections mostly false positives
     },
     "surfboard": {
         "min_scene_similarity": 0.70,  # Very unlikely indoors
@@ -294,6 +294,35 @@ SUSPICIOUS_LABELS = {
         "vlm_check_keywords": ["handbag", "purse", "bag"],
         "common_confusions": ["backpack", "bag", "suitcase"],
         "min_confidence": 0.32,
+    },
+    # NEW: Additional labels from Eval 007 feedback - major false positives
+    "mouse": {
+        "min_scene_similarity": 0.55,
+        "requires_vlm_verification": True,
+        "vlm_check_keywords": ["computer mouse", "mouse", "input device", "desk"],
+        "common_confusions": ["remote", "small object", "phone", "decoration"],
+        "min_confidence": 0.40,  # Very common hallucination
+    },
+    "keyboard": {
+        "min_scene_similarity": 0.55,
+        "requires_vlm_verification": True,
+        "vlm_check_keywords": ["keyboard", "computer keyboard", "typing", "desk"],
+        "common_confusions": ["wall pattern", "tiles", "rug", "grate", "mat"],
+        "min_confidence": 0.40,  # Often confused with patterns
+    },
+    "laptop": {
+        "min_scene_similarity": 0.50,
+        "requires_vlm_verification": False,
+        "vlm_check_keywords": ["laptop", "computer", "notebook", "macbook"],
+        "common_confusions": ["tv", "monitor", "book", "tablet", "frame"],
+        "min_confidence": 0.38,  # Often confused with other screens
+    },
+    "cell phone": {
+        "min_scene_similarity": 0.45,
+        "requires_vlm_verification": False,
+        "vlm_check_keywords": ["phone", "cell phone", "smartphone", "mobile"],
+        "common_confusions": ["remote", "small object", "wallet", "decoration"],
+        "min_confidence": 0.35,
     },
 }
 
