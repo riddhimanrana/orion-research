@@ -99,11 +99,11 @@ SCENE_TYPES = {
 # Labels that are commonly confused/false positives
 SUSPICIOUS_LABELS = {
     "refrigerator": {
-        "min_scene_similarity": 0.65,  # Higher threshold - often confused with doors
+        "min_scene_similarity": 0.70,  # Increased from 0.65 - still appearing as FP
         "requires_vlm_verification": True,
         "vlm_check_keywords": ["refrigerator", "fridge", "appliance", "kitchen"],
-        "common_confusions": ["door", "closet", "cabinet", "wardrobe", "wall"],
-        "min_confidence": 0.40,  # Increased - very common confusion with doors
+        "common_confusions": ["door", "closet", "cabinet", "wardrobe", "wall", "bookshelf"],
+        "min_confidence": 0.45,  # Increased from 0.40 - false positive in Eval 009
     },
     "toilet": {
         "min_scene_similarity": 0.55,
@@ -113,11 +113,11 @@ SUSPICIOUS_LABELS = {
         "min_confidence": 0.35,
     },
     "sink": {
-        "min_scene_similarity": 0.50,
+        "min_scene_similarity": 0.55,  # Increased from 0.50
         "requires_vlm_verification": True,
         "vlm_check_keywords": ["sink", "basin", "faucet", "tap", "kitchen", "bathroom"],
-        "common_confusions": ["door", "window", "whiteboard", "wall"],
-        "min_confidence": 0.30,
+        "common_confusions": ["door", "window", "whiteboard", "wall", "tub", "bathtub"],
+        "min_confidence": 0.35,  # Increased from 0.30 - confused with tub in Eval 009
     },
     "microwave": {
         "min_scene_similarity": 0.50,
@@ -127,11 +127,11 @@ SUSPICIOUS_LABELS = {
         "min_confidence": 0.30,
     },
     "hair drier": {
-        "min_scene_similarity": 0.60,
+        "min_scene_similarity": 0.70,  # Increased from 0.60
         "requires_vlm_verification": True,
         "vlm_check_keywords": ["hair dryer", "hairdryer", "blow dryer", "bathroom"],
-        "common_confusions": ["remote", "phone", "brush", "handheld object"],
-        "min_confidence": 0.40,  # High threshold - very common false positive
+        "common_confusions": ["remote", "phone", "brush", "handheld object", "door handle"],
+        "min_confidence": 0.50,  # Increased from 0.40 - still showing in Eval 009
     },
     "bird": {
         "min_scene_similarity": 0.65,
@@ -275,11 +275,11 @@ SUSPICIOUS_LABELS = {
         "min_confidence": 0.35,
     },
     "suitcase": {
-        "min_scene_similarity": 0.45,
-        "requires_vlm_verification": False,
+        "min_scene_similarity": 0.55,  # Increased from 0.45
+        "requires_vlm_verification": True,  # Changed to True
         "vlm_check_keywords": ["suitcase", "luggage", "travel bag"],
-        "common_confusions": ["bag", "backpack", "box", "container"],
-        "min_confidence": 0.32,  # Often confused with bags
+        "common_confusions": ["bag", "backpack", "box", "container", "basket"],
+        "min_confidence": 0.38,  # Increased from 0.32 - false positive in Eval 009
     },
     "toothbrush": {
         "min_scene_similarity": 0.55,
@@ -289,11 +289,11 @@ SUSPICIOUS_LABELS = {
         "min_confidence": 0.45,  # Often a false positive
     },
     "handbag": {
-        "min_scene_similarity": 0.45,
-        "requires_vlm_verification": False,
+        "min_scene_similarity": 0.50,  # Increased from 0.45
+        "requires_vlm_verification": True,  # Changed to True
         "vlm_check_keywords": ["handbag", "purse", "bag"],
-        "common_confusions": ["backpack", "bag", "suitcase"],
-        "min_confidence": 0.32,
+        "common_confusions": ["backpack", "bag", "suitcase", "pillow", "fabric"],
+        "min_confidence": 0.38,  # Increased from 0.32 - false positive in Eval 009
     },
     # NEW: Additional labels from Eval 007 feedback - major false positives
     "mouse": {
@@ -323,6 +323,14 @@ SUSPICIOUS_LABELS = {
         "vlm_check_keywords": ["phone", "cell phone", "smartphone", "mobile"],
         "common_confusions": ["remote", "small object", "wallet", "decoration"],
         "min_confidence": 0.35,
+    },
+    # NEW: Eval 009 (video-based) false positives
+    "tv": {
+        "min_scene_similarity": 0.50,
+        "requires_vlm_verification": True,
+        "vlm_check_keywords": ["tv", "television", "screen", "display", "monitor"],
+        "common_confusions": ["window", "mirror", "picture frame", "dark opening", "doorway"],
+        "min_confidence": 0.38,  # Often confused with windows/dark areas
     },
 }
 
