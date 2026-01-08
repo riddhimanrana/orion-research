@@ -275,17 +275,20 @@ def main():
     tracks_path = episode_dir / "tracks.jsonl"
     if not tracks_path.exists():
         print(f"No Orion results found for episode '{args.episode}'")
-        print("Running Orion detection first...")
+        print("Running full Orion pipeline with semantic filtering...")
         
-        from orion.cli.run_tracks import process_video_to_tracks
-        process_video_to_tracks(
-            video_path=str(video_path),
-            episode_id=args.episode,
-            target_fps=5.0,
-            detector_backend="yoloworld",
-            device="cuda",
-            enable_3d=False,
-        )
+        # Use run_showcase which includes semantic filtering
+        import subprocess
+        cmd = [
+            sys.executable, "-m", "orion.cli.run_showcase",
+            "--episode", args.episode,
+            "--video", str(video_path),
+            "--skip-overlay",  # Skip overlay for speed
+        ]
+        result = subprocess.run(cmd, cwd=Path(__file__).parent.parent)
+        if result.returncode != 0:
+            print(f"ERROR: Orion pipeline failed with code {result.returncode}")
+            sys.exit(1)
     
     # Load Orion results
     print(f"\nLoading Orion results from: {episode_dir}")
