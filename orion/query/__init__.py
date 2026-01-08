@@ -1,15 +1,35 @@
 """
-Visual Query System
-===================
+Visual Query System (Stage 5+6)
+================================
 
-Query-driven semantic enrichment for processed videos.
-Uses Memgraph for graph-based queries.
+Natural language queries over video memory.
+
+Stage 5: Retrieval (Cypher → Evidence)
+Stage 6: Reasoning (LLM → Natural Language)
+
+Components:
+- OrionRAG: Main query interface
+- ReasoningModel: Ollama-based LLM reasoning
+- QueryResult: Structured query response
 
 Author: Orion Research Team
-Date: November 2025
+Date: January 2026
 """
 
-# Query module placeholder - will use Memgraph backend for queries
-# See orion.graph.memgraph_backend for graph queries
+from orion.query.rag_v2 import OrionRAG, QueryResult
 
-__all__ = []
+try:
+    from orion.query.reasoning import ReasoningModel, ReasoningConfig
+    REASONING_AVAILABLE = True
+except ImportError:
+    ReasoningModel = None
+    ReasoningConfig = None
+    REASONING_AVAILABLE = False
+
+__all__ = [
+    "OrionRAG",
+    "QueryResult",
+    "ReasoningModel",
+    "ReasoningConfig",
+    "REASONING_AVAILABLE",
+]

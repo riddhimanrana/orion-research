@@ -149,7 +149,7 @@ Orion v2 is a memory-centric video understanding system that tracks objects pers
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
 │  STAGE 6: LLM REASONING (Ollama)                                                        │
 │  ┌────────────────────┐    ┌────────────────────┐    ┌────────────────────┐            │
-│  │  Query Parser      │───▶│  Graph Retrieval   │───▶│  LLM (Qwen2.5-20B) │            │
+│  │  Query Parser      │───▶│  Graph Retrieval   │───▶│  LLM (qwen3-vl:30B)│            │
 │  │  (natural lang)    │    │  (Cypher queries)  │    │  via Ollama        │            │
 │  └────────────────────┘    └────────────────────┘    └────────────────────┘            │
 │                                                                │                        │
