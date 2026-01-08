@@ -74,7 +74,7 @@ SCENE_TYPES = {
     },
     "living_room": {
         "keywords": ["living room", "couch", "sofa", "tv", "television", "coffee table", "living", "lounge", "fireplace"],
-        "blacklist": ["toilet", "bathtub", "shower", "oven", "stove"],
+        "blacklist": ["toilet", "bathtub", "shower", "oven", "stove", "microwave", "refrigerator", "sink"],  # Expanded - oven confused with fireplace
         "expected": ["couch", "chair", "tv", "remote", "book", "clock", "vase", "potted plant", "bottle", "person"],
     },
     "hallway": {
@@ -218,11 +218,11 @@ SUSPICIOUS_LABELS = {
         "min_confidence": 0.30,  # Often confused with curtains
     },
     "book": {
-        "min_scene_similarity": 0.40,
+        "min_scene_similarity": 0.45,
         "requires_vlm_verification": False,
         "vlm_check_keywords": ["book", "notebook", "reading", "pages"],
-        "common_confusions": ["curtain", "railing", "stairs", "wall"],
-        "min_confidence": 0.28,  # Often confused with railings/stairs
+        "common_confusions": ["curtain", "railing", "stairs", "wall", "scarf"],
+        "min_confidence": 0.32,  # Increased - often confused with walls/stairs/scarves
     },
     "surfboard": {
         "min_scene_similarity": 0.70,  # Very unlikely indoors
@@ -236,14 +236,14 @@ SUSPICIOUS_LABELS = {
         "requires_vlm_verification": False,
         "vlm_check_keywords": ["knife", "blade", "kitchen", "utensil"],
         "common_confusions": ["pen", "stylus", "remote"],
-        "min_confidence": 0.35,
+        "min_confidence": 0.38,  # Increased
     },
     "umbrella": {
         "min_scene_similarity": 0.50,
         "requires_vlm_verification": False,
         "vlm_check_keywords": ["umbrella", "parasol"],
         "common_confusions": ["rug", "mat", "carpet", "lamp"],
-        "min_confidence": 0.35,
+        "min_confidence": 0.38,  # Increased
     },
     "cat": {
         "min_scene_similarity": 0.55,
@@ -251,6 +251,49 @@ SUSPICIOUS_LABELS = {
         "vlm_check_keywords": ["cat", "kitten", "pet", "feline"],
         "common_confusions": ["pillow", "blanket", "clothing", "shadow"],
         "min_confidence": 0.40,
+    },
+    # NEW: Additional labels from Eval 006 feedback
+    "oven": {
+        "min_scene_similarity": 0.55,
+        "requires_vlm_verification": True,
+        "vlm_check_keywords": ["oven", "stove", "range", "kitchen", "appliance"],
+        "common_confusions": ["fireplace", "door", "opening", "cabinet"],
+        "min_confidence": 0.38,  # Often confused with fireplaces
+    },
+    "frisbee": {
+        "min_scene_similarity": 0.70,  # Very unlikely indoors
+        "requires_vlm_verification": True,
+        "vlm_check_keywords": ["frisbee", "disc", "toy"],
+        "common_confusions": ["clock", "plate", "display", "artwork"],
+        "min_confidence": 0.50,
+    },
+    "clock": {
+        "min_scene_similarity": 0.45,
+        "requires_vlm_verification": False,
+        "vlm_check_keywords": ["clock", "watch", "time"],
+        "common_confusions": ["display", "artwork", "plate", "mirror"],
+        "min_confidence": 0.35,
+    },
+    "suitcase": {
+        "min_scene_similarity": 0.45,
+        "requires_vlm_verification": False,
+        "vlm_check_keywords": ["suitcase", "luggage", "travel bag"],
+        "common_confusions": ["bag", "backpack", "box", "container"],
+        "min_confidence": 0.32,  # Often confused with bags
+    },
+    "toothbrush": {
+        "min_scene_similarity": 0.55,
+        "requires_vlm_verification": True,
+        "vlm_check_keywords": ["toothbrush", "bathroom", "hygiene"],
+        "common_confusions": ["pen", "stylus", "wall", "stick"],
+        "min_confidence": 0.45,  # Often a false positive
+    },
+    "handbag": {
+        "min_scene_similarity": 0.45,
+        "requires_vlm_verification": False,
+        "vlm_check_keywords": ["handbag", "purse", "bag"],
+        "common_confusions": ["backpack", "bag", "suitcase"],
+        "min_confidence": 0.32,
     },
 }
 
