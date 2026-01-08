@@ -283,7 +283,7 @@ def main():
             sys.executable, "-m", "orion.cli.run_showcase",
             "--episode", args.episode,
             "--video", str(video_path),
-            "--skip-overlay",  # Skip overlay for speed
+            "--no-overlay",  # Skip overlay for speed
         ]
         result = subprocess.run(cmd, cwd=Path(__file__).parent.parent)
         if result.returncode != 0:
