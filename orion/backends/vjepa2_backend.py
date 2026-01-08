@@ -128,6 +128,78 @@ class VJepa2Embedder:
             embedding = torch.nn.functional.normalize(embedding, p=2, dim=-1)
         
         return embedding.cpu().float()
+
+    def embed_batch(
+        self, 
+        images: list[Union[np.ndarray, torch.Tensor]],
+        batch_size: int = 8
+    ) -> list[torch.Tensor]:
+        """
+        Batch embed multiple images for Re-ID efficiency.
+        
+        Process images in batches to maximize GPU utilization.
+        
+        Args:
+            images: List of images as numpy arrays (H, W, C) or tensors (C, H, W)
+            batch_size: Number of images to process at once
+            
+        Returns:
+            List of embedding tensors, each of shape (1, embedding_dim)
+        """
+        self._ensure_loaded()
+        
+        if not images:
+            return []
+        
+        # Process in batches
+        all_embeddings = []
+        
+        for batch_start in range(0, len(images), batch_size):
+            batch_images = images[batch_start:batch_start + batch_size]
+            
+            # Convert all images to tensors
+            batch_tensors = []
+            for image in batch_images:
+                if isinstance(image, np.ndarray):
+                    if image.ndim == 3 and image.shape[-1] in [1, 3, 4]:
+                        image = np.transpose(image, (2, 0, 1))
+                    image = torch.from_numpy(image).float()
+                
+                # Add time dimension: 1 x C x H x W
+                if image.ndim == 3:
+                    image = image.unsqueeze(0)
+                batch_tensors.append(image)
+            
+            # Process each image through the processor individually
+            # (V-JEPA2 processor may have inconsistent batch handling)
+            processed_batch = []
+            for img_tensor in batch_tensors:
+                inputs = self._processor(img_tensor, return_tensors="pt")
+                # Repeat for single-image embedding
+                if 'pixel_values_videos' in inputs:
+                    inputs['pixel_values_videos'] = inputs['pixel_values_videos'].repeat(1, 16, 1, 1, 1)
+                processed_batch.append(inputs['pixel_values_videos'])
+            
+            # Stack into batch: [batch_size, 16, C, H, W]
+            try:
+                batch_input = torch.cat(processed_batch, dim=0).to(self._model.device)
+            except RuntimeError:
+                # Fallback to sequential if shapes don't match (different image sizes)
+                logger.debug("Batch shapes mismatched, falling back to sequential")
+                for img in batch_images:
+                    all_embeddings.append(self.embed_single_image(img))
+                continue
+            
+            with torch.no_grad():
+                features = self._model.get_vision_features(pixel_values_videos=batch_input)
+                embeddings = features.mean(dim=1)  # Pool across patches
+                embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=-1)
+            
+            # Split back into individual embeddings
+            for i in range(embeddings.shape[0]):
+                all_embeddings.append(embeddings[i:i+1].cpu().float())
+        
+        return all_embeddings
     
     def embed_video_sequence(
         self, 

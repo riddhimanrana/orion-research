@@ -134,14 +134,20 @@ class OrionRAG:
         question: str,
         use_llm: Optional[bool] = None,
         episode_id: Optional[str] = None,
+        use_neural_cypher: bool = True,
     ) -> QueryResult:
         """
         Answer a natural language question about the video.
+        
+        Neural Cypher RAG: Uses the LLM to dynamically generate Cypher queries
+        instead of hardcoded string matching. Falls back to template queries
+        if LLM is disabled or generation fails.
         
         Args:
             question: Natural language question
             use_llm: Force LLM synthesis on/off (default: auto based on initialization)
             episode_id: Filter by episode (for multi-episode support)
+            use_neural_cypher: Use LLM-generated Cypher (default: True)
             
         Returns:
             QueryResult with answer and evidence
@@ -151,6 +157,26 @@ class OrionRAG:
         # Determine if we should use LLM
         should_use_llm = use_llm if use_llm is not None else self.llm_enabled
         
+        # NEURAL CYPHER RAG: Let LLM generate the query if enabled
+        if use_neural_cypher and should_use_llm and self.reasoning_model:
+            result = self._query_neural_cypher(question)
+            if result.evidence:  # Neural cypher succeeded
+                # Synthesize natural language answer from evidence
+                try:
+                    llm_answer = self.reasoning_model.synthesize_answer(
+                        question=question,
+                        evidence=result.evidence,
+                    )
+                    result.answer = llm_answer
+                    result.llm_used = True
+                except Exception as e:
+                    logger.warning(f"LLM synthesis failed: {e}")
+                result.latency_ms = (time.time() - start_time) * 1000
+                return result
+            # If neural cypher returned no evidence, fall through to template queries
+            logger.debug("Neural Cypher returned no results, trying template queries")
+        
+        # FALLBACK: Template-based routing for specific query patterns
         question_lower = question.lower()
         
         # Route to appropriate retrieval handler
@@ -190,6 +216,93 @@ class OrionRAG:
         
         result.latency_ms = (time.time() - start_time) * 1000
         return result
+    
+    def _query_neural_cypher(self, question: str) -> QueryResult:
+        """
+        Generate and execute a Cypher query using the LLM.
+        
+        This is the core of Neural Cypher RAG - the LLM translates
+        natural language directly into graph queries.
+        """
+        # Generate Cypher with enhanced schema hint
+        schema_hint = """
+Schema (Memgraph):
+- (Entity {id: INT, class_name: STRING, first_seen: FLOAT, last_seen: FLOAT, embedding: LIST})
+  Objects detected in video (person, laptop, book, chair, etc.)
+
+- (Frame {idx: INT, timestamp: FLOAT})
+  Video frames with timestamps in seconds
+
+- (Entity)-[OBSERVED_IN {bbox_x1, bbox_y1, bbox_x2, bbox_y2, confidence}]->(Frame)
+  When/where an entity was seen
+
+- (Entity)-[NEAR {confidence: FLOAT, frame_idx: INT}]->(Entity)
+  Two objects were spatially close in a frame
+
+- (Entity)-[HELD_BY {confidence: FLOAT, frame_idx: INT}]->(Entity)
+  Object was held/interacted with by another entity (usually person)
+
+Common Patterns:
+- Find all objects: MATCH (e:Entity) RETURN DISTINCT e.class_name
+- Object timeline: MATCH (e:Entity)-[:OBSERVED_IN]->(f:Frame) RETURN e.class_name, f.timestamp ORDER BY f.timestamp
+- Spatial relations: MATCH (e1)-[r:NEAR]-(e2) RETURN e1.class_name, e2.class_name, r.confidence
+- Interactions: MATCH (obj)-[r:HELD_BY]->(agent) RETURN obj.class_name, agent.class_name
+"""
+        
+        try:
+            cypher = self.reasoning_model.generate_cypher(question, schema_hint)
+            
+            if not cypher or len(cypher) < 10:
+                logger.warning(f"Invalid Cypher generated: {cypher}")
+                return QueryResult(
+                    query_type="neural_cypher",
+                    question=question,
+                    answer="",
+                    evidence=[],
+                    confidence=0.0,
+                    cypher_query=cypher,
+                )
+            
+            # Execute the generated query
+            cursor = self.backend.connection.cursor()
+            cursor.execute(cypher)
+            results = cursor.fetchall()
+            
+            # Convert results to evidence dicts
+            # Get column names from cursor description if available
+            evidence = []
+            if results:
+                # Try to get column names
+                try:
+                    col_names = [desc[0] for desc in cursor.description] if cursor.description else None
+                except:
+                    col_names = None
+                
+                for row in results[:20]:  # Limit to 20 results
+                    if col_names:
+                        evidence.append(dict(zip(col_names, row)))
+                    else:
+                        # Fallback: use positional names
+                        evidence.append({f"col_{i}": v for i, v in enumerate(row)})
+            
+            return QueryResult(
+                query_type="neural_cypher",
+                question=question,
+                answer="",  # Will be filled by LLM synthesis
+                evidence=evidence,
+                confidence=1.0 if evidence else 0.0,
+                cypher_query=cypher,
+            )
+            
+        except Exception as e:
+            logger.warning(f"Neural Cypher execution failed: {e}")
+            return QueryResult(
+                query_type="neural_cypher",
+                question=question,
+                answer="",
+                evidence=[],
+                confidence=0.0,
+            )
     
     def stream_query(
         self,

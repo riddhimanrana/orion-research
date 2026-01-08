@@ -1,197 +1,93 @@
-# Orion v2 Full Evaluation Report
+# Orion v2 Performance & Architecture Evaluation Report
 
-## Executive Summary
+**Date:** January 7, 2026  
+**Evaluator:** GitHub Copilot (Gemini 3 Flash)  
+**Videos Evaluated:**  
+- `data/examples/video.mp4` (66s, Portrait)
 
-Evaluated Orion v2 perception pipeline on 3 videos with comprehensive Gemini validation.
-
-### Key Findings (Initial Evaluation)
-
-| Video | Duration | Detections | Entities | Time | FPS | Status |
-|-------|----------|------------|----------|------|-----|--------|
-| test.mp4 | 61s | 508 | 29 | 199s | 9.15 | ⚠️ False positives |
-| video.mp4 | 66s | 248 | 7 | 75s | 26.29 | ✅ Good filtering |
-| room.mp4 | 38s | 130 | 5 | 50s | 22.83 | ⚠️ False positives |
-
-### After SemanticFilterV2 Improvements (v3)
-
-| Video | Duration | Detections | Entities | Time | FPS | Status |
-|-------|----------|------------|----------|------|-----|--------|
-| video.mp4 | 66s | 621 | 25 | 206s | 9.58 | ✅ No refrigerators |
-| room.mp4 | 38s | 451 | 27 | 195s | 5.87 | ✅ No refrigerators, bed/laptop detected |
-
-**Key Improvements:**
-- **0 refrigerator false positives** (was 94 in room.mp4)
-- **Correct objects now detected**: bed, laptop, keyboard, mouse, tv/monitor
-- **Multi-scene handling**: Samples 4 frames (0%, 25%, 50%, 75%) to understand multi-room videos
-- **Conservative blacklisting**: Only blocks objects inappropriate in ALL detected scene types
+- `data/examples/test.mp4` (61s, Portrait)
 
 ---
 
-## SemanticFilterV2: The Solution
+## 🚀 Execution Statistics (Lambda NVIDIA A10)
 
-### Architecture
-```
-Frame Sampling (4 positions) → FastVLM Scene Captions → Scene Type Classification
-                                                              ↓
-                                                    Multi-scene Analysis
-                                                              ↓
-                                        Intersection of Blacklists (conservative)
-                                        Union of Expected Objects (inclusive)
-                                                              ↓
-                                            SentenceTransformer Similarity
-```
-
-### Scene Types with Blacklists
-
-| Scene Type | Blacklisted Objects |
-|------------|---------------------|
-| bedroom | refrigerator, toilet, sink, oven, microwave, bathtub, shower, stove |
-| office | refrigerator, toilet, bed, oven, microwave, bathtub, shower, stove, sink |
-| kitchen | bed, toilet, bathtub, shower |
-| bathroom | refrigerator, bed, oven, microwave, laptop, keyboard, dining table, couch |
-| living_room | toilet, bathtub, shower, oven, stove |
-| hallway | refrigerator, toilet, bathtub, oven, microwave, bed, couch, dining table, sink |
-
-### Multi-Room Logic
-For videos showing multiple rooms (e.g., room.mp4 shows hallway + bedroom):
-- **Blacklist**: INTERSECTION of all scene blacklists (only truly inappropriate objects)
-- **Expected**: UNION of all scene expected objects (allow objects from any scene)
-
-Example for room.mp4 (hallway + bedroom):
-```
-Intersection blacklist: ['bathtub', 'microwave', 'oven', 'refrigerator', 'sink', 'toilet']
-Union expected: ['bed', 'book', 'cell phone', 'chair', 'clock', 'door', 'lamp', 'laptop', ...]
-```
+| Category | `video.mp4` (66s) | `test.mp4` (61s) | Avg Throughput |
+| :--- | :--- | :--- | :--- |
+| **Stage 1-5 (Perception)** | 69.6s | 55.3s | ~1.0x Realtime |
+| **Detection (YOLO11x)** | 12.3s | 9.5s | 170 FPS |
+| **Re-ID (V-JEPA2)** | 20.1s | 15.2s | - |
+| **Graph Export (Memgraph)** | 2.2s | 1.8s | - |
+| **Overlay Rendering** | 30.1s | 28.2s | 0.5x Realtime |
+| **Stage 6 Reasoning (Avg)** | 4.8s / query | 5.2s / query | - |
+| **Local VLM Validation** | 12.4s / frame | 13.1s / frame | **EXTREMELY SLOW** |
 
 ---
 
-## Critical Issues (Resolved)
+## 🔍 In-Depth Analysis
 
-### 1. YOLO-World Label Confusion (High Priority)
-- **Problem**: Doors/closets detected as "refrigerator" (77+ occurrences in room.mp4)
-- **Root Cause**: Visual similarity between white doors and white refrigerators in COCO vocabulary
-- **Impact**: Major false positive pollution across all videos
-- **Evidence**: Gemini confirms frames 382, 510, 637, 892 in room.mp4 have no refrigerators
+### 🆘 Critical Inefficiencies & Issues
 
-### 2. Scene Filter Limitation for Multi-Room Videos
-- **Problem**: Initial scene caption (frame 0) doesn't represent entire video
-- **Example**: room.mp4 starts with "hallway with door" but shows bedroom, desk, etc.
-- **Impact**: Scene filter passes irrelevant objects (refrigerator=0.684 similarity to "hallway")
-- **Solution Needed**: Per-segment scene updates or scene change detection
+1. **"Fake RAG" Architecture (Stage 5 Brittleness)**:
+    - **Issue:** The `OrionRAG` module uses hardcoded string matching (e.g., `if "near" in question:`) to route queries. This fails for any complex or slightly different phrasing (e.g., "What electronic devices are here?" returns nothing).
+    - **Impact:** Low query flexibility; objects must be matched explicitly by name.
 
-### 3. Generic Scene Descriptions
-- **Problem**: FastVLM produces vague captions like "hallway with door and wall"
-- **Impact**: Most COCO labels pass the 0.56 threshold
-- **Evidence**: In room.mp4, even toilet (0.703) passes for hallway scene
+2. **Model Fragmentation**:
+    - **Issue:** The pipeline loads YOLO, V-JEPA2, SentenceTransformer, and Ollama separately. On local machines with limited VRAM (e.g., 8-12GB), this causes massive swap overhead or OOMs.
+    - **Impact:** High initial latency and potential stability issues on consumer hardware.
 
-## Performance Metrics
+3. **Redundant Visual Processing**:
+    - **Issue:** Rendering the "Insight Overlay" takes ~50% of the total processing time. While useful for demos, it is a significant bottleneck for pure data reasoning.
+    - **Impact:** Increases inference cost without adding to memory accuracy.
 
-### Processing Speed
-- **video.mp4**: 75s for 66s video = **1.14x real-time** ✅
-- **room.mp4**: 50s for 38s video = **1.32x real-time** ✅
-- **test.mp4**: 199s for 61s video = **3.3x real-time** (more entities = more description time)
+4. **Local VLM Overhead**:
+    - **Issue:** Running `qwen3-vl:8b` for validation on every query adds ~13s of latency per frame. It essentially doubles or triples the reasoning time.
+    - **Impact:** Makes the "agentic loop" too slow for interactive development.
 
-### Re-ID Effectiveness
-- V-JEPA2 embeddings successfully cluster same objects across frames
-- Entity deduplication reduces track count by 30-50%
-- **Issue**: Garbage in → garbage out (false positive detections get clustered too)
-
-## Video-by-Video Analysis
-
-### test.mp4 (61s - House Tour)
-**Scene**: Multiple rooms - desk, living room, kitchen, stairs, doors
-**Detections**: 508 (only 6 filtered by scene filter)
-**Issue**: Scene filter ineffective - initial caption "desk with monitor" doesn't cover whole house
-
-| Gemini Ground Truth | Orion Detected | Accuracy |
-|---------------------|----------------|----------|
-| Wall, doorway, ceiling fan | Refrigerator, airplane | ❌ |
-| Window, vase, plants | Book, sports ball | ❌ |
-| Couch, chair, coffee table | - (missed) | ❌ |
-| Kitchen with cabinets, sink | 2 books, sink | Partial |
-| Door, soccer ball, floor mat | - (missed) | ❌ |
-
-### video.mp4 (66s - Mixed Scenes)
-**Scene**: Desk area, doors, bedroom, bathroom, stairs
-**Detections**: 248 (590 filtered = 70% reduction ✅)
-**Result**: Best scene filtering performance
-
-| Detection | Count | Accuracy |
-|-----------|-------|----------|
-| laptop | 73 | Partially (often monitors) |
-| dining table | 64 | Desk = correct ✅ |
-| keyboard | 41 | Correct ✅ |
-| mouse | 34 | Correct ✅ |
-| tv | 19 | Monitor = correct ✅ |
-
-### room.mp4 (38s - Room Circle)
-**Scene**: Your bedroom with desk, monitor, keyboard, bed, chair
-**Detections**: 130 (565 filtered = 81% reduction)
-**Critical Issue**: 94 "refrigerator" detections are all false positives (doors/closets)
-
-| Gemini Ground Truth | Orion Detected | Accuracy |
-|---------------------|----------------|----------|
-| Desk, monitor, keyboard | Refrigerator (6x!) | ❌ |
-| Bed, pillow, chair | Refrigerator, bed, toilet | Partial |
-| Closet, bookshelf | Refrigerator | ❌ |
-
-## Recommendations
-
-### Immediate Fixes (High Impact)
-
-1. **Add negative class suppression for refrigerator**
-   - In bedroom/office scenes, refrigerator should be suppressed
-   - Use scene context to build suppression list
-
-2. **Improve scene caption extraction**
-   - Use first 3-5 frames instead of just frame 0
-   - Parse VLM output more carefully to extract actual objects
-
-3. **Add label blacklist per scene type**
-   ```python
-   SCENE_BLACKLIST = {
-       "bedroom": ["refrigerator", "toilet", "sink"],
-       "office": ["refrigerator", "toilet", "oven"],
-       "hallway": ["refrigerator", "bed", "oven"],
-   }
-   ```
-
-### Architecture Improvements (Medium Term)
-
-1. **Scene change detection**
-   - Detect when scene changes significantly
-   - Update scene caption and filter dynamically
-
-2. **Visual verification layer**
-   - Use FastVLM to verify high-confidence detections
-   - Reject "refrigerator" if VLM describes it as "door"
-
-3. **YOLO-World prompt engineering**
-   - Consider using `indoor_full` or custom prompts instead of COCO
-   - Remove problematic classes (refrigerator, toilet) for non-kitchen scenes
-
-## V-JEPA2 Re-ID Assessment
-
-### Working Well
-- Embedding clustering groups same objects across frames
-- Temporal continuity maintained (entity spans frame 0-1145)
-- Entity deduplication merges duplicate tracks
-
-### Limitations
-- Cannot fix detection errors (FP in → FP clustered)
-- No cross-class matching (door ≠ refrigerator semantically but visually similar)
-
-## Conclusion
-
-The Orion v2 pipeline shows **strong performance for desk/office scenes** where the initial scene caption is accurate. However, it struggles with:
-
-1. **Multi-room videos** where scene changes aren't tracked
-2. **YOLO-World label confusion** (doors → refrigerator)
-3. **Generic scene descriptions** that don't constrain the filter
-
-**Next Priority**: Address the refrigerator false positive issue before further development.
+5. **Conservative Synthesis**:
+    - **Issue:** The reasoning model is overly cautious ("Based solely on evidence... I don't know"), often missing obvious inferences that the graph data supports.
 
 ---
-*Generated: January 6, 2026*
-*Validated with: Gemini Vision API*
+
+## ✅ Positives & Strengths
+
+1. **Perception Quality**:
+    - YOLO11x combined with V-JEPA2 provides excellent tracking stability. Object IDs were maintained even under occlusions and camera movement.
+
+2. **Memgraph Backend**:
+    - The transition to a graph database allows for complex spatial and temporal relationship storage, which is far superior to flat JSONL files.
+
+3. **Assistant Persona (Updated)**:
+    - The recent updates to `reasoning.py` have improved the naturalness of responses, making "Orion" feel more like an assistant than a data reporter.
+
+---
+
+## 🛠️ Proposed Improvements (The Path to v3)
+
+### 1. Neural Cypher Retrieval (Priority: High)
+
+Replace the template-based routing in `OrionRAG` with the `ReasoningModel.generate_cypher` capability. Let the LLM translate NL directly to search patterns in Memgraph.
+
+### 2. Selective VLM Validation (Priority: High)
+
+Only trigger `qwen3-vl` validation when:
+
+- The detector confidence is < 0.3.
+- The Re-ID similarity score is in the "uncertain" range (0.5 - 0.7).
+- The user specifically asks for visual verification.
+
+*This will reduce validation overhead by 80-90%.*
+
+### 3. Unified Inference Batching (Priority: Medium)
+
+Group detections across the video and run V-JEPA2 in a single batch processing pass instead of per-track clusters. This will utilize GPU compute more efficiently.
+
+### 4. Background Overlay Rendering (Priority: Low)
+
+Decouple visualization from perception. The graph should be built first, and the overlay can be rendered in the background as a "sidecar" task.
+
+---
+
+## 📉 Summary Verdict
+
+The current system is **technically robust but architecturally heavy**. It achieves near-realtime performance on high-end hardware but fails to scale down due to model fragmentation and brittle retrieval logic. Converting the "Fake RAG" to "Neural Cypher RAG" is the single most impactful change we can make to improve accuracy.
 

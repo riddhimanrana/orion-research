@@ -197,14 +197,18 @@ def compute_track_embeddings(
     video_path: Path,
     tracks: List[Dict[str, Any]],
     max_crops_per_track: int = 5,
+    batch_size: int = 8,
 ) -> Dict[int, np.ndarray]:
     """
     Compute an average embedding per track by cropping detections from frames.
+
+    Uses batch processing for GPU efficiency when available.
 
     Args:
         video_path: Path to source video
         tracks: Parsed list of track observations (from tracks.jsonl)
         max_crops_per_track: Cap number of crops per track for speed
+        batch_size: Number of crops to process at once (GPU batch)
 
     Returns:
         Dict mapping track_id -> embedding vector (np.ndarray)
@@ -218,6 +222,11 @@ def compute_track_embeddings(
 
     # Collect per-track embeddings
     per_track_embs: Dict[int, List[np.ndarray]] = {}
+    
+    # First pass: collect all crops and their metadata
+    all_crops: List[np.ndarray] = []
+    crop_metadata: List[Tuple[int, int]] = []  # (track_id, crop_index within track)
+    crops_per_track: Dict[int, int] = {}  # track_id -> current crop count
 
     for fid in needed_frames:
         frame = frames.get(fid)
@@ -225,15 +234,14 @@ def compute_track_embeddings(
             continue
         H, W = frame.shape[:2]
         obs = by_frame[fid]
-        # For efficiency, batch crops per frame when backend supports batch
-        crops: List[np.ndarray] = []
-        meta: List[Tuple[int, Tuple[int, int, int, int]]] = []  # (track_id, bbox)
+        
         for det in obs:
             tid = int(det.get("track_id", -1))
             if tid < 0:
                 continue
             # Limit samples per track
-            if len(per_track_embs.get(tid, [])) >= max_crops_per_track:
+            current_count = crops_per_track.get(tid, 0)
+            if current_count >= max_crops_per_track:
                 continue
             raw_bbox = det.get("bbox_2d") or det.get("bbox")
             if not raw_bbox or len(raw_bbox) != 4:
@@ -243,20 +251,39 @@ def compute_track_embeddings(
             crop = frame[y1:y2, x1:x2]
             if crop.size == 0:
                 continue
-            crops.append(crop)
-            meta.append((tid, (x1, y1, x2, y2)))
+            
+            all_crops.append(crop)
+            crop_metadata.append((tid, current_count))
+            crops_per_track[tid] = current_count + 1
 
-        if not crops:
-            continue
+    if not all_crops:
+        logger.warning("No crops collected for embedding")
+        return {}
 
-        # V-JEPA2: embed each crop as single-frame video
+    logger.info(f"Embedding {len(all_crops)} crops from {len(crops_per_track)} tracks (batch_size={batch_size})")
+    
+    # Check if model supports batch embedding
+    has_batch = hasattr(reid_model, 'embed_batch')
+    
+    if has_batch and len(all_crops) > batch_size:
+        # Use batch embedding for efficiency
+        try:
+            embeddings = reid_model.embed_batch(all_crops, batch_size=batch_size)
+            embs = [emb.numpy().flatten() for emb in embeddings]
+        except Exception as e:
+            logger.warning(f"Batch embedding failed ({e}), falling back to sequential")
+            has_batch = False
+    
+    if not has_batch or len(all_crops) <= batch_size:
+        # Sequential fallback
         embs = []
-        for crop in crops:
+        for crop in all_crops:
             emb_tensor = reid_model.embed_single_image(crop)
             embs.append(emb_tensor.numpy().flatten())
 
-        for (tid, _), emb in zip(meta, embs):
-            per_track_embs.setdefault(tid, []).append(emb.astype(np.float32))
+    # Group embeddings by track
+    for (tid, _), emb in zip(crop_metadata, embs):
+        per_track_embs.setdefault(tid, []).append(emb.astype(np.float32))
 
     # Average per track
     track_proto: Dict[int, np.ndarray] = {}

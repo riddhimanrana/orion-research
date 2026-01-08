@@ -396,8 +396,83 @@ class ModelManager:
         
         logger.info("✓ Cleanup complete")
     
+    def unload_perception_models(self):
+        """
+        Unload perception models (YOLO, V-JEPA2, FastVLM) to free VRAM.
+        
+        Call this before loading the reasoning LLM to avoid VRAM conflicts.
+        This implements the "active model swapping" strategy for limited VRAM.
+        """
+        logger.info("Unloading perception models for reasoning phase...")
+        
+        unloaded = []
+        
+        if self._yolo is not None:
+            del self._yolo
+            self._yolo = None
+            unloaded.append("YOLO")
+        
+        if self._yoloworld is not None:
+            del self._yoloworld
+            self._yoloworld = None
+            unloaded.append("YOLO-World")
+        
+        if self._vjepa2 is not None:
+            del self._vjepa2
+            self._vjepa2 = None
+            unloaded.append("V-JEPA2")
+        
+        if self._fastvlm is not None:
+            del self._fastvlm
+            self._fastvlm = None
+            unloaded.append("FastVLM")
+        
+        # Clear GPU memory
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+        elif torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+        
+        if unloaded:
+            logger.info(f"✓ Unloaded: {', '.join(unloaded)}")
+        else:
+            logger.info("  No perception models were loaded")
+        
+        return unloaded
+    
+    def get_vram_status(self) -> dict:
+        """Get detailed VRAM status for debugging."""
+        status = {
+            "device": self.device,
+            "models_loaded": {
+                "yolo": self._yolo is not None,
+                "yoloworld": self._yoloworld is not None,
+                "clip": self._clip is not None,
+                "fastvlm": self._fastvlm is not None,
+                "vjepa2": self._vjepa2 is not None,
+            },
+        }
+        
+        if torch.cuda.is_available():
+            status["gpu"] = {
+                "name": torch.cuda.get_device_name(0),
+                "total_memory_gb": torch.cuda.get_device_properties(0).total_memory / 1024**3,
+                "allocated_gb": torch.cuda.memory_allocated() / 1024**3,
+                "reserved_gb": torch.cuda.memory_reserved() / 1024**3,
+                "free_gb": (torch.cuda.get_device_properties(0).total_memory - torch.cuda.memory_reserved()) / 1024**3,
+            }
+        elif torch.backends.mps.is_available():
+            status["gpu"] = {
+                "name": "Apple Silicon (MPS)",
+                "allocated_gb": torch.mps.current_allocated_memory() / 1024**3 if hasattr(torch.mps, 'current_allocated_memory') else "unknown",
+            }
+        
+        return status
+    
     def get_memory_usage(self) -> dict:
         """Get current memory usage"""
+
         usage = {
             "yolo_loaded": self._yolo is not None,
             "yoloworld_loaded": self._yoloworld is not None,
