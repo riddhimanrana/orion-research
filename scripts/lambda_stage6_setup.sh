@@ -69,14 +69,26 @@ fi
 
 # Pull the recommended model
 echo ""
-echo "[5/5] Pulling Ollama model..."
-MODEL="qwen2.5:14b-instruct-q8_0"
-if ollama list | grep -q "$MODEL"; then
-    echo "  ✓ Model $MODEL already available"
+echo "[5/5] Pulling Ollama models..."
+
+# Reasoning model (text-only)
+REASONING_MODEL="qwen2.5:14b-instruct-q8_0"
+if ollama list | grep -q "$REASONING_MODEL"; then
+    echo "  ✓ Reasoning model $REASONING_MODEL already available"
 else
-    echo "  Pulling $MODEL (this may take a few minutes)..."
-    ollama pull $MODEL
-    echo "  ✓ Model downloaded"
+    echo "  Pulling $REASONING_MODEL (this may take a few minutes)..."
+    ollama pull $REASONING_MODEL
+    echo "  ✓ Reasoning model downloaded"
+fi
+
+# Vision-Language model for validation
+VLM_MODEL="qwen3-vl:8b"
+if ollama list | grep -q "$VLM_MODEL"; then
+    echo "  ✓ VLM model $VLM_MODEL already available"
+else
+    echo "  Pulling $VLM_MODEL (6.1GB, for evaluation validation)..."
+    ollama pull $VLM_MODEL
+    echo "  ✓ VLM model downloaded"
 fi
 
 # Verify setup
@@ -118,16 +130,16 @@ echo "    --episode stage6_eval \\"
 echo "    --video data/examples/video.mp4 \\"
 echo "    --memgraph"
 echo ""
-echo "# Run Stage 6 evaluation:"
-echo "python scripts/eval_full_pipeline.py \\"
+echo "# Run iterative evaluation with local VLM (Qwen3-VL):"
+echo "python scripts/iterative_eval.py \\"
 echo "    --video data/examples/video.mp4 \\"
-echo "    --episode stage6_eval"
+echo "    --iterations 3"
 echo ""
 echo "# Interactive query mode:"
 echo "python -m orion.cli.run_query --episode stage6_eval"
 echo ""
-echo "# Conversational eval with Gemini:"
-echo "GEMINI_API_KEY=your_key python scripts/eval_conversation.py \\"
+echo "# Single conversation eval with local VLM:"
+echo "python scripts/eval_conversation_local.py \\"
 echo "    --video data/examples/video.mp4 \\"
 echo "    --episode stage6_eval"
 echo ""

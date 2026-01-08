@@ -86,6 +86,7 @@ class OrionRAG:
         password: str = "memgraph",
         enable_llm: bool = True,
         llm_model: str = "qwen2.5:14b-instruct-q8_0",
+        ollama_url: str = "http://localhost:11434",
     ):
         """
         Initialize RAG with Memgraph and optional LLM.
@@ -97,6 +98,7 @@ class OrionRAG:
             password: Memgraph password
             enable_llm: Enable Stage 6 LLM reasoning
             llm_model: Ollama model for reasoning
+            ollama_url: Ollama API URL
         """
         if not MEMGRAPH_AVAILABLE:
             raise ImportError("Memgraph backend not available. Install pymgclient.")
@@ -115,7 +117,7 @@ class OrionRAG:
         
         if enable_llm and REASONING_AVAILABLE:
             try:
-                config = ReasoningConfig(model=llm_model)
+                config = ReasoningConfig(model=llm_model, base_url=ollama_url)
                 self.reasoning_model = ReasoningModel(config=config)
                 if self.reasoning_model.validate_model():
                     self.llm_enabled = True
