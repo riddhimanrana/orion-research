@@ -78,10 +78,16 @@ SCENE_TYPES = {
         "expected": ["couch", "chair", "tv", "remote", "book", "clock", "vase", "potted plant", "bottle", "person"],
     },
     "hallway": {
-        "keywords": ["hallway", "corridor", "door", "entrance", "hall", "doorway", "passage", "staircase", "stairs"],
+        "keywords": ["hallway", "corridor", "door", "entrance", "hall", "doorway", "passage"],
         "blacklist": ["refrigerator", "toilet", "bathtub", "oven", "microwave", "bed", "couch", "dining table", "sink", 
-                      "laptop", "keyboard", "mouse", "tv"],
+                      "laptop", "keyboard", "mouse", "tv", "book", "bird", "surfboard", "knife", "remote"],
         "expected": ["door", "person", "clock", "vase", "potted plant", "handbag", "backpack", "umbrella"],
+    },
+    "staircase": {
+        "keywords": ["staircase", "stairs", "stairway", "steps", "railing", "banister"],
+        "blacklist": ["refrigerator", "toilet", "bathtub", "oven", "microwave", "bed", "couch", "dining table", "sink", 
+                      "laptop", "keyboard", "mouse", "tv", "book", "bird", "surfboard", "knife", "remote", "umbrella"],
+        "expected": ["person", "handbag", "backpack", "cell phone"],
     },
     "dining": {
         "keywords": ["dining", "table", "eat", "meal", "dinner", "lunch", "breakfast"],
@@ -93,11 +99,11 @@ SCENE_TYPES = {
 # Labels that are commonly confused/false positives
 SUSPICIOUS_LABELS = {
     "refrigerator": {
-        "min_scene_similarity": 0.60,  # Higher threshold than default
+        "min_scene_similarity": 0.65,  # Higher threshold - often confused with doors
         "requires_vlm_verification": True,
         "vlm_check_keywords": ["refrigerator", "fridge", "appliance", "kitchen"],
         "common_confusions": ["door", "closet", "cabinet", "wardrobe", "wall"],
-        "min_confidence": 0.35,  # Require higher detection confidence
+        "min_confidence": 0.40,  # Increased - very common confusion with doors
     },
     "toilet": {
         "min_scene_similarity": 0.55,
@@ -128,11 +134,11 @@ SUSPICIOUS_LABELS = {
         "min_confidence": 0.40,  # High threshold - very common false positive
     },
     "bird": {
-        "min_scene_similarity": 0.55,
+        "min_scene_similarity": 0.65,
         "requires_vlm_verification": True,
         "vlm_check_keywords": ["bird", "pet bird", "parrot", "cage"],
-        "common_confusions": ["plant", "decoration", "toy", "sculpture"],
-        "min_confidence": 0.35,
+        "common_confusions": ["plant", "decoration", "toy", "sculpture", "curtain"],
+        "min_confidence": 0.50,  # Increased - very common hallucination indoors
     },
     "airplane": {
         "min_scene_similarity": 0.70,  # Very unlikely indoors
@@ -176,11 +182,11 @@ SUSPICIOUS_LABELS = {
         "min_confidence": 0.35,
     },
     "bed": {
-        "min_scene_similarity": 0.45,
-        "requires_vlm_verification": False,
+        "min_scene_similarity": 0.50,
+        "requires_vlm_verification": True,
         "vlm_check_keywords": ["bed", "mattress", "bedding", "bedroom"],
-        "common_confusions": ["couch", "floor", "rug", "carpet", "table"],
-        "min_confidence": 0.28,  # Common false positive on floors/surfaces
+        "common_confusions": ["couch", "floor", "rug", "carpet", "table", "wall", "door frame"],
+        "min_confidence": 0.35,  # Increased - often confused with floors/walls/door frames
     },
     "toaster": {
         "min_scene_similarity": 0.55,
@@ -196,12 +202,62 @@ SUSPICIOUS_LABELS = {
         "common_confusions": ["plant", "potted plant", "decoration"],
         "min_confidence": 0.40,
     },
+    # NEW: Additional problematic labels from Gemini evaluation
+    "couch": {
+        "min_scene_similarity": 0.45,
+        "requires_vlm_verification": False,
+        "vlm_check_keywords": ["couch", "sofa", "furniture", "living room"],
+        "common_confusions": ["bed", "floor", "rug", "kitchen island", "counter"],
+        "min_confidence": 0.32,  # Often confused with kitchen islands
+    },
+    "potted plant": {
+        "min_scene_similarity": 0.45,
+        "requires_vlm_verification": False,
+        "vlm_check_keywords": ["plant", "potted plant", "flower", "houseplant"],
+        "common_confusions": ["curtain", "decoration", "art"],
+        "min_confidence": 0.30,  # Often confused with curtains
+    },
+    "book": {
+        "min_scene_similarity": 0.40,
+        "requires_vlm_verification": False,
+        "vlm_check_keywords": ["book", "notebook", "reading", "pages"],
+        "common_confusions": ["curtain", "railing", "stairs", "wall"],
+        "min_confidence": 0.28,  # Often confused with railings/stairs
+    },
+    "surfboard": {
+        "min_scene_similarity": 0.70,  # Very unlikely indoors
+        "requires_vlm_verification": True,
+        "vlm_check_keywords": ["surfboard", "surf", "board"],
+        "common_confusions": ["door", "wall", "panel"],
+        "min_confidence": 0.50,
+    },
+    "knife": {
+        "min_scene_similarity": 0.50,
+        "requires_vlm_verification": False,
+        "vlm_check_keywords": ["knife", "blade", "kitchen", "utensil"],
+        "common_confusions": ["pen", "stylus", "remote"],
+        "min_confidence": 0.35,
+    },
+    "umbrella": {
+        "min_scene_similarity": 0.50,
+        "requires_vlm_verification": False,
+        "vlm_check_keywords": ["umbrella", "parasol"],
+        "common_confusions": ["rug", "mat", "carpet", "lamp"],
+        "min_confidence": 0.35,
+    },
+    "cat": {
+        "min_scene_similarity": 0.55,
+        "requires_vlm_verification": True,
+        "vlm_check_keywords": ["cat", "kitten", "pet", "feline"],
+        "common_confusions": ["pillow", "blanket", "clothing", "shadow"],
+        "min_confidence": 0.40,
+    },
 }
 
 # Semantic aliases for better matching
 SEMANTIC_ALIASES = {
     "tv": ["monitor", "screen", "display", "television"],
-    "laptop": ["computer", "notebook", "macbook"],
+    "laptop": ["computer", "notebook", "macbook", "monitor"],  # Added monitor as alias
     "dining table": ["desk", "table", "work surface", "counter"],
     "couch": ["sofa", "settee", "loveseat"],
     "bed": ["mattress", "bedding"],

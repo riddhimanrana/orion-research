@@ -1061,3 +1061,410 @@ class MemgraphBackend:
         except Exception as e:
             logger.error(f"Batch insert with VLM failed: {e}")
             raise
+    # ==========================================================================
+    # RAG (Retrieval-Augmented Generation) QUERY METHODS
+    # ==========================================================================
+
+    def query_for_rag(
+        self,
+        query_type: str,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Unified RAG query interface for LLM-friendly responses.
+        
+        Query types:
+        - "find_object": Find objects by class name or description
+        - "spatial_context": Get spatial context around an entity
+        - "temporal_journey": Track an entity over time
+        - "interactions": Get CIS interactions for an entity
+        - "scene_summary": Get summary of a frame range
+        
+        Returns structured data optimized for LLM context injection.
+        """
+        handlers = {
+            "find_object": self._rag_find_object,
+            "spatial_context": self._rag_spatial_context,
+            "temporal_journey": self._rag_temporal_journey,
+            "interactions": self._rag_interactions,
+            "scene_summary": self._rag_scene_summary,
+        }
+        
+        handler = handlers.get(query_type)
+        if not handler:
+            raise ValueError(f"Unknown RAG query type: {query_type}")
+        
+        return handler(**kwargs)
+
+    def _rag_find_object(
+        self,
+        class_name: Optional[str] = None,
+        description_keywords: Optional[List[str]] = None,
+        frame_range: Optional[Tuple[int, int]] = None,
+        limit: int = 10,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Find objects matching class name or description keywords."""
+        cursor = self.connection.cursor()
+        
+        conditions = []
+        params = {"limit": limit}
+        
+        if class_name:
+            conditions.append("e.class_name = $class_name")
+            params["class_name"] = class_name.lower()
+        
+        if frame_range:
+            conditions.append("f.idx >= $frame_start AND f.idx <= $frame_end")
+            params["frame_start"] = frame_range[0]
+            params["frame_end"] = frame_range[1]
+        
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+        
+        query = f"""
+        MATCH (e:Entity)-[r:OBSERVED_IN]->(f:Frame)
+        WHERE {where_clause}
+        WITH e, collect({{
+            frame: f.idx,
+            timestamp: f.timestamp,
+            confidence: r.confidence,
+            description: r.vlm_description,
+            bbox: [r.bbox_x1, r.bbox_y1, r.bbox_x2, r.bbox_y2]
+        }}) as observations
+        RETURN e.id as entity_id,
+               e.class_name as class_name,
+               size(observations) as num_observations,
+               observations[0].frame as first_seen_frame,
+               observations[-1].frame as last_seen_frame,
+               observations[0].description as sample_description
+        ORDER BY num_observations DESC
+        LIMIT $limit
+        """
+        
+        try:
+            cursor.execute(query, params)
+            
+            results = []
+            for row in cursor.fetchall():
+                results.append({
+                    "entity_id": row[0],
+                    "class_name": row[1],
+                    "num_observations": row[2],
+                    "first_seen_frame": row[3],
+                    "last_seen_frame": row[4],
+                    "sample_description": row[5],
+                })
+            
+            return {
+                "query_type": "find_object",
+                "results": results,
+                "total": len(results),
+                "natural_language_summary": self._format_find_object_summary(results, class_name)
+            }
+        except Exception as e:
+            logger.error(f"RAG find_object failed: {e}")
+            return {"query_type": "find_object", "results": [], "error": str(e)}
+
+    def _format_find_object_summary(self, results: List[Dict], class_name: Optional[str]) -> str:
+        """Format find_object results as natural language for LLM."""
+        if not results:
+            return f"No {class_name or 'objects'} found in the video."
+        
+        if class_name:
+            summary = f"Found {len(results)} {class_name}(s) in the video:\n"
+        else:
+            summary = f"Found {len(results)} objects:\n"
+        
+        for i, r in enumerate(results[:5], 1):
+            desc = r.get('sample_description', 'No description')[:100]
+            summary += f"  {i}. {r['class_name']} (ID:{r['entity_id']}) - seen {r['num_observations']} times, frames {r['first_seen_frame']}-{r['last_seen_frame']}\n"
+            if desc:
+                summary += f"     Description: {desc}...\n"
+        
+        return summary
+
+    def _rag_spatial_context(
+        self,
+        entity_id: int,
+        frame_idx: Optional[int] = None,
+        radius_mm: float = 2000.0,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Get spatial context: what objects are near an entity."""
+        cursor = self.connection.cursor()
+        
+        params = {"entity_id": entity_id}
+        frame_filter = ""
+        if frame_idx is not None:
+            frame_filter = "AND r1.frame_idx = $frame_idx AND r2.frame_idx = $frame_idx"
+            params["frame_idx"] = frame_idx
+        
+        query = f"""
+        MATCH (e1:Entity {{id: $entity_id}})-[r1:OBSERVED_IN]->(f:Frame)
+        MATCH (e2:Entity)-[r2:OBSERVED_IN]->(f)
+        WHERE e1.id <> e2.id {frame_filter}
+        OPTIONAL MATCH (e1)-[spatial:NEAR|ABOVE|BELOW]->(e2)
+        RETURN e2.id as nearby_id,
+               e2.class_name as nearby_class,
+               type(spatial) as spatial_relation,
+               spatial.confidence as spatial_confidence,
+               f.idx as frame_idx
+        LIMIT 50
+        """
+        
+        try:
+            cursor.execute(query, params)
+            
+            nearby_objects = {}
+            for row in cursor.fetchall():
+                eid = row[0]
+                if eid not in nearby_objects:
+                    nearby_objects[eid] = {
+                        "entity_id": eid,
+                        "class_name": row[1],
+                        "relations": [],
+                    }
+                if row[2]:  # Has spatial relation
+                    nearby_objects[eid]["relations"].append({
+                        "type": row[2],
+                        "confidence": row[3],
+                        "frame_idx": row[4],
+                    })
+            
+            return {
+                "query_type": "spatial_context",
+                "entity_id": entity_id,
+                "nearby_objects": list(nearby_objects.values()),
+                "natural_language_summary": self._format_spatial_summary(entity_id, nearby_objects)
+            }
+        except Exception as e:
+            logger.error(f"RAG spatial_context failed: {e}")
+            return {"query_type": "spatial_context", "error": str(e)}
+
+    def _format_spatial_summary(self, entity_id: int, nearby_objects: Dict) -> str:
+        """Format spatial context as natural language."""
+        if not nearby_objects:
+            return f"Entity {entity_id} has no nearby objects detected."
+        
+        summary = f"Entity {entity_id} is near {len(nearby_objects)} objects:\n"
+        for obj in list(nearby_objects.values())[:5]:
+            relations = obj.get("relations", [])
+            if relations:
+                rel_str = ", ".join([f"{r['type']} (conf:{r['confidence']:.2f})" for r in relations[:3]])
+                summary += f"  - {obj['class_name']} (ID:{obj['entity_id']}): {rel_str}\n"
+            else:
+                summary += f"  - {obj['class_name']} (ID:{obj['entity_id']}): co-located in frame\n"
+        
+        return summary
+
+    def _rag_temporal_journey(
+        self,
+        entity_id: int,
+        sample_every_n: int = 10,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Track an entity's journey through the video."""
+        cursor = self.connection.cursor()
+        
+        query = """
+        MATCH (e:Entity {id: $entity_id})-[r:OBSERVED_IN]->(f:Frame)
+        WITH e, r, f
+        ORDER BY f.idx
+        RETURN f.idx as frame_idx,
+               f.timestamp as timestamp,
+               r.bbox_x1 as x1, r.bbox_y1 as y1,
+               r.bbox_x2 as x2, r.bbox_y2 as y2,
+               r.vlm_description as description,
+               r.confidence as confidence
+        """
+        
+        try:
+            cursor.execute(query, {"entity_id": entity_id})
+            
+            journey = []
+            for i, row in enumerate(cursor.fetchall()):
+                if i % sample_every_n == 0 or i == 0:  # Sample every N frames + first
+                    journey.append({
+                        "frame_idx": row[0],
+                        "timestamp": row[1],
+                        "bbox": [row[2], row[3], row[4], row[5]],
+                        "description": row[6],
+                        "confidence": row[7],
+                    })
+            
+            return {
+                "query_type": "temporal_journey",
+                "entity_id": entity_id,
+                "journey": journey,
+                "total_observations": len(journey) * sample_every_n,
+                "natural_language_summary": self._format_journey_summary(entity_id, journey)
+            }
+        except Exception as e:
+            logger.error(f"RAG temporal_journey failed: {e}")
+            return {"query_type": "temporal_journey", "error": str(e)}
+
+    def _format_journey_summary(self, entity_id: int, journey: List[Dict]) -> str:
+        """Format temporal journey as natural language."""
+        if not journey:
+            return f"No observations found for entity {entity_id}."
+        
+        first = journey[0]
+        last = journey[-1]
+        duration = (last.get("timestamp", 0) or 0) - (first.get("timestamp", 0) or 0)
+        
+        summary = f"Entity {entity_id} tracked over {len(journey)} key frames ({duration:.1f}s):\n"
+        summary += f"  First seen: frame {first['frame_idx']} at {first.get('timestamp', 0):.1f}s\n"
+        summary += f"  Last seen: frame {last['frame_idx']} at {last.get('timestamp', 0):.1f}s\n"
+        
+        if first.get("description"):
+            summary += f"  Initial description: {first['description'][:100]}...\n"
+        
+        return summary
+
+    def _rag_interactions(
+        self,
+        entity_id: int,
+        min_score: float = 0.5,
+        limit: int = 20,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Get CIS interactions involving an entity."""
+        cursor = self.connection.cursor()
+        
+        query = """
+        MATCH (a:Entity)-[r]->(p:Entity)
+        WHERE type(r) IN ['INFLUENCES', 'GRASPS', 'MOVES_WITH']
+          AND (a.id = $entity_id OR p.id = $entity_id)
+          AND r.cis_score >= $min_score
+        RETURN a.id as agent_id,
+               a.class_name as agent_class,
+               type(r) as interaction_type,
+               r.cis_score as score,
+               r.frame_idx as frame_idx,
+               r.influence_type as detail,
+               p.id as patient_id,
+               p.class_name as patient_class
+        ORDER BY r.cis_score DESC
+        LIMIT $limit
+        """
+        
+        try:
+            cursor.execute(query, {"entity_id": entity_id, "min_score": min_score, "limit": limit})
+            
+            interactions = []
+            for row in cursor.fetchall():
+                interactions.append({
+                    "agent_id": row[0],
+                    "agent_class": row[1],
+                    "interaction_type": row[2],
+                    "score": row[3],
+                    "frame_idx": row[4],
+                    "detail": row[5],
+                    "patient_id": row[6],
+                    "patient_class": row[7],
+                })
+            
+            return {
+                "query_type": "interactions",
+                "entity_id": entity_id,
+                "interactions": interactions,
+                "natural_language_summary": self._format_interactions_summary(entity_id, interactions)
+            }
+        except Exception as e:
+            logger.error(f"RAG interactions failed: {e}")
+            return {"query_type": "interactions", "error": str(e)}
+
+    def _format_interactions_summary(self, entity_id: int, interactions: List[Dict]) -> str:
+        """Format interactions as natural language."""
+        if not interactions:
+            return f"No significant interactions found for entity {entity_id}."
+        
+        summary = f"Entity {entity_id} has {len(interactions)} interactions:\n"
+        for i in interactions[:5]:
+            if i["agent_id"] == entity_id:
+                summary += f"  - {i['interaction_type']} {i['patient_class']} (ID:{i['patient_id']}) at frame {i['frame_idx']} (score: {i['score']:.2f})\n"
+            else:
+                summary += f"  - {i['agent_class']} (ID:{i['agent_id']}) {i['interaction_type']} this entity at frame {i['frame_idx']} (score: {i['score']:.2f})\n"
+        
+        return summary
+
+    def _rag_scene_summary(
+        self,
+        frame_start: int = 0,
+        frame_end: Optional[int] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Get summary of objects and interactions in a frame range."""
+        cursor = self.connection.cursor()
+        
+        params = {"frame_start": frame_start}
+        frame_filter = "f.idx >= $frame_start"
+        if frame_end is not None:
+            frame_filter += " AND f.idx <= $frame_end"
+            params["frame_end"] = frame_end
+        
+        # Get entity counts
+        query = f"""
+        MATCH (e:Entity)-[r:OBSERVED_IN]->(f:Frame)
+        WHERE {frame_filter}
+        WITH e.class_name as class, count(distinct e) as entity_count, count(r) as obs_count
+        RETURN class, entity_count, obs_count
+        ORDER BY obs_count DESC
+        LIMIT 20
+        """
+        
+        try:
+            cursor.execute(query, params)
+            
+            class_summary = []
+            for row in cursor.fetchall():
+                class_summary.append({
+                    "class_name": row[0],
+                    "entity_count": row[1],
+                    "observation_count": row[2],
+                })
+            
+            # Get interaction summary
+            interaction_query = f"""
+            MATCH (a:Entity)-[r]->(p:Entity)
+            WHERE type(r) IN ['INFLUENCES', 'GRASPS', 'MOVES_WITH']
+              AND r.frame_idx >= $frame_start
+              {"AND r.frame_idx <= $frame_end" if frame_end else ""}
+            RETURN type(r) as interaction_type, count(r) as count
+            """
+            
+            cursor.execute(interaction_query, params)
+            interaction_summary = {}
+            for row in cursor.fetchall():
+                interaction_summary[row[0]] = row[1]
+            
+            return {
+                "query_type": "scene_summary",
+                "frame_range": [frame_start, frame_end],
+                "object_classes": class_summary,
+                "interactions": interaction_summary,
+                "natural_language_summary": self._format_scene_summary(class_summary, interaction_summary, frame_start, frame_end)
+            }
+        except Exception as e:
+            logger.error(f"RAG scene_summary failed: {e}")
+            return {"query_type": "scene_summary", "error": str(e)}
+
+    def _format_scene_summary(self, classes: List[Dict], interactions: Dict, frame_start: int, frame_end: Optional[int]) -> str:
+        """Format scene summary as natural language."""
+        range_str = f"frames {frame_start}-{frame_end}" if frame_end else f"from frame {frame_start}"
+        
+        total_entities = sum(c["entity_count"] for c in classes)
+        total_obs = sum(c["observation_count"] for c in classes)
+        
+        summary = f"Scene summary for {range_str}:\n"
+        summary += f"  Total: {total_entities} unique entities, {total_obs} observations\n"
+        summary += "  Objects by type:\n"
+        for c in classes[:7]:
+            summary += f"    - {c['class_name']}: {c['entity_count']} entities, {c['observation_count']} sightings\n"
+        
+        if interactions:
+            summary += "  Interactions:\n"
+            for itype, count in interactions.items():
+                summary += f"    - {itype}: {count}\n"
+        
+        return summary
