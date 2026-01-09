@@ -49,9 +49,11 @@ class FrameObserver:
     def __init__(
         self,
         config: DetectionConfig,
-        detector_backend: Literal["yolo", "yoloworld"] = "yolo",
+        detector_backend: Literal["yolo", "yoloworld", "groundingdino"] = "yolo",
         yolo_model: Optional[Any] = None,
         yoloworld_model: Optional[Any] = None,
+        gdino_model: Optional[Any] = None,
+        gdino_processor: Optional[Any] = None,
         target_fps: float = 2.0,
         show_progress: bool = True,
         enable_3d: bool = False,
@@ -64,9 +66,11 @@ class FrameObserver:
         Initialize observer.
         
         Args:
-            detector_backend: Detection backend identifier ('yolo', 'yoloworld')
+            detector_backend: Detection backend identifier ('yolo', 'yoloworld', 'groundingdino')
             yolo_model: YOLO model instance from ModelManager
             yoloworld_model: YOLO-World model instance when backend='yoloworld'
+            gdino_model: GroundingDINO model instance
+            gdino_processor: GroundingDINO processor instance
             config: Detection configuration
             target_fps: Target frames per second for processing
             show_progress: Show progress bar
@@ -80,6 +84,8 @@ class FrameObserver:
         self.detector_backend = detector_backend
         self.yolo = yolo_model if detector_backend == "yolo" else None
         self.yoloworld = yoloworld_model if detector_backend == "yoloworld" else None
+        self.gdino = gdino_model if detector_backend == "groundingdino" else None
+        self.gdino_processor = gdino_processor if detector_backend == "groundingdino" else None
 
         # YOLO-World can internally keep text feature tensors (e.g., txt_feats) on CPU
         # even when the model runs on CUDA/MPS. We track a preferred device and
@@ -90,6 +96,8 @@ class FrameObserver:
             raise ValueError("YOLO backend selected but yolo_model was not provided")
         if self.detector_backend == "yoloworld" and self.yoloworld is None:
             raise ValueError("YOLO-World backend selected but yoloworld_model was not provided")
+        if self.detector_backend == "groundingdino" and (self.gdino is None or self.gdino_processor is None):
+            raise ValueError("GroundingDINO backend selected but model/processor was not provided")
 
         # Detector class registry (used by downstream trackers)
         if self.detector_backend == "yolo" and hasattr(self.yolo, "names"):
@@ -394,8 +402,71 @@ class FrameObserver:
         """Dispatch to the configured detection backend."""
         if self.detector_backend == "yoloworld":
             return self._detect_with_yoloworld(frame)
+        elif self.detector_backend == "groundingdino":
+            return self._detect_with_groundingdino(frame)
         else:
             return self._detect_with_yolo(frame)
+
+    @profile("observer_detect_with_groundingdino")
+    def _detect_with_groundingdino(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+        """Run GroundingDINO inference and normalize outputs."""
+        if self.gdino is None or self.gdino_processor is None:
+            return []
+
+        import torch
+        from PIL import Image
+        
+        # Convert BGR to RGB PIL image for processor
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        pil_img = Image.fromarray(rgb_frame)
+        
+        # Use categories from config (COCO or custom)
+        categories = self.detector_classes
+        text_prompt = " . ".join(categories) + " ."
+        
+        device = next(self.gdino.parameters()).device
+        
+        inputs = self.gdino_processor(images=pil_img, text=text_prompt, return_tensors="pt").to(device)
+        with torch.no_grad():
+            outputs = self.gdino(**inputs)
+        
+        # Post-process
+        target_sizes = torch.tensor([pil_img.size[::-1]]).to(device)
+        results = self.gdino_processor.post_process_grounded_object_detection(
+            outputs,
+            inputs.input_ids,
+            threshold=self.config.confidence_threshold,
+            target_sizes=target_sizes
+        )[0]
+        
+        detections: List[Dict[str, Any]] = []
+        # In newer transformers, 'labels' returns string names if text_labels isn't used.
+        # But let's be safe and use 'scores', 'boxes', 'labels'.
+        boxes = results["boxes"].cpu().numpy().tolist()
+        scores = results["scores"].cpu().numpy().tolist()
+        
+        # Check if version returns string labels or int IDs
+        raw_labels = results.get("text_labels", results.get("labels", []))
+        
+        for i in range(len(boxes)):
+            label = raw_labels[i]
+            # Map back to standard class name if it's an ID
+            if isinstance(label, int):
+                class_name = categories[label] if label < len(categories) else f"class_{label}"
+                class_id = label
+            else:
+                class_name = str(label)
+                class_id = self._grounding_label_map.get(class_name.lower(), -1)
+
+            detections.append(
+                {
+                    "bbox": boxes[i],
+                    "confidence": float(scores[i]),
+                    "class_id": class_id,
+                    "class_name": class_name,
+                }
+            )
+        return detections
 
     def _detect_with_yoloworld(self, frame: np.ndarray) -> List[Dict[str, Any]]:
         """Run YOLO-World inference and normalize outputs."""

@@ -88,6 +88,8 @@ class ModelManager:
         # Model instances (lazy loaded)
         self._yolo: Optional[Any] = None
         self._yoloworld: Optional[Any] = None
+        self._gdino_model: Optional[Any] = None
+        self._gdino_processor: Optional[Any] = None
         self._clip: Optional[Any] = None
         self._fastvlm: Optional[Any] = None
         self._vjepa2: Optional[Any] = None
@@ -96,6 +98,7 @@ class ModelManager:
         self.yolo_model_name = "yolo11m"  # Default to medium (balanced)
         self.yoloworld_model_name = "yolov8m-worldv2.pt"  # YOLO-World model
         self.yoloworld_classes: Optional[list] = None  # Classes to set for YOLO-World
+        self.gdino_model_name = "IDEA-Research/grounding-dino-tiny" # Default to tiny for speed
         
         # LLM for contextual understanding
         self._ollama_client: Optional[Any] = None
@@ -233,6 +236,40 @@ class ModelManager:
             
         except Exception as e:
             logger.error(f"Failed to load YOLO-World: {e}")
+            raise
+    
+    # ========================================================================
+    # GroundingDINO Detector (Transformers)
+    # ========================================================================
+    
+    @property
+    def gdino(self) -> tuple[Any, Any]:
+        """
+        Get GroundingDINO model and processor (lazy loaded).
+        
+        Returns:
+            Tuple of (model, processor)
+        """
+        if self._gdino_model is None:
+            self._gdino_model, self._gdino_processor = self._load_gdino()
+        return self._gdino_model, self._gdino_processor
+    
+    def _load_gdino(self) -> tuple[Any, Any]:
+        """Load GroundingDINO model via transformers"""
+        try:
+            from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
+            
+            model_id = self.gdino_model_name
+            logger.info(f"Loading GroundingDINO ({model_id})...")
+            
+            processor = AutoProcessor.from_pretrained(model_id)
+            model = AutoModelForZeroShotObjectDetection.from_pretrained(model_id).to(self.device)
+            
+            logger.info(f"✓ GroundingDINO loaded on {self.device}")
+            return model, processor
+            
+        except Exception as e:
+            logger.error(f"Failed to load GroundingDINO: {e}")
             raise
     
     # ========================================================================

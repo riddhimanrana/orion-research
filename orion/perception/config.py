@@ -78,17 +78,20 @@ YOLOWORLD_PROMPT_INDOOR_FULL = (
 
 @dataclass
 class DetectionConfig:
-    """Detection backend configuration (YOLO or YOLO-World)."""
+    """Detection backend configuration (YOLO, YOLO-World, or GroundingDINO)."""
 
-    backend: Literal["yolo", "yoloworld"] = "yoloworld"
-    """Primary detector to use for frame observations. Options: 'yolo', 'yoloworld'
+    backend: Literal["yolo", "yoloworld", "groundingdino"] = "yoloworld"
+    """Primary detector to use for frame observations. Options: 'yolo', 'yoloworld', 'groundingdino'
     
     v2 default: 'yoloworld' for open-vocabulary detection without retraining.
     """
 
-    # YOLO-specific settings
-    model: Literal["yolo11n", "yolo11s", "yolo11m", "yolo11x"] = "yolo11x"
-    """YOLO model size (n=fastest, x=most accurate)."""
+    # Model specific settings
+    model: str = "yolo11x"
+    """Model identifier. 
+    YOLO: 'yolo11n', 'yolo11s', 'yolo11m', 'yolo11x'
+    GroundingDINO: 'IDEA-Research/grounding-dino-tiny' or 'IDEA-Research/grounding-dino-base'
+    """
 
     # Detection thresholds (shared)
     confidence_threshold: float = 0.20
@@ -187,13 +190,13 @@ class DetectionConfig:
 
     def __post_init__(self):
         """Validate detection config."""
-        if self.backend not in {"yolo", "yoloworld"}:
-            raise ValueError(f"backend must be 'yolo' or 'yoloworld', got {self.backend}")
+        if self.backend not in {"yolo", "yoloworld", "groundingdino"}:
+            raise ValueError(f"backend must be 'yolo' or 'yoloworld', or 'groundingdino', got {self.backend}")
 
         # Model validation
-        valid_models = {"yolo11n", "yolo11s", "yolo11m", "yolo11x"}
+        valid_models = {"yolo11n", "yolo11s", "yolo11m", "yolo11x", "IDEA-Research/grounding-dino-tiny", "IDEA-Research/grounding-dino-base"}
         if self.model not in valid_models:
-            raise ValueError(f"Invalid model: {self.model}. Must be one of {valid_models}")
+            logger.warning(f"Model {self.model} not in standard set. Proceeding anyway.")
 
         # Threshold validation
         if not (0 <= self.confidence_threshold <= 1):
@@ -291,6 +294,13 @@ class DetectionConfig:
         while len(categories) > 1 and categories[-1] == '' and categories[-2] == '':
             categories.pop()
         return categories
+
+    def grounding_categories(self) -> list[str]:
+        """Return normalized category list for GroundingDINO prompts.
+        
+        Uses the same prompt settings as YOLO-World for consistency in research.
+        """
+        return self.yoloworld_categories()
 
 
 @dataclass

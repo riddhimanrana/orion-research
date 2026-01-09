@@ -222,11 +222,18 @@ class PerceptionEngine:
             yoloworld_model = self.model_manager.yoloworld
 
         # Frame observer
+        gdino_model = None
+        gdino_processor = None
+        if self.config.detection.backend == "groundingdino":
+            gdino_model, gdino_processor = self.model_manager.gdino
+
         self.observer = FrameObserver(
             config=self.config.detection,
             detector_backend=self.config.detection.backend,
             yolo_model=self.model_manager.yolo if self.config.detection.backend == "yolo" else None,
             yoloworld_model=yoloworld_model,
+            gdino_model=gdino_model,
+            gdino_processor=gdino_processor,
             target_fps=self.config.target_fps,
             enable_3d=self.config.enable_3d,
             enable_occlusion=self.config.enable_occlusion,

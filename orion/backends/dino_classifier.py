@@ -100,7 +100,7 @@ FINE_GRAINED_LABELS = {
 
 
 def get_dino_model(device: str = "mps"):
-    """Lazy-load DINOv2 model."""
+    """Lazy-load DINO model (prefers local DINOv3 if available)."""
     global _dino_model, _dino_processor
     
     if _dino_model is None:
@@ -108,11 +108,17 @@ def get_dino_model(device: str = "mps"):
             import torch
             from transformers import AutoModel, AutoImageProcessor
             
-            model_id = "facebook/dinov2-large"
-            logger.info(f"Loading DINOv2 model: {model_id}")
+            # Check for local DINOv3 model first
+            local_dinov3 = Path("models/dinov3-vitl16")
+            if local_dinov3.exists():
+                model_id = str(local_dinov3)
+                logger.info(f"Loading local DINOv3 model: {model_id}")
+            else:
+                model_id = "facebook/dinov2-large"
+                logger.info(f"Loading DINOv2 model (fallback): {model_id}")
             
             _dino_processor = AutoImageProcessor.from_pretrained(model_id)
-            _dino_model = AutoModel.from_pretrained(model_id)
+            _dino_model = AutoModel.from_pretrained(model_id, trust_remote_code=True)
             
             # Move to device
             if device == "mps" and torch.backends.mps.is_available():
@@ -473,6 +479,36 @@ class DINOv3Classifier:
         
         return results
 
+    def classify_crop(
+        self,
+        crop: Union[np.ndarray, Image.Image],
+        coarse_class: str,
+        scene_type: str = "default",
+        top_k: int = 3
+    ) -> DINOClassificationResult:
+        """
+        Classify a single crop directly (no full-frame context).
+        
+        This is a fallback for legacy code or when full frames are unavailable.
+        """
+        self._ensure_models_loaded()
+        
+        # Extract features from crop as if it were a frame
+        features = self.extract_frame_features(crop)
+        
+        # Use the CLS token or mean pooling for classification of the crop
+        # For a crop, we treat the whole thing as the region of interest
+        detection = {
+            "bbox": [0, 0, features["original_width"], features["original_height"]],
+            "class_name": coarse_class
+        }
+        return self.classify_detection(
+            features, 
+            detection,
+            scene_type,
+            top_k
+        )
+
 
 # =====================================================================
 # Scene Type Detection
@@ -526,7 +562,7 @@ class SceneTypeDetector:
         """
         self._ensure_loaded()
         
-        if not detected_objects:
+        if self._model is None or not detected_objects:
             return "default", 0.0
         
         # Create description from detected objects
