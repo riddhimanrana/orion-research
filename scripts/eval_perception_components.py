@@ -234,9 +234,19 @@ def evaluate_detection(
         try:
             # Load model
             from ultralytics import YOLO
+            import torch
             model_path = f"{model_name}.pt"
             model = YOLO(model_path)
-            model.to("mps")
+            
+            # Auto-detect device
+            if torch.cuda.is_available():
+                device = "cuda"
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                device = "mps"
+            else:
+                device = "cpu"
+            model.to(device)
+            logger.info(f"Model loaded on {device}")
             
             # Open video
             cap = cv2.VideoCapture(str(video_path))
@@ -357,8 +367,18 @@ def evaluate_classification(
     
     # First run YOLO11x to get base detections
     from ultralytics import YOLO
+    import torch
     base_detector = YOLO("yolo11x.pt")
-    base_detector.to("mps")
+    
+    # Auto-detect device
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+    base_detector.to(device)
+    logger.info(f"Base detector loaded on {device}")
     
     # Open video
     cap = cv2.VideoCapture(str(video_path))
@@ -412,7 +432,7 @@ def evaluate_classification(
     try:
         from ultralytics import YOLO as YOLOWorld
         yoloworld = YOLOWorld("yolov8x-worldv2.pt")
-        yoloworld.to("mps")
+        yoloworld.to(device)  # Use same device as base detector
         
         start_time = time.time()
         yoloworld_results = []
@@ -529,9 +549,16 @@ def evaluate_classification(
         dino_processor = AutoProcessor.from_pretrained("facebook/dinov2-large")
         dino_model = AutoModel.from_pretrained("facebook/dinov2-large")
         
-        device = "mps" if torch.backends.mps.is_available() else "cpu"
-        dino_model = dino_model.to(device)
+        # Auto-detect device
+        if torch.cuda.is_available():
+            dino_device = "cuda"
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            dino_device = "mps"
+        else:
+            dino_device = "cpu"
+        dino_model = dino_model.to(dino_device)
         dino_model.eval()
+        logger.info(f"DINOv3 loaded on {dino_device}")
         
         # Load SentenceTransformer for text matching
         from sentence_transformers import SentenceTransformer
@@ -677,8 +704,18 @@ def evaluate_filtering(
     
     # Get base detections first
     from ultralytics import YOLO
+    import torch
     detector = YOLO("yolo11x.pt")
-    detector.to("mps")
+    
+    # Auto-detect device
+    if torch.cuda.is_available():
+        filter_device = "cuda"
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        filter_device = "mps"
+    else:
+        filter_device = "cpu"
+    detector.to(filter_device)
+    logger.info(f"Detector loaded on {filter_device}")
     
     cap = cv2.VideoCapture(str(video_path))
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
