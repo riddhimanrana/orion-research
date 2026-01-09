@@ -415,8 +415,8 @@ def main():
         "--detector-backend",
         type=str,
         default="yoloworld",
-        choices=["yolo", "yoloworld", "groundingdino", "hybrid"],
-        help="Detection backend (default: yoloworld)"
+        choices=["yolo", "yoloworld", "groundingdino", "hybrid", "openvocab"],
+        help="Detection backend (default: yoloworld). 'openvocab' uses YOLO-World + CLIP for open-vocabulary detection."
     )
     parser.add_argument(
         "--gdino-model",
