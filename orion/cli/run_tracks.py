@@ -56,6 +56,10 @@ def process_video_to_tracks(
     detector_backend: str = "yolo",
     yoloworld_open_vocab: bool = False,
     yoloworld_prompt: str | None = None,
+    gdino_model: str = "IDEA-Research/grounding-dino-tiny",
+    hybrid_min_detections: int = 3,
+    hybrid_always_verify: str | None = None,
+    hybrid_secondary_conf: float = 0.30,
     confidence_threshold: float = 0.25,
     iou_threshold: float = 0.3,
     max_age: int = 30,
@@ -77,7 +81,8 @@ def process_video_to_tracks(
         episode_id: Episode identifier for results
         target_fps: Target FPS for processing
         yolo_model: YOLO variant to use
-        detector_backend: Detection backend ('yolo', 'yoloworld')
+        detector_backend: Detection backend ('yolo', 'yoloworld', 'groundingdino', 'hybrid')
+        gdino_model: GroundingDINO model ID when using groundingdino/hybrid
         confidence_threshold: Min detection confidence
         iou_threshold: Min IoU for track association
         max_age: Frames to keep unmatched tracks
@@ -108,10 +113,15 @@ def process_video_to_tracks(
     from orion.perception.observer import FrameObserver
     from orion.perception.config import DetectionConfig
     from ultralytics import YOLO
+    from orion.managers.model_manager import ModelManager
+    from orion.perception.hybrid_detector import HybridDetector, HybridDetectorConfig
     
     # Initialize detector based on backend
     yolo = None
     yoloworld = None
+    gdino = None
+    gdino_processor = None
+    hybrid_detector = None
 
     if detector_backend == "yolo":
         logger.info(f"Loading YOLO model: {yolo_model}")
@@ -138,6 +148,54 @@ def process_video_to_tracks(
             logger.info(f"  Setting {len(custom_classes)} custom classes for open-vocab detection")
             yoloworld.set_classes(custom_classes)
 
+    elif detector_backend == "groundingdino":
+        # GroundingDINO is loaded via ModelManager for consistent device placement.
+        manager = ModelManager.get_instance()
+        manager.device = device
+        manager.gdino_model_name = gdino_model
+        logger.info(f"Loading GroundingDINO model: {gdino_model} (device={device})")
+        gdino, gdino_processor = manager.gdino
+
+    elif detector_backend == "hybrid":
+        logger.info(f"Loading YOLO model (primary): {yolo_model}")
+        yolo = YOLO(f"{yolo_model}.pt")
+
+        manager = ModelManager.get_instance()
+        manager.device = device
+        manager.gdino_model_name = gdino_model
+        logger.info(f"Loading GroundingDINO model (secondary): {gdino_model} (device={device})")
+        gdino, gdino_processor = manager.gdino
+
+        # HybridDetectorConfig expects a python list for always_verify_classes; parse from CLI if provided.
+        always_verify_list = None
+        if hybrid_always_verify and str(hybrid_always_verify).strip():
+            always_verify_list = [c.strip() for c in str(hybrid_always_verify).split(",") if c.strip()]
+
+        hybrid_cfg = HybridDetectorConfig(
+            primary_backend="yolo",
+            primary_model=yolo_model,
+            primary_confidence=float(confidence_threshold),
+            secondary_backend="groundingdino",
+            secondary_model=gdino_model,
+            secondary_confidence=float(hybrid_secondary_conf),
+            min_detections_for_skip=int(hybrid_min_detections),
+            always_verify_classes=(always_verify_list if always_verify_list is not None else None) or [
+                "remote",
+                "clock",
+                "vase",
+                "scissors",
+                "toothbrush",
+            ],
+        )
+
+        hybrid_detector = HybridDetector(
+            config=hybrid_cfg,
+            yolo_model=yolo,
+            gdino_model=gdino,
+            gdino_processor=gdino_processor,
+            device=device,
+        )
+
     det_config = DetectionConfig(
         backend=detector_backend,
         model=yolo_model,
@@ -153,6 +211,9 @@ def process_video_to_tracks(
         detector_backend=detector_backend,
         yolo_model=yolo,
         yoloworld_model=yoloworld,
+        gdino_model=gdino,
+        gdino_processor=gdino_processor,
+        hybrid_detector=hybrid_detector,
         target_fps=target_fps,
         enable_3d=enable_3d,
         depth_model_size=depth_model_size,
@@ -225,11 +286,26 @@ def process_video_to_tracks(
     
     # Save run metadata
     tracker_stats = tracker.get_statistics()
-    detector_info = {
+    detector_info: dict = {
         "backend": detector_backend,
-        "model": yolo_model if detector_backend == "yolo" else ("yolov8m-worldv2" if detector_backend == "yoloworld" else "grounding-dino-base"),
-        "confidence_threshold": confidence_threshold
+        "confidence_threshold": confidence_threshold,
     }
+    if detector_backend == "yolo":
+        detector_info["model"] = yolo_model
+    elif detector_backend == "yoloworld":
+        detector_info["model"] = str(det_config.yoloworld_model)
+        detector_info["open_vocab"] = bool(yoloworld_open_vocab)
+        if yoloworld_prompt:
+            detector_info["prompt"] = yoloworld_prompt
+    elif detector_backend == "groundingdino":
+        detector_info["model"] = gdino_model
+    elif detector_backend == "hybrid":
+        detector_info["primary"] = {"backend": "yolo", "model": yolo_model, "conf": confidence_threshold}
+        detector_info["secondary"] = {"backend": "groundingdino", "model": gdino_model, "conf": hybrid_secondary_conf}
+        detector_info["hybrid"] = {
+            "min_detections": hybrid_min_detections,
+            "always_verify": hybrid_always_verify,
+        }
     
     run_meta = {
         "episode_id": episode_id,
@@ -307,8 +383,33 @@ def main():
         "--detector-backend",
         type=str,
         default="yoloworld",
-        choices=["yolo", "yoloworld"],
+        choices=["yolo", "yoloworld", "groundingdino", "hybrid"],
         help="Detection backend (default: yoloworld)"
+    )
+    parser.add_argument(
+        "--gdino-model",
+        type=str,
+        default="IDEA-Research/grounding-dino-tiny",
+        choices=["IDEA-Research/grounding-dino-tiny", "IDEA-Research/grounding-dino-base"],
+        help="GroundingDINO model ID (used for --detector-backend groundingdino|hybrid)",
+    )
+    parser.add_argument(
+        "--hybrid-min-detections",
+        type=int,
+        default=3,
+        help="When using --detector-backend hybrid: if YOLO finds fewer than this many detections, trigger GroundingDINO (default: 3)",
+    )
+    parser.add_argument(
+        "--hybrid-always-verify",
+        type=str,
+        default=None,
+        help="When using --detector-backend hybrid: comma-separated class names to always verify with GroundingDINO (e.g. 'remote,clock,vase')",
+    )
+    parser.add_argument(
+        "--hybrid-secondary-conf",
+        type=float,
+        default=0.30,
+        help="When using --detector-backend hybrid: GroundingDINO confidence threshold (default: 0.30)",
     )
     parser.add_argument(
         "--yoloworld-open-vocab",
@@ -423,6 +524,10 @@ def main():
             detector_backend=args.detector_backend,
             yoloworld_open_vocab=args.yoloworld_open_vocab,
             yoloworld_prompt=args.yoloworld_prompt,
+            gdino_model=args.gdino_model,
+            hybrid_min_detections=args.hybrid_min_detections,
+            hybrid_always_verify=args.hybrid_always_verify,
+            hybrid_secondary_conf=args.hybrid_secondary_conf,
             enable_hand_detector=args.detect_hands,
             hand_max_hands=args.hand_max,
             hand_detection_confidence=args.hand_det_conf,

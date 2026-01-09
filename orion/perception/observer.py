@@ -49,11 +49,12 @@ class FrameObserver:
     def __init__(
         self,
         config: DetectionConfig,
-        detector_backend: Literal["yolo", "yoloworld", "groundingdino"] = "yolo",
+        detector_backend: Literal["yolo", "yoloworld", "groundingdino", "hybrid"] = "yolo",
         yolo_model: Optional[Any] = None,
         yoloworld_model: Optional[Any] = None,
         gdino_model: Optional[Any] = None,
         gdino_processor: Optional[Any] = None,
+        hybrid_detector: Optional[Any] = None,
         target_fps: float = 2.0,
         show_progress: bool = True,
         enable_3d: bool = False,
@@ -82,10 +83,11 @@ class FrameObserver:
         self.target_fps = target_fps
         self.show_progress = show_progress
         self.detector_backend = detector_backend
-        self.yolo = yolo_model if detector_backend == "yolo" else None
+        self.yolo = yolo_model if detector_backend in {"yolo", "hybrid"} else None
         self.yoloworld = yoloworld_model if detector_backend == "yoloworld" else None
-        self.gdino = gdino_model if detector_backend == "groundingdino" else None
-        self.gdino_processor = gdino_processor if detector_backend == "groundingdino" else None
+        self.gdino = gdino_model if detector_backend in {"groundingdino", "hybrid"} else None
+        self.gdino_processor = gdino_processor if detector_backend in {"groundingdino", "hybrid"} else None
+        self.hybrid_detector = hybrid_detector if detector_backend == "hybrid" else None
 
         # YOLO-World can internally keep text feature tensors (e.g., txt_feats) on CPU
         # even when the model runs on CUDA/MPS. We track a preferred device and
@@ -98,9 +100,16 @@ class FrameObserver:
             raise ValueError("YOLO-World backend selected but yoloworld_model was not provided")
         if self.detector_backend == "groundingdino" and (self.gdino is None or self.gdino_processor is None):
             raise ValueError("GroundingDINO backend selected but model/processor was not provided")
+        if self.detector_backend == "hybrid":
+            if self.yolo is None:
+                raise ValueError("Hybrid backend selected but yolo_model was not provided")
+            if self.gdino is None or self.gdino_processor is None:
+                raise ValueError("Hybrid backend selected but GroundingDINO model/processor was not provided")
+            if self.hybrid_detector is None:
+                raise ValueError("Hybrid backend selected but hybrid_detector was not provided")
 
         # Detector class registry (used by downstream trackers)
-        if self.detector_backend == "yolo" and hasattr(self.yolo, "names"):
+        if self.detector_backend in {"yolo", "hybrid"} and hasattr(self.yolo, "names"):
             self.detector_classes = list(self.yolo.names.values())
         elif self.detector_backend == "yoloworld":
             use_custom = getattr(self.config, "yoloworld_use_custom_classes", True)
@@ -404,8 +413,33 @@ class FrameObserver:
             return self._detect_with_yoloworld(frame)
         elif self.detector_backend == "groundingdino":
             return self._detect_with_groundingdino(frame)
+        elif self.detector_backend == "hybrid":
+            return self._detect_with_hybrid(frame)
         else:
             return self._detect_with_yolo(frame)
+
+    @profile("observer_detect_with_hybrid")
+    def _detect_with_hybrid(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+        """Run HybridDetector and normalize outputs to the common schema."""
+        if self.hybrid_detector is None:
+            return []
+
+        dets, _meta = self.hybrid_detector.detect(frame)
+
+        detections: List[Dict[str, Any]] = []
+        for d in dets:
+            bbox = d.get("bbox")
+            if not bbox or len(bbox) != 4:
+                continue
+            detections.append(
+                {
+                    "bbox": [float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])],
+                    "confidence": float(d.get("confidence", 0.0)),
+                    "class_id": int(d.get("class_id", -1) if d.get("class_id", -1) is not None else -1),
+                    "class_name": str(d.get("class_name", "object")),
+                }
+            )
+        return detections
 
     @profile("observer_detect_with_groundingdino")
     def _detect_with_groundingdino(self, frame: np.ndarray) -> List[Dict[str, Any]]:

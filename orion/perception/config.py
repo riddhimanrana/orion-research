@@ -80,8 +80,8 @@ YOLOWORLD_PROMPT_INDOOR_FULL = (
 class DetectionConfig:
     """Detection backend configuration (YOLO, YOLO-World, or GroundingDINO)."""
 
-    backend: Literal["yolo", "yoloworld", "groundingdino"] = "yoloworld"
-    """Primary detector to use for frame observations. Options: 'yolo', 'yoloworld', 'groundingdino'
+    backend: Literal["yolo", "yoloworld", "groundingdino", "hybrid"] = "yoloworld"
+    """Primary detector to use for frame observations. Options: 'yolo', 'yoloworld', 'groundingdino', 'hybrid'
     
     v2 default: 'yoloworld' for open-vocabulary detection without retraining.
     """
@@ -208,8 +208,11 @@ class DetectionConfig:
 
     def __post_init__(self):
         """Validate detection config."""
-        if self.backend not in {"yolo", "yoloworld", "groundingdino"}:
-            raise ValueError(f"backend must be 'yolo' or 'yoloworld', or 'groundingdino', got {self.backend}")
+        if self.backend not in {"yolo", "yoloworld", "groundingdino", "hybrid"}:
+            raise ValueError(
+                "backend must be 'yolo', 'yoloworld', 'groundingdino', or 'hybrid', "
+                f"got {self.backend}"
+            )
 
         # Model validation
         valid_models = {"yolo11n", "yolo11s", "yolo11m", "yolo11x", "IDEA-Research/grounding-dino-tiny", "IDEA-Research/grounding-dino-base"}

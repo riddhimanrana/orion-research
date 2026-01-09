@@ -207,6 +207,11 @@ class PerceptionEngine:
     def _initialize_components(self):
         """Initializes all perception components based on the config."""
         settings = OrionSettings.load()
+
+        use_hybrid = (
+            self.config.detection.backend == "hybrid"
+            or bool(getattr(self.config.detection, "enable_hybrid_detection", False))
+        )
         
         # YOLO-World detector
         yoloworld_model = None
@@ -224,16 +229,48 @@ class PerceptionEngine:
         # Frame observer
         gdino_model = None
         gdino_processor = None
-        if self.config.detection.backend == "groundingdino":
+        if self.config.detection.backend in {"groundingdino"} or use_hybrid:
             gdino_model, gdino_processor = self.model_manager.gdino
+
+        hybrid_detector = None
+        if use_hybrid:
+            try:
+                from orion.perception.hybrid_detector import HybridDetector, HybridDetectorConfig
+
+                always_verify = getattr(self.config.detection, "hybrid_always_verify", None)
+                if not always_verify:
+                    always_verify = ["remote", "clock", "vase", "scissors", "toothbrush"]
+
+                hybrid_cfg = HybridDetectorConfig(
+                    primary_backend="yolo",
+                    primary_model=str(self.config.detection.model),
+                    primary_confidence=float(self.config.detection.confidence_threshold),
+                    secondary_backend="groundingdino",
+                    secondary_model=str(getattr(self.model_manager, "gdino_model_name", "IDEA-Research/grounding-dino-tiny")),
+                    secondary_confidence=0.30,
+                    min_detections_for_skip=int(getattr(self.config.detection, "hybrid_min_detections", 3)),
+                    always_verify_classes=list(always_verify),
+                )
+
+                hybrid_detector = HybridDetector(
+                    config=hybrid_cfg,
+                    yolo_model=self.model_manager.yolo,
+                    gdino_model=gdino_model,
+                    gdino_processor=gdino_processor,
+                    device=str(getattr(self.model_manager, "device", "cpu")),
+                )
+            except Exception as e:
+                logger.error(f"Failed to initialize HybridDetector: {e}")
+                raise
 
         self.observer = FrameObserver(
             config=self.config.detection,
-            detector_backend=self.config.detection.backend,
-            yolo_model=self.model_manager.yolo if self.config.detection.backend == "yolo" else None,
+            detector_backend=("hybrid" if use_hybrid else self.config.detection.backend),
+            yolo_model=self.model_manager.yolo if (self.config.detection.backend == "yolo" or use_hybrid) else None,
             yoloworld_model=yoloworld_model,
             gdino_model=gdino_model,
             gdino_processor=gdino_processor,
+            hybrid_detector=hybrid_detector,
             target_fps=self.config.target_fps,
             enable_3d=self.config.enable_3d,
             enable_occlusion=self.config.enable_occlusion,
