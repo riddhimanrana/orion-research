@@ -485,8 +485,8 @@ class OWLProposerFallback:
         if not proposals:
             return proposals
         
-        # Get top candidate labels from vocab bank (use more for CLIP to rank)
-        candidate_labels = self.vocab_bank.labels[:100]  # Top 100 most common
+        # Use curated common object labels (exclude body parts, abstract concepts)
+        candidate_labels = self._get_candidate_labels()
         
         # Load processor if needed
         processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
@@ -536,6 +536,49 @@ class OWLProposerFallback:
                 proposal["confidence"] = proposal.get("objectness", 0.0)
         
         return proposals
+    
+    def _get_candidate_labels(self) -> List[str]:
+        """Get curated candidate labels for CLIP classification.
+        
+        Returns a list of common indoor/outdoor object labels,
+        excluding body parts, abstract concepts, and rare items.
+        """
+        # Core object categories commonly found in video scenes
+        return [
+            # Electronics
+            "laptop", "computer", "monitor", "screen", "television", "tv",
+            "keyboard", "mouse", "phone", "smartphone", "tablet", "remote control",
+            "speaker", "headphones", "camera", "charger", "cable",
+            # Furniture
+            "chair", "couch", "sofa", "table", "desk", "bed", "shelf",
+            "cabinet", "drawer", "nightstand", "bookshelf", "ottoman",
+            # Kitchen
+            "refrigerator", "microwave", "oven", "stove", "toaster",
+            "cup", "mug", "glass", "bottle", "plate", "bowl", "pot", "pan",
+            "fork", "spoon", "knife", "cutting board",
+            # Containers
+            "box", "bag", "backpack", "suitcase", "basket", "bin",
+            "package", "envelope", "folder",
+            # Office
+            "book", "notebook", "paper", "pen", "pencil", "scissors",
+            "stapler", "tape", "clock", "lamp",
+            # Decor
+            "picture frame", "plant", "flower", "vase", "pillow", "blanket",
+            "curtain", "rug", "mirror",
+            # Bathroom
+            "towel", "toilet", "sink", "soap",
+            # Food
+            "apple", "banana", "orange", "pizza", "sandwich", "salad",
+            # People
+            "person", "man", "woman", "child",
+            # Vehicles (outdoor)
+            "car", "bicycle", "motorcycle",
+            # Animals
+            "dog", "cat", "bird",
+            # Misc common objects
+            "door", "window", "wall", "floor", "ceiling",
+            "keys", "wallet", "watch", "glasses", "hat",
+        ]
     
     def _compute_clip_embedding(self, crop: np.ndarray) -> np.ndarray:
         """Compute CLIP visual embedding for crop."""
