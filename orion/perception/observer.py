@@ -424,7 +424,7 @@ class FrameObserver:
         if self.hybrid_detector is None:
             return []
 
-        dets, _meta = self.hybrid_detector.detect(frame)
+        dets, meta = self.hybrid_detector.detect(frame)
 
         detections: List[Dict[str, Any]] = []
         for d in dets:
@@ -437,6 +437,15 @@ class FrameObserver:
                     "confidence": float(d.get("confidence", 0.0)),
                     "class_id": int(d.get("class_id", -1) if d.get("class_id", -1) is not None else -1),
                     "class_name": str(d.get("class_name", "object")),
+                    # Preserve origin where possible so downstream analysis can attribute detections.
+                    # HybridDetector typically sets this to "yolo" or "gdino".
+                    "source": str(d.get("source", "hybrid")),
+                    # Lightweight per-frame hybrid metadata (duplicated per detection on that frame).
+                    "hybrid_secondary_ran": bool(meta.get("secondary_ran", False)),
+                    "hybrid_trigger_reason": meta.get("trigger_reason"),
+                    "hybrid_primary_count": int(meta.get("primary_count", 0) or 0),
+                    "hybrid_secondary_count": int(meta.get("secondary_count", 0) or 0),
+                    "hybrid_merged_count": int(meta.get("merged_count", 0) or 0),
                 }
             )
         return detections
@@ -498,6 +507,7 @@ class FrameObserver:
                     "confidence": float(scores[i]),
                     "class_id": class_id,
                     "class_name": class_name,
+                    "source": "gdino",
                 }
             )
         return detections
@@ -538,6 +548,7 @@ class FrameObserver:
                         "confidence": float(boxes.conf[i]),
                         "class_id": class_id,
                         "class_name": class_name,
+                        "source": "yoloworld",
                     }
                 )
         return detections
@@ -566,6 +577,7 @@ class FrameObserver:
                         "confidence": float(boxes.conf[i]),
                         "class_id": int(boxes.cls[i]),
                         "class_name": result.names[int(boxes.cls[i])],
+                        "source": "yolo",
                     }
                 )
         return detections
@@ -703,6 +715,19 @@ class FrameObserver:
                 "frame_height": frame_height,
                 "spatial_zone": spatial_zone,
             }
+
+            # Preserve detector provenance (useful for debugging hybrid vs baseline behavior).
+            det_source = detection_source.get("source")
+            if det_source is not None:
+                detection["detector_source"] = det_source
+
+            # Preserve lightweight hybrid metadata when present.
+            if "hybrid_secondary_ran" in detection_source:
+                detection["hybrid_secondary_ran"] = bool(detection_source.get("hybrid_secondary_ran"))
+                detection["hybrid_trigger_reason"] = detection_source.get("hybrid_trigger_reason")
+                detection["hybrid_primary_count"] = int(detection_source.get("hybrid_primary_count", 0) or 0)
+                detection["hybrid_secondary_count"] = int(detection_source.get("hybrid_secondary_count", 0) or 0)
+                detection["hybrid_merged_count"] = int(detection_source.get("hybrid_merged_count", 0) or 0)
             # Ensure YOLO-World detections have description and object_class fields
             if self.detector_backend == "yoloworld":
                 detection["description"] = class_name

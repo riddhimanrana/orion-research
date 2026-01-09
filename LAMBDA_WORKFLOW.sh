@@ -25,7 +25,7 @@ python -m orion.cli.run_showcase --episode local_test --video data/examples/test
 # 3. PULL & TEST ON GPU (Lambda) - $0.02 (~1 min)
 # ============================================================================
 ssh lambda
-cd ~/orion-research
+cd ~/orion-research  # or: cd /lambda/nfs/orion-core-fs/orion-research
 git pull
 python -m orion.cli.run_showcase --episode gpu_quick --video data/examples/test.mp4 --max-frames 100
 
@@ -41,6 +41,44 @@ for video in data/videos/*.mp4; do
 done
 wait
 echo "All done!"
+
+
+# 4b. COMPARE DETECTOR BACKENDS (Lambda) - apples-to-apples hallucination check
+# ============================================================================
+# Run the same video with YOLO-only, GDINO-only, and HYBRID, keeping FPS and thresholds identical.
+# Output goes to results/<episode>/tracks.jsonl.
+# NOTE: Do NOT edit code on Lambda; only git pull.
+
+# YOLO baseline
+python -m orion.cli.run_tracks \
+    --episode cmp_yolo \
+    --video data/videos/test.mp4 \
+    --fps 5 \
+    --model yolo11x \
+    --detector-backend yolo \
+    --conf-threshold 0.25
+
+# GroundingDINO baseline
+python -m orion.cli.run_tracks \
+    --episode cmp_gdino \
+    --video data/videos/test.mp4 \
+    --fps 5 \
+    --model yolo11x \
+    --detector-backend groundingdino \
+    --gdino-model IDEA-Research/grounding-dino-tiny \
+    --conf-threshold 0.25
+
+# Hybrid (YOLO primary + conditional GDINO)
+python -m orion.cli.run_tracks \
+    --episode cmp_hybrid \
+    --video data/videos/test.mp4 \
+    --fps 5 \
+    --model yolo11x \
+    --detector-backend hybrid \
+    --gdino-model IDEA-Research/grounding-dino-tiny \
+    --hybrid-min-detections 3 \
+    --hybrid-secondary-conf 0.30 \
+    --conf-threshold 0.25
 
 
 # 5. RUN EVALUATIONS (Lambda) - $0.50-2.00
@@ -160,7 +198,7 @@ jupyter lab
 # 1. Start instance                            FREE
 # 2. git pull                                  FREE
 # 3. Run batch: 15 videos × 3min = 45 min      $0.97
-# 4. Let it run (you can edit code via Remote SSH)
+# 4. Let it run (avoid code edits on Lambda; make changes locally and git push)
 # 5. Download all results                      FREE
 # 6. Analyze on Mac                            FREE
 # 7. Stop instance                             FREE
