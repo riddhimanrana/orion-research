@@ -12,8 +12,8 @@ Performance target: <5ms overhead per frame (real-time compatible)
 """
 
 import numpy as np
-from typing import List, Dict, Optional, Tuple
-from dataclasses import dataclass
+from typing import List, Dict, Optional, Tuple, Any
+from dataclasses import dataclass, field
 from collections import deque
 import cv2
 
@@ -43,6 +43,9 @@ class Track:
     # Depth and zone
     depth_mm: float
     zone_id: Optional[str]
+
+    # Detection provenance / debug metadata (optional)
+    metadata: Dict[str, Any] = field(default_factory=dict)
     
     @property
     def velocity(self) -> Optional[np.ndarray]:
@@ -53,7 +56,7 @@ class Track:
     
     def to_dict(self) -> Dict:
         """Convert track to JSON-serializable dictionary."""
-        return {
+        d = {
             'id': int(self.id),
             'track_id': int(self.id),  # Alias for compatibility
             'class_name': str(self.class_name),
@@ -68,6 +71,21 @@ class Track:
             'hits': int(self.hits),
             'time_since_update': int(self.time_since_update),
         }
+
+        # Include selected provenance fields (if present). Kept flat for easier JSONL analytics.
+        if isinstance(self.metadata, dict) and self.metadata:
+            for k in (
+                "detector_source",
+                "hybrid_secondary_ran",
+                "hybrid_trigger_reason",
+                "hybrid_primary_count",
+                "hybrid_secondary_count",
+                "hybrid_merged_count",
+            ):
+                if k in self.metadata:
+                    d[k] = self.metadata.get(k)
+
+        return d
 
 
 class KalmanFilter3D:
@@ -603,6 +621,19 @@ class EnhancedTracker:
         track.bbox_2d = bbox_2d
         track.confidence = detection['confidence']
         track.depth_mm = depth_mm
+
+        # Preserve detector provenance / hybrid debug metadata on the track.
+        if hasattr(track, "metadata") and isinstance(track.metadata, dict):
+            for k in (
+                "detector_source",
+                "hybrid_secondary_ran",
+                "hybrid_trigger_reason",
+                "hybrid_primary_count",
+                "hybrid_secondary_count",
+                "hybrid_merged_count",
+            ):
+                if k in detection:
+                    track.metadata[k] = detection.get(k)
         
         # Update appearance (EMA)
         if embedding is not None:
@@ -657,6 +688,19 @@ class EnhancedTracker:
         appearance_features = deque(maxlen=self.max_gallery_size)
         if embedding is not None:
             appearance_features.append(embedding)
+
+        # Capture detector provenance / hybrid metadata at creation time.
+        meta: Dict[str, Any] = {}
+        for k in (
+            "detector_source",
+            "hybrid_secondary_ran",
+            "hybrid_trigger_reason",
+            "hybrid_primary_count",
+            "hybrid_secondary_count",
+            "hybrid_merged_count",
+        ):
+            if k in detection:
+                meta[k] = detection.get(k)
         
         track = Track(
             id=self.next_id,
@@ -673,6 +717,7 @@ class EnhancedTracker:
             time_since_update=0,
             depth_mm=depth_mm,
             zone_id=None,
+            metadata=meta,
         )
         
         self.tracks.append(track)
