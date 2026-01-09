@@ -263,6 +263,35 @@ class PerceptionEngine:
                 logger.error(f"Failed to initialize HybridDetector: {e}")
                 raise
 
+        # OpenVocab pipeline (Propose → Label architecture)
+        openvocab_pipeline = None
+        if self.config.detection.backend == "openvocab":
+            logger.info("Initializing OpenVocab pipeline (Propose → Label)...")
+            try:
+                from orion.perception.open_vocab_pipeline import OpenVocabPipeline, OpenVocabConfig
+                
+                openvocab_cfg = OpenVocabConfig(
+                    proposer_type=self.config.detection.openvocab_proposer,
+                    vocab_preset=self.config.detection.openvocab_vocab_preset,
+                    top_k=self.config.detection.openvocab_top_k,
+                    min_similarity=self.config.detection.openvocab_min_similarity,
+                    enable_evidence_gates=self.config.detection.openvocab_enable_evidence_gates,
+                    confidence_gate=self.config.detection.openvocab_confidence_gate,
+                    margin_gate=self.config.detection.openvocab_margin_gate,
+                    temporal_window=self.config.detection.openvocab_temporal_window,
+                    temporal_threshold=self.config.detection.openvocab_temporal_threshold,
+                    vlm_gate=self.config.detection.openvocab_vlm_gate,
+                    detection_confidence=self.config.detection.confidence_threshold,
+                    device=str(getattr(self.model_manager, "device", "auto")),
+                    # Reuse YOLO model from model_manager for yolo_clip proposer
+                    yolo_model=self.model_manager.yolo if self.config.detection.openvocab_proposer == "yolo_clip" else None,
+                )
+                openvocab_pipeline = OpenVocabPipeline.from_config(openvocab_cfg)
+                logger.info(f"OpenVocab pipeline initialized: proposer={openvocab_cfg.proposer_type}, vocab={openvocab_cfg.vocab_preset}")
+            except Exception as e:
+                logger.error(f"Failed to initialize OpenVocab pipeline: {e}")
+                raise
+
         self.observer = FrameObserver(
             config=self.config.detection,
             detector_backend=("hybrid" if use_hybrid else self.config.detection.backend),
@@ -271,6 +300,7 @@ class PerceptionEngine:
             gdino_model=gdino_model,
             gdino_processor=gdino_processor,
             hybrid_detector=hybrid_detector,
+            openvocab_pipeline=openvocab_pipeline,
             target_fps=self.config.target_fps,
             enable_3d=self.config.enable_3d,
             enable_occlusion=self.config.enable_occlusion,

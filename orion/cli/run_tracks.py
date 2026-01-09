@@ -60,6 +60,9 @@ def process_video_to_tracks(
     hybrid_min_detections: int = 3,
     hybrid_always_verify: str | None = None,
     hybrid_secondary_conf: float = 0.30,
+    openvocab_proposer: str = "yolo_clip",
+    openvocab_vocab: str = "lvis",
+    openvocab_top_k: int = 5,
     confidence_threshold: float = 0.25,
     iou_threshold: float = 0.3,
     max_age: int = 30,
@@ -81,8 +84,11 @@ def process_video_to_tracks(
         episode_id: Episode identifier for results
         target_fps: Target FPS for processing
         yolo_model: YOLO variant to use
-        detector_backend: Detection backend ('yolo', 'yoloworld', 'groundingdino', 'hybrid')
+        detector_backend: Detection backend ('yolo', 'yoloworld', 'groundingdino', 'hybrid', 'openvocab')
         gdino_model: GroundingDINO model ID when using groundingdino/hybrid
+        openvocab_proposer: OpenVocab proposer ('owl', 'yolo_clip')
+        openvocab_vocab: OpenVocab vocabulary preset ('lvis', 'coco', 'objects365')
+        openvocab_top_k: Number of label hypotheses for openvocab backend
         confidence_threshold: Min detection confidence
         iou_threshold: Min IoU for track association
         max_age: Frames to keep unmatched tracks
@@ -196,12 +202,37 @@ def process_video_to_tracks(
             device=device,
         )
 
+    # OpenVocab pipeline (Propose → Label architecture)
+    openvocab_pipeline = None
+    if detector_backend == "openvocab":
+        logger.info(f"Initializing OpenVocab pipeline: proposer={openvocab_proposer}, vocab={openvocab_vocab}")
+        try:
+            from orion.perception.open_vocab_pipeline import OpenVocabPipeline, OpenVocabConfig
+            
+            openvocab_cfg = OpenVocabConfig(
+                proposer_type=openvocab_proposer,
+                vocab_preset=openvocab_vocab,
+                top_k=openvocab_top_k,
+                detection_confidence=confidence_threshold,
+                device=device,
+            )
+            openvocab_pipeline = OpenVocabPipeline.from_config(openvocab_cfg)
+        except Exception as e:
+            logger.error(f"Failed to initialize OpenVocab pipeline: {e}")
+            raise
+
     det_config = DetectionConfig(
         backend=detector_backend,
         model=yolo_model,
         confidence_threshold=confidence_threshold,
         yoloworld_use_custom_classes=(False if yoloworld_open_vocab else True),
     )
+    
+    # Add openvocab-specific config fields
+    if detector_backend == "openvocab":
+        det_config.openvocab_proposer = openvocab_proposer
+        det_config.openvocab_vocab_preset = openvocab_vocab
+        det_config.openvocab_top_k = openvocab_top_k
     if yoloworld_prompt:
         det_config.yoloworld_prompt_preset = "custom"
         det_config.yoloworld_prompt = yoloworld_prompt
@@ -214,6 +245,7 @@ def process_video_to_tracks(
         gdino_model=gdino,
         gdino_processor=gdino_processor,
         hybrid_detector=hybrid_detector,
+        openvocab_pipeline=openvocab_pipeline,
         target_fps=target_fps,
         enable_3d=enable_3d,
         depth_model_size=depth_model_size,

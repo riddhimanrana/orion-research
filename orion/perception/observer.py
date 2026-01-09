@@ -49,12 +49,13 @@ class FrameObserver:
     def __init__(
         self,
         config: DetectionConfig,
-        detector_backend: Literal["yolo", "yoloworld", "groundingdino", "hybrid"] = "yolo",
+        detector_backend: Literal["yolo", "yoloworld", "groundingdino", "hybrid", "openvocab"] = "yolo",
         yolo_model: Optional[Any] = None,
         yoloworld_model: Optional[Any] = None,
         gdino_model: Optional[Any] = None,
         gdino_processor: Optional[Any] = None,
         hybrid_detector: Optional[Any] = None,
+        openvocab_pipeline: Optional[Any] = None,
         target_fps: float = 2.0,
         show_progress: bool = True,
         enable_3d: bool = False,
@@ -67,11 +68,12 @@ class FrameObserver:
         Initialize observer.
         
         Args:
-            detector_backend: Detection backend identifier ('yolo', 'yoloworld', 'groundingdino')
+            detector_backend: Detection backend identifier ('yolo', 'yoloworld', 'groundingdino', 'openvocab')
             yolo_model: YOLO model instance from ModelManager
             yoloworld_model: YOLO-World model instance when backend='yoloworld'
             gdino_model: GroundingDINO model instance
             gdino_processor: GroundingDINO processor instance
+            openvocab_pipeline: OpenVocabPipeline instance when backend='openvocab'
             config: Detection configuration
             target_fps: Target frames per second for processing
             show_progress: Show progress bar
@@ -88,6 +90,7 @@ class FrameObserver:
         self.gdino = gdino_model if detector_backend in {"groundingdino", "hybrid"} else None
         self.gdino_processor = gdino_processor if detector_backend in {"groundingdino", "hybrid"} else None
         self.hybrid_detector = hybrid_detector if detector_backend == "hybrid" else None
+        self.openvocab_pipeline = openvocab_pipeline if detector_backend == "openvocab" else None
 
         # YOLO-World can internally keep text feature tensors (e.g., txt_feats) on CPU
         # even when the model runs on CUDA/MPS. We track a preferred device and
@@ -107,6 +110,8 @@ class FrameObserver:
                 raise ValueError("Hybrid backend selected but GroundingDINO model/processor was not provided")
             if self.hybrid_detector is None:
                 raise ValueError("Hybrid backend selected but hybrid_detector was not provided")
+        if self.detector_backend == "openvocab" and self.openvocab_pipeline is None:
+            raise ValueError("OpenVocab backend selected but openvocab_pipeline was not provided")
 
         # Detector class registry (used by downstream trackers)
         if self.detector_backend in {"yolo", "hybrid"} and hasattr(self.yolo, "names"):
@@ -415,6 +420,8 @@ class FrameObserver:
             return self._detect_with_groundingdino(frame)
         elif self.detector_backend == "hybrid":
             return self._detect_with_hybrid(frame)
+        elif self.detector_backend == "openvocab":
+            return self._detect_with_openvocab(frame)
         else:
             return self._detect_with_yolo(frame)
 
@@ -551,6 +558,44 @@ class FrameObserver:
                         "source": "yoloworld",
                     }
                 )
+        return detections
+
+    @profile("observer_detect_with_openvocab")
+    def _detect_with_openvocab(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+        """Run OpenVocab pipeline (Propose → Label) and normalize outputs.
+        
+        The OpenVocabPipeline uses:
+        1. Proposer: Class-agnostic object proposals (OWL-ViT2 or YOLO+CLIP fallback)
+        2. VocabularyBank: CLIP-based label matching against LVIS/COCO vocabulary
+        3. EvidenceGates: Multi-level verification for label confidence
+        """
+        if self.openvocab_pipeline is None:
+            return []
+
+        # Run the propose→label pipeline
+        results = self.openvocab_pipeline.detect(frame)
+
+        detections: List[Dict[str, Any]] = []
+        for det in results:
+            bbox = det.get("bbox")
+            if not bbox or len(bbox) != 4:
+                continue
+            
+            # Build detection record with hypothesis information
+            detection = {
+                "bbox": [float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])],
+                "confidence": float(det.get("confidence", 0.0)),
+                "class_id": det.get("class_id", -1),
+                "class_name": str(det.get("label", "object")),
+                "source": "openvocab",
+                # Schema v2 hypothesis fields
+                "label_hypotheses_topk": det.get("label_hypotheses", []),
+                "verification_status": det.get("verification_status", "unverified"),
+                "verification_source": det.get("verification_source"),
+                "proposal_confidence": float(det.get("proposal_confidence", det.get("confidence", 0.0))),
+            }
+            detections.append(detection)
+        
         return detections
 
     @profile("observer_detect_with_yolo")

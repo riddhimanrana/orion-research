@@ -78,12 +78,13 @@ YOLOWORLD_PROMPT_INDOOR_FULL = (
 
 @dataclass
 class DetectionConfig:
-    """Detection backend configuration (YOLO, YOLO-World, or GroundingDINO)."""
+    """Detection backend configuration (YOLO, YOLO-World, GroundingDINO, or OpenVocab)."""
 
-    backend: Literal["yolo", "yoloworld", "groundingdino", "hybrid"] = "yoloworld"
-    """Primary detector to use for frame observations. Options: 'yolo', 'yoloworld', 'groundingdino', 'hybrid'
+    backend: Literal["yolo", "yoloworld", "groundingdino", "hybrid", "openvocab"] = "yoloworld"
+    """Primary detector to use for frame observations. Options: 'yolo', 'yoloworld', 'groundingdino', 'hybrid', 'openvocab'
     
     v2 default: 'yoloworld' for open-vocabulary detection without retraining.
+    v3 option: 'openvocab' for propose→label pipeline with vocabulary bank (no hand-picked prompts).
     """
 
     # Model specific settings
@@ -206,11 +207,51 @@ class DetectionConfig:
     yoloworld_candidate_rotate_every_frames: int = 4
     """Rotate candidate prompt groups every N sampled frames to cover long-tail labels over time."""
 
+    # ===========================================
+    # OpenVocab backend options (Propose → Label)
+    # ===========================================
+    openvocab_proposer: Literal["owl", "yolo_clip"] = "yolo_clip"
+    """Proposal generator for openvocab backend.
+    - 'owl': OWL-ViT2 class-agnostic proposals (HuggingFace model)
+    - 'yolo_clip': YOLO11 proposals + CLIP visual embeddings (fallback, faster)
+    """
+
+    openvocab_vocab_preset: Literal["lvis", "coco", "objects365"] = "lvis"
+    """Vocabulary bank preset for label matching.
+    - 'lvis': ~1200 fine-grained LVIS categories
+    - 'coco': 80 COCO classes (faster, less coverage)
+    - 'objects365': 365 Objects365 classes
+    """
+
+    openvocab_top_k: int = 5
+    """Number of candidate labels to store per detection."""
+
+    openvocab_min_similarity: float = 0.20
+    """Minimum CLIP similarity threshold for label matching (0-1)."""
+
+    openvocab_enable_evidence_gates: bool = True
+    """If True, apply evidence gates (temporal, margin, VLM) for label verification."""
+
+    openvocab_confidence_gate: float = 0.50
+    """Confidence threshold for automatic verification (bypass gates if above)."""
+
+    openvocab_margin_gate: float = 0.10
+    """Minimum margin between top-2 hypotheses for confident labeling."""
+
+    openvocab_temporal_window: int = 5
+    """Number of frames for temporal consistency check."""
+
+    openvocab_temporal_threshold: float = 0.60
+    """Fraction of frames where label must appear for temporal verification."""
+
+    openvocab_vlm_gate: bool = False
+    """If True, escalate ambiguous detections to VLM for verification (slower)."""
+
     def __post_init__(self):
         """Validate detection config."""
-        if self.backend not in {"yolo", "yoloworld", "groundingdino", "hybrid"}:
+        if self.backend not in {"yolo", "yoloworld", "groundingdino", "hybrid", "openvocab"}:
             raise ValueError(
-                "backend must be 'yolo', 'yoloworld', 'groundingdino', or 'hybrid', "
+                "backend must be 'yolo', 'yoloworld', 'groundingdino', 'hybrid', or 'openvocab', "
                 f"got {self.backend}"
             )
 
@@ -273,6 +314,37 @@ class DetectionConfig:
                 raise ValueError("yoloworld_refinement_every_n_sampled_frames must be >= 1")
             if self.yoloworld_refinement_max_crops_per_class < 1:
                 raise ValueError("yoloworld_refinement_max_crops_per_class must be >= 1")
+
+        # Validate openvocab backend options
+        if self.backend == "openvocab":
+            if self.openvocab_proposer not in {"owl", "yolo_clip"}:
+                raise ValueError(
+                    f"openvocab_proposer must be 'owl' or 'yolo_clip', got {self.openvocab_proposer}"
+                )
+            if self.openvocab_vocab_preset not in {"lvis", "coco", "objects365"}:
+                raise ValueError(
+                    f"openvocab_vocab_preset must be 'lvis', 'coco', or 'objects365', got {self.openvocab_vocab_preset}"
+                )
+            if self.openvocab_top_k < 1:
+                raise ValueError(f"openvocab_top_k must be >= 1, got {self.openvocab_top_k}")
+            if not (0.0 <= self.openvocab_min_similarity <= 1.0):
+                raise ValueError(
+                    f"openvocab_min_similarity must be in [0, 1], got {self.openvocab_min_similarity}"
+                )
+            if not (0.0 <= self.openvocab_confidence_gate <= 1.0):
+                raise ValueError(
+                    f"openvocab_confidence_gate must be in [0, 1], got {self.openvocab_confidence_gate}"
+                )
+            if not (0.0 <= self.openvocab_margin_gate <= 1.0):
+                raise ValueError(
+                    f"openvocab_margin_gate must be in [0, 1], got {self.openvocab_margin_gate}"
+                )
+            if self.openvocab_temporal_window < 1:
+                raise ValueError(f"openvocab_temporal_window must be >= 1, got {self.openvocab_temporal_window}")
+            if not (0.0 <= self.openvocab_temporal_threshold <= 1.0):
+                raise ValueError(
+                    f"openvocab_temporal_threshold must be in [0, 1], got {self.openvocab_temporal_threshold}"
+                )
 
         # Validate candidate prompt groups early (applies for any backend).
         if self.yoloworld_enable_candidate_labels:

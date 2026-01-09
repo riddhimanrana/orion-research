@@ -71,6 +71,9 @@ def _phase1(args: argparse.Namespace, video_path: Path, results_dir: Path) -> Di
         hybrid_min_detections=args.hybrid_min_detections,
         hybrid_always_verify=args.hybrid_always_verify,
         hybrid_secondary_conf=args.hybrid_secondary_conf,
+        openvocab_proposer=getattr(args, 'openvocab_proposer', 'yolo_clip'),
+        openvocab_vocab=getattr(args, 'openvocab_vocab', 'lvis'),
+        openvocab_top_k=getattr(args, 'openvocab_top_k', 5),
         confidence_threshold=args.confidence,
         iou_threshold=args.iou,
         max_age=args.max_age,
@@ -211,7 +214,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--detector-backend",
         type=str,
         default="yolo",
-        choices=["yolo", "yoloworld", "groundingdino", "hybrid"],
+        choices=["yolo", "yoloworld", "groundingdino", "hybrid", "openvocab"],
         help="Detection backend for Phase 1 (default: yolo)",
     )
     parser.add_argument(
@@ -249,6 +252,28 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Custom prompt/classes for YOLO-World set_classes() (dot-separated: 'chair . table . lamp')",
+    )
+    
+    # OpenVocab backend settings (propose→label architecture)
+    parser.add_argument(
+        "--openvocab-proposer",
+        type=str,
+        default="yolo_clip",
+        choices=["owl", "yolo_clip"],
+        help="OpenVocab proposer backend: owl (OWL-ViT2) or yolo_clip (YOLO+CLIP fallback)",
+    )
+    parser.add_argument(
+        "--openvocab-vocab",
+        type=str,
+        default="lvis",
+        choices=["lvis", "coco", "objects365"],
+        help="Vocabulary bank preset for openvocab backend",
+    )
+    parser.add_argument(
+        "--openvocab-top-k",
+        type=int,
+        default=5,
+        help="Number of label hypotheses per detection (openvocab backend)",
     )
 
     parser.add_argument("--confidence", type=float, default=0.25, help="YOLO confidence threshold")

@@ -123,15 +123,44 @@ def build_config(args: argparse.Namespace) -> tuple[PerceptionConfig, str]:
 
 
 def observation_to_dict(obs: Any) -> dict:
-    """Convert Observation object to serializable dict."""
+    """Convert Observation object to serializable dict.
+    
+    Supports:
+    - Dict inputs (passed through with schema v2 field normalization)
+    - Observation dataclass (legacy format)
+    """
     if isinstance(obs, dict):
-        return obs
+        # For dict inputs (e.g., from openvocab pipeline), normalize to schema v2
+        d = dict(obs)  # copy
+        
+        # Ensure bbox field is present (primary field)
+        if "bbox" not in d and "bbox_xyxy" in d:
+            d["bbox"] = d["bbox_xyxy"]
+        elif "bbox" not in d and "bounding_box" in d:
+            bb = d["bounding_box"]
+            if isinstance(bb, dict):
+                d["bbox"] = [bb.get("x1", 0), bb.get("y1", 0), bb.get("x2", 0), bb.get("y2", 0)]
+            else:
+                d["bbox"] = list(bb) if hasattr(bb, "__iter__") else []
+        
+        # Ensure class_name is present (primary field for labels)
+        if "class_name" not in d and "label" in d:
+            d["class_name"] = d["label"]
+        if "class_name" not in d and "object_class" in d:
+            oc = d["object_class"]
+            d["class_name"] = oc.value if hasattr(oc, "value") else str(oc)
+        
+        # Schema v2 hypothesis fields (pass through if present)
+        # label_hypotheses, verification_status, verification_source, proposal_confidence
+        
+        return d
     
     # Handle Observation dataclass
     d = {
         "frame_number": obs.frame_number,
         "timestamp": obs.timestamp,
         "object_class": obs.object_class.value if hasattr(obs.object_class, "value") else str(obs.object_class),
+        "class_name": obs.object_class.value if hasattr(obs.object_class, "value") else str(obs.object_class),
         "confidence": float(obs.confidence),
         "bounding_box": {
             "x1": obs.bounding_box.x1,
@@ -139,6 +168,7 @@ def observation_to_dict(obs: Any) -> dict:
             "x2": obs.bounding_box.x2,
             "y2": obs.bounding_box.y2,
         },
+        "bbox": [obs.bounding_box.x1, obs.bounding_box.y1, obs.bounding_box.x2, obs.bounding_box.y2],
         "centroid": list(obs.centroid),
         "temp_id": obs.temp_id,
     }
@@ -196,7 +226,7 @@ def main():
         "--detection-backend",
         type=str,
         default="yoloworld",
-        choices=["yolo", "yoloworld"],
+        choices=["yolo", "yoloworld", "openvocab"],
         help="Detection backend",
     )
     parser.add_argument(
