@@ -38,11 +38,15 @@ class OpenVocabConfig:
     """Configuration for open-vocabulary detection pipeline."""
     
     # Proposal backend
-    proposer_type: str = "yolo_clip"
-    """Proposal backend: 'owl' (OWL-ViT), 'yolo_clip' (YOLO + CLIP fallback)."""
+    proposer_type: str = "yoloworld_clip"
+    """Proposal backend: 'owl' (OWL-ViT), 'yolo_clip' (YOLO + CLIP), 'yoloworld_clip' (YOLO-World + CLIP)."""
     
     proposer_model: str = "google/owlv2-base-patch16-ensemble"
     """Model for proposals (OWL-ViT model name or YOLO weights)."""
+    
+    # YOLO-World vocabulary for proposals
+    yoloworld_classes: Optional[List[str]] = None
+    """Custom classes for YOLO-World proposer. If None, uses indoor defaults."""
     
     # Vocabulary bank
     vocab_preset: str = "lvis"
@@ -233,11 +237,34 @@ class OpenVocabPipeline:
                 proposer = OWLProposer(proposer_config, vocab_bank=vocab_bank)
                 proposer._load_model()  # Test loading
             except Exception as e:
-                logger.warning(f"OWL-ViT not available, falling back to YOLO+CLIP: {e}")
-                config.proposer_type = "yolo_clip"
+                logger.warning(f"OWL-ViT not available, falling back to YOLO-World+CLIP: {e}")
+                config.proposer_type = "yoloworld_clip"
         
-        if config.proposer_type == "yolo_clip" or proposer is None:
-            # Use pre-initialized YOLO or load new one
+        if config.proposer_type == "yoloworld_clip":
+            # Use YOLO-World for better open-vocab proposals
+            from ultralytics import YOLO
+            
+            # Load YOLO-World model
+            yolo_world = YOLO("yolov8m-worldv2.pt")
+            yolo_world.to(resolved_device)
+            
+            # Set classes for YOLO-World
+            yoloworld_classes = config.yoloworld_classes or cls._get_default_yoloworld_classes()
+            yolo_world.set_classes(yoloworld_classes)
+            
+            # Load CLIP for refined embeddings
+            clip_model = cls._load_clip(config.embedding_model, resolved_device)
+            
+            proposer = OWLProposerFallback(
+                config=proposer_config,
+                yolo_model=yolo_world,
+                clip_model=clip_model,
+                vocab_bank=vocab_bank,
+            )
+            logger.info(f"Using YOLO-World proposer with {len(yoloworld_classes)} classes")
+        
+        elif config.proposer_type == "yolo_clip" or proposer is None:
+            # Fallback to vanilla YOLO + CLIP
             yolo_model = config.yolo_model
             if yolo_model is None:
                 from ultralytics import YOLO
@@ -253,6 +280,7 @@ class OpenVocabPipeline:
                 clip_model=clip_model,
                 vocab_bank=vocab_bank,
             )
+            logger.info("Using YOLO+CLIP proposer (limited to COCO classes)")
         
         return cls(
             config=config,
@@ -273,6 +301,30 @@ class OpenVocabPipeline:
         elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             return "mps"
         return "cpu"
+    
+    @staticmethod
+    def _get_default_yoloworld_classes() -> List[str]:
+        """Default classes for YOLO-World open-vocab detection."""
+        return [
+            # People
+            "person", "face", "hand",
+            # Electronics
+            "laptop", "computer", "monitor", "tv", "keyboard", "mouse", 
+            "phone", "tablet", "remote", "camera", "speaker", "headphones",
+            # Furniture
+            "chair", "couch", "table", "desk", "bed", "shelf", "cabinet",
+            # Containers
+            "cup", "mug", "glass", "bottle", "bowl", "plate", "box", "bag",
+            "backpack", "vase", "basket",
+            # Decor
+            "picture frame", "painting", "clock", "mirror", "lamp", "plant",
+            "flowers", "candle", "book", "pillow", "blanket", "rug",
+            # Kitchen
+            "refrigerator", "microwave", "oven", "sink", "pan", "pot",
+            # Other
+            "door", "window", "curtain", "stairs",
+            "",  # Background class per Ultralytics guidance
+        ]
     
     @staticmethod
     def _load_clip(model_name: str, device: str) -> Any:
