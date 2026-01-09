@@ -117,7 +117,7 @@ def render_insight_overlay(
             rendered_path = output_path
 
     return rendered_path
-from __future__ import annotations
+
 
 import json
 import logging
