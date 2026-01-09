@@ -233,7 +233,7 @@ def run_memgraph_ingest(
         
         result = export_results_to_memgraph(
             results_dir=results_dir,
-            memgraph_host=memgraph_host,
+            host=memgraph_host,
             clear_existing=True,
         )
         
