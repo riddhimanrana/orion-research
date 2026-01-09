@@ -259,10 +259,44 @@ Common Patterns:
 - Interactions: MATCH (obj)-[r:HELD_BY]->(agent) RETURN obj.class_name, agent.class_name
 """
         
+        def _looks_like_sql(q: str) -> bool:
+            u = (q or "").upper()
+            return any(tok in u for tok in ("SELECT ", " FROM ", "INSERT ", "UPDATE ", "DELETE "))
+
+        def _exec(cypher: str) -> QueryResult:
+            # Execute the generated query
+            cursor = self.backend.connection.cursor()
+            cursor.execute(cypher)
+            results = cursor.fetchall()
+
+            # Convert results to evidence dicts
+            evidence: List[Dict[str, Any]] = []
+            if results:
+                # Try to get column names
+                try:
+                    col_names = [desc[0] for desc in cursor.description] if cursor.description else None
+                except Exception:
+                    col_names = None
+
+                for row in results[:20]:  # Limit to 20 results
+                    if col_names:
+                        evidence.append(dict(zip(col_names, row)))
+                    else:
+                        evidence.append({f"col_{i}": v for i, v in enumerate(row)})
+
+            return QueryResult(
+                query_type="neural_cypher",
+                question=question,
+                answer="",  # Will be filled by LLM synthesis
+                evidence=evidence,
+                confidence=1.0 if evidence else 0.0,
+                cypher_query=cypher,
+            )
+
         try:
             cypher = self.reasoning_model.generate_cypher(question, schema_hint)
             
-            if not cypher or len(cypher) < 10:
+            if not cypher or len(cypher) < 10 or _looks_like_sql(cypher):
                 logger.warning(f"Invalid Cypher generated: {cypher}")
                 return QueryResult(
                     query_type="neural_cypher",
@@ -272,37 +306,28 @@ Common Patterns:
                     confidence=0.0,
                     cypher_query=cypher,
                 )
-            
-            # Execute the generated query
-            cursor = self.backend.connection.cursor()
-            cursor.execute(cypher)
-            results = cursor.fetchall()
-            
-            # Convert results to evidence dicts
-            # Get column names from cursor description if available
-            evidence = []
-            if results:
-                # Try to get column names
-                try:
-                    col_names = [desc[0] for desc in cursor.description] if cursor.description else None
-                except:
-                    col_names = None
-                
-                for row in results[:20]:  # Limit to 20 results
-                    if col_names:
-                        evidence.append(dict(zip(col_names, row)))
-                    else:
-                        # Fallback: use positional names
-                        evidence.append({f"col_{i}": v for i, v in enumerate(row)})
-            
-            return QueryResult(
-                query_type="neural_cypher",
-                question=question,
-                answer="",  # Will be filled by LLM synthesis
-                evidence=evidence,
-                confidence=1.0 if evidence else 0.0,
-                cypher_query=cypher,
-            )
+
+            try:
+                return _exec(cypher)
+            except Exception as e:
+                # One-shot retry: ask the model to correct the Cypher using the parse/runtime error.
+                logger.warning(f"Neural Cypher execution failed: {e}")
+                retry_prompt = (
+                    f"{question}\n\n"
+                    f"The previous Cypher failed in Memgraph with this error:\n{e}\n\n"
+                    "Please output a corrected Cypher query only (no markdown, no explanation)."
+                )
+                cypher2 = self.reasoning_model.generate_cypher(retry_prompt, schema_hint)
+                if not cypher2 or len(cypher2) < 10 or _looks_like_sql(cypher2):
+                    return QueryResult(
+                        query_type="neural_cypher",
+                        question=question,
+                        answer="",
+                        evidence=[],
+                        confidence=0.0,
+                        cypher_query=cypher2,
+                    )
+                return _exec(cypher2)
             
         except Exception as e:
             logger.warning(f"Neural Cypher execution failed: {e}")

@@ -175,6 +175,8 @@ Rules:
 2. Use proper Memgraph syntax (similar to Neo4j)
 3. Limit results to 20 unless counting
 4. Include relevant properties in RETURN
+5. Do NOT use SQL syntax (e.g., SELECT, FROM) or pseudo-code
+6. Only use labels/relationships that appear in the schema exactly as written
 
 Cypher query:"""
         
