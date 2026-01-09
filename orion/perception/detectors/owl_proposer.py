@@ -412,8 +412,10 @@ class OWLProposerFallback:
         **kwargs,
     ) -> List[Dict[str, Any]]:
         """Generate proposals using YOLO, then embed with CLIP."""
-        # Run YOLO detection
-        results = self.yolo(frame, verbose=False)[0]
+        # Run YOLO detection with explicit low conf threshold
+        # YOLO default is 0.25, but we want more proposals for CLIP classification
+        yolo_conf = min(self.config.objectness_threshold, 0.10)
+        results = self.yolo(frame, conf=yolo_conf, verbose=False)[0]
         
         proposals = []
         boxes = results.boxes
