@@ -83,6 +83,11 @@ class Track:
                 "hybrid_primary_count",
                 "hybrid_secondary_count",
                 "hybrid_merged_count",
+                # Schema v2 hypothesis / verification fields
+                "label_hypotheses",
+                "verification_status",
+                "verification_source",
+                "proposal_confidence",
             ):
                 if k in self.metadata:
                     d[k] = self.metadata.get(k)
@@ -640,9 +645,17 @@ class EnhancedTracker:
                 "hybrid_primary_count",
                 "hybrid_secondary_count",
                 "hybrid_merged_count",
+                # Schema v2 hypothesis / verification fields
+                "label_hypotheses",
+                "label_hypotheses_topk",
+                "verification_status",
+                "verification_source",
+                "proposal_confidence",
             ):
                 if k in detection:
-                    track.metadata[k] = detection.get(k)
+                    # Map label_hypotheses_topk to label_hypotheses for consistency
+                    key = "label_hypotheses" if k == "label_hypotheses_topk" else k
+                    track.metadata[key] = detection.get(k)
         
         # Update appearance (EMA)
         if embedding is not None:
@@ -713,9 +726,17 @@ class EnhancedTracker:
             "hybrid_primary_count",
             "hybrid_secondary_count",
             "hybrid_merged_count",
+            # Schema v2 hypothesis / verification fields
+            "label_hypotheses",
+            "label_hypotheses_topk",
+            "verification_status",
+            "verification_source",
+            "proposal_confidence",
         ):
             if k in detection:
-                meta[k] = detection.get(k)
+                # Map label_hypotheses_topk to label_hypotheses for consistency
+                key = "label_hypotheses" if k == "label_hypotheses_topk" else k
+                meta[key] = detection.get(k)
         
         track = Track(
             id=self.next_id,
