@@ -62,7 +62,7 @@ class DeepResearchEvaluator:
                 batch_size=16,
                 device=self.device,
             ),
-            target_fps=5.0,
+            target_fps=1.0,  # Speed up for quick research
             enable_tracking=True,
             enable_3d=False
         )
@@ -72,14 +72,14 @@ class DeepResearchEvaluator:
         return PerceptionConfig(
             detection=DetectionConfig(
                 backend="groundingdino",
-                model="IDEA-Research/grounding-dino-base",
+                model="IDEA-Research/grounding-dino-tiny", # Switch to tiny for reliability/speed in research
                 confidence_threshold=0.20,
             ),
             embedding=EmbeddingConfig(
                 batch_size=8, # V-JEPA2 is heavy
                 device=self.device,
             ),
-            target_fps=5.0,
+            target_fps=1.0,  # Speed up for quick research
             enable_tracking=True,
             enable_3d=False
         )
