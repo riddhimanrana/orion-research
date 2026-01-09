@@ -104,6 +104,7 @@ def _phase2(args: argparse.Namespace, video_path: Path, results_dir: Path) -> Di
         results_dir=results_dir,
         cosine_threshold=args.reid_threshold,
         max_crops_per_track=args.max_crops_per_track,
+        reid_batch_size=args.reid_batch_size,
         class_thresholds=None,
     )
     return json.loads(memory_path.read_text())
@@ -203,6 +204,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable-3d", action="store_true", help="Enable 3D perception (Depth/SLAM)")
     parser.add_argument("--reid-threshold", type=float, default=0.70)
     parser.add_argument("--max-crops-per-track", type=int, default=5)
+    parser.add_argument(
+        "--reid-batch-size",
+        type=int,
+        default=8,
+        help="Batch size for V-JEPA2 Re-ID embedding in Phase 2",
+    )
 
     parser.add_argument("--skip-phase1", action="store_true")
     parser.add_argument("--skip-memory", action="store_true")

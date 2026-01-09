@@ -45,9 +45,9 @@ Orion v2 is a memory-centric video understanding system that tracks objects pers
                                            ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
 │  STAGE 2: VIDEO EMBEDDING (RE-ID) - THE CRITICAL FIX                                    │
-│  ┌────────────────────┐    ┌────────────────────┐    ┌────────────────────┐            │
-│  │  Track Crops       │───▶│  V-JEPA2 Encoder   │───▶│  Cosine Clustering │            │
-│  │  (multi-frame)     │    │  (3D-aware ViT)    │    │  (threshold tuning)│            │
+│  ┌────────────────────┐    ┌────────────────────┐    ┌────────────────────┐             │
+│  │  Track Crops       │───▶│  V-JEPA2 Encoder   │───▶│  Cosine Clustering │             │
+│  │  (multi-frame)     │    │  (3D-aware ViT)    │    │  (threshold tuning)│             │
 │  └────────────────────┘    └────────────────────┘    └────────────────────┘            │
 │           │                         │                          │                        │
 │           │                         │                          ▼                        │
@@ -105,8 +105,7 @@ Orion v2 is a memory-centric video understanding system that tracks objects pers
 │  │  SCENE GRAPH EDGES (per frame):                                          │           │
 │  │  • NEAR(obj_a, obj_b, distance)                                          │           │
 │  │  • ON(obj_a, obj_b)                                                      │           │
-│  │  • HELD_BY(object, person)                                               │           │
-│  │  • CONTAINS(container, object)                                           │           │
+│  │  • HELD_BY(object, person)                                               │        ndi  │
 │  │                                                                           │           │
 │  │  CIS EDGES (temporal):                                                    │           │
 │  │  • CAUSES(event_a, event_b, influence_score)                             │           │

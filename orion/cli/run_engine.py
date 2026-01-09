@@ -85,6 +85,15 @@ def build_config(args: argparse.Namespace) -> tuple[PerceptionConfig, str]:
     if args.detection_backend == "yoloworld":
         config.detection.yoloworld_model = args.yoloworld_model
         config.detection.yoloworld_prompt_preset = args.yoloworld_prompt
+        # Candidate labels are a non-committal hypothesis layer that powers:
+        # - FastVLM semantic verification in `candidates_only` mode
+        # - richer overlays/debugging
+        # To avoid unexpected overhead, we only auto-enable them when semantic verification is enabled.
+        if args.disable_candidate_labels:
+            config.detection.yoloworld_enable_candidate_labels = False
+        else:
+            if bool(args.enable_semantic_verifier):
+                config.detection.yoloworld_enable_candidate_labels = True
         # Crop refinement settings
         config.detection.yoloworld_enable_crop_refinement = args.enable_crop_refinement
         config.detection.yoloworld_refinement_every_n_sampled_frames = args.crop_refinement_every_n
@@ -95,7 +104,9 @@ def build_config(args: argparse.Namespace) -> tuple[PerceptionConfig, str]:
 
     # Semantic verifier settings (via SemanticVerificationConfig)
     config.semantic_verification.enabled = args.enable_semantic_verifier
-    if args.semantic_candidates_only:
+    config.semantic_verification.mode = args.semantic_mode
+    # Back-compat flag: prefer explicit mode if provided.
+    if getattr(args, "semantic_candidates_only", False):
         config.semantic_verification.mode = "candidates_only"
     config.semantic_verification.rerank_blend = args.rerank_blend
 
@@ -229,10 +240,33 @@ def main():
         help="Enable FastVLM semantic verification",
     )
     parser.add_argument(
+        "--semantic-mode",
+        type=str,
+        default="candidates_only",
+        choices=["candidates_only", "low_confidence", "all"],
+        help=(
+            "Which detections to send to the semantic verifier. "
+            "candidates_only: only detections that already have candidate_labels; "
+            "low_confidence: candidate_labels OR confidence below threshold; "
+            "all: verify everything (slow)."
+        ),
+    )
+    # Deprecated/back-compat alias (kept so older scripts don't break).
+    parser.add_argument(
         "--semantic-candidates-only",
         action="store_true",
-        default=True,
-        help="Only add VLM metadata without modifying labels",
+        default=False,
+        help="[DEPRECATED] Alias for --semantic-mode candidates_only",
+    )
+
+    # Candidate labels (YOLO-World)
+    parser.add_argument(
+        "--disable-candidate-labels",
+        action="store_true",
+        help=(
+            "Disable CLIP-based candidate label hypotheses. "
+            "When semantic verification is enabled, candidate labels are auto-enabled unless you pass this flag."
+        ),
     )
     parser.add_argument(
         "--rerank-blend",
@@ -257,6 +291,13 @@ def main():
     # Visualization
     parser.add_argument(
         "--save-viz", action="store_true", help="Save visualization data"
+    )
+
+    # Optional skips (useful for fast overlay/debug runs)
+    parser.add_argument(
+        "--skip-description",
+        action="store_true",
+        help="Skip FastVLM entity description generation (keeps detections/embeddings/tracking)",
     )
 
     args = parser.parse_args()
@@ -293,6 +334,12 @@ def main():
     engine = PerceptionEngine(config=config, verbose=True)
     init_time = time.time() - t0
     logger.info(f"  ✓ Engine initialized in {init_time:.2f}s")
+
+    if args.skip_description:
+        # Entity descriptions are useful for qualitative summaries but slow for
+        # batch overlay regeneration. We keep scene context + semantic verifier.
+        engine.describer = None
+        logger.info("  → Skipping entity description generation (--skip-description)")
 
     # Process video
     logger.info("\n[2/3] Processing video...")

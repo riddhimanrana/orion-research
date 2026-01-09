@@ -264,17 +264,17 @@ def compute_track_embeddings(
     
     # Check if model supports batch embedding
     has_batch = hasattr(reid_model, 'embed_batch')
-    
-    if has_batch and len(all_crops) > batch_size:
-        # Use batch embedding for efficiency
+
+    if has_batch:
+        # Use batch embedding when available (it will internally chunk by batch_size)
         try:
             embeddings = reid_model.embed_batch(all_crops, batch_size=batch_size)
             embs = [emb.numpy().flatten() for emb in embeddings]
         except Exception as e:
             logger.warning(f"Batch embedding failed ({e}), falling back to sequential")
             has_batch = False
-    
-    if not has_batch or len(all_crops) <= batch_size:
+
+    if not has_batch:
         # Sequential fallback
         embs = []
         for crop in all_crops:
@@ -434,6 +434,7 @@ def build_memory_from_tracks(
     results_dir: Path,
     cosine_threshold: float = 0.75,
     max_crops_per_track: int = 5,
+    reid_batch_size: int = 8,
     class_thresholds: Optional[Dict[str, float]] = None,
 ) -> Path:
     """
@@ -445,11 +446,13 @@ def build_memory_from_tracks(
     logger.info("[Phase 2] Building memory from tracks…")
     tracks = _read_tracks_jsonl(tracks_path)
 
-    # Compute per-track embeddings
-    from orion.managers.model_manager import ModelManager
-    mm = ModelManager.get_instance()
     logger.info("Computing per-track embeddings (V-JEPA2 encoder)…")
-    track_embs = compute_track_embeddings(video_path, tracks, max_crops_per_track)
+    track_embs = compute_track_embeddings(
+        video_path,
+        tracks,
+        max_crops_per_track=max_crops_per_track,
+        batch_size=reid_batch_size,
+    )
     logger.info(f"✓ Got embeddings for {len(track_embs)} tracks")
 
     # Cluster tracks into memory objects

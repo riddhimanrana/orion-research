@@ -21,6 +21,7 @@ import argparse
 import json
 import logging
 import os
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -35,6 +36,9 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+
+DEFAULT_GEMINI_MODEL = "gemini-3-flash-preview"
 
 
 # Test questions covering different query types
@@ -83,49 +87,49 @@ class EvaluationReport:
     video_path: str
     episode_id: str
     timestamp: str
+    gemini_model: str = "disabled"
     total_questions: int = 0
     correct_count: int = 0
     partial_count: int = 0
     incorrect_count: int = 0
     avg_latency_ms: float = 0.0
     neural_cypher_success_rate: float = 0.0
+    top_detected_classes: List[Dict[str, Any]] = field(default_factory=list)
+    class_audit: Optional[Dict[str, Any]] = None
     results: List[QueryResult] = field(default_factory=list)
 
-
-def load_dotenv():
-    """Load environment variables from .env file."""
-    env_path = Path(__file__).parent.parent / ".env"
-    if env_path.exists():
-        with open(env_path) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, value = line.split("=", 1)
-                    os.environ.setdefault(key.strip(), value.strip())
-
-
-def setup_gemini():
+def setup_gemini(model_name: str) -> Optional[Any]:
     """Initialize Gemini API for validation."""
-    load_dotenv()
-    
-    api_key = os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        logger.warning("GOOGLE_API_KEY not found - Gemini validation disabled")
-        return None
-    
     try:
         from orion.utils.gemini_client import get_gemini_model
-        model = get_gemini_model("gemini-2.0-flash", api_key=api_key)
-        logger.info("✓ Gemini validation enabled (gemini-2.0-flash)")
+        model = get_gemini_model(model_name)
+        logger.info("✓ Gemini validation enabled (%s)", model_name)
         return model
     except Exception as e:
-        logger.warning(f"Gemini setup failed: {e}")
+        logger.warning("Gemini setup failed (%s): %s", model_name, e)
         return None
+
+
+def _guess_video_mime(video_path: Path) -> str:
+    ext = video_path.suffix.lower()
+    if ext == ".mp4":
+        return "video/mp4"
+    if ext == ".mov":
+        return "video/quicktime"
+    return "application/octet-stream"
+
+
+def prepare_video_payload(video_path: Path) -> Dict[str, Any]:
+    """Prepare a reusable video payload for Gemini (sent with each request)."""
+    return {
+        "mime_type": _guess_video_mime(video_path),
+        "data": video_path.read_bytes(),
+    }
 
 
 def validate_with_gemini(
     gemini_model,
-    video_path: Path,
+    video_payload: Dict[str, Any],
     question: str,
     orion_answer: str,
 ) -> tuple:
@@ -138,19 +142,6 @@ def validate_with_gemini(
         return "skipped", "Gemini not available"
     
     try:
-        import google.generativeai as genai
-        
-        # Upload video file
-        video_file = genai.upload_file(str(video_path))
-        
-        # Wait for processing
-        while video_file.state.name == "PROCESSING":
-            time.sleep(1)
-            video_file = genai.get_file(video_file.name)
-        
-        if video_file.state.name != "ACTIVE":
-            return "error", f"Video processing failed: {video_file.state.name}"
-        
         prompt = f"""Watch this video carefully and evaluate the following answer.
 
 QUESTION: {question}
@@ -167,7 +158,7 @@ Respond with ONLY a JSON object:
 {{"verdict": "CORRECT|PARTIAL|INCORRECT|HALLUCINATION", "notes": "brief explanation"}}
 """
         
-        response = gemini_model.generate_content([video_file, prompt])
+        response = gemini_model.generate_content([video_payload, prompt])
         result_text = response.text.strip()
         
         # Parse JSON
@@ -198,17 +189,136 @@ Respond with ONLY a JSON object:
         return "error", str(e)
 
 
+def fetch_top_detected_classes(rag, limit: int = 20) -> List[Dict[str, Any]]:
+    """Read top detected classes from Memgraph to audit semantic filtering quality."""
+    cypher = f"""
+        MATCH (e:Entity)-[r:OBSERVED_IN]->(f:Frame)
+        RETURN e.class_name AS class_name, count(r) AS observations
+        ORDER BY observations DESC
+        LIMIT {int(limit)}
+    """
+    cur = rag.backend.connection.cursor()
+    cur.execute(cypher)
+    rows = cur.fetchall() or []
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        # Memgraph cursor may return tuples
+        if isinstance(row, dict):
+            out.append(row)
+        elif isinstance(row, (list, tuple)) and len(row) >= 2:
+            out.append({"class_name": row[0], "observations": row[1]})
+        else:
+            out.append({"row": row})
+    return out
+
+
+def audit_classes_with_gemini(
+    gemini_model,
+    video_payload: Dict[str, Any],
+    top_classes: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Ask Gemini to confirm whether top detected classes truly appear in the video."""
+    if gemini_model is None:
+        return {"verdict": "skipped", "notes": "Gemini not available"}
+
+    class_list = [str(it.get("class_name")) for it in top_classes if it.get("class_name")]
+    class_list = class_list[:20]
+
+    prompt = f"""Watch this video and verify whether each object class truly appears at any time.
+
+Classes to verify (from an object detector + tracker):
+{json.dumps(class_list)}
+
+Return ONLY JSON in this exact schema:
+{{
+  "present": ["class", ...],
+  "absent": ["class", ...],
+  "unsure": ["class", ...],
+  "notes": "brief overall notes"
+}}
+"""
+
+    try:
+        resp = gemini_model.generate_content([video_payload, prompt])
+        text = (resp.text or "").strip()
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start >= 0 and end > start:
+            return json.loads(text[start:end])
+        return {"present": [], "absent": [], "unsure": [], "notes": text[:200]}
+    except Exception as e:
+        return {"present": [], "absent": [], "unsure": [], "notes": f"error: {e}"}
+
+
+def maybe_run_showcase(
+    *,
+    episode_id: str,
+    video_path: Path,
+    host: str,
+    port: int,
+    fps: float,
+    yolo_model: str,
+    device: str,
+    memgraph_clear: bool,
+) -> None:
+    """Run the end-to-end pipeline to populate results + Memgraph for evaluation."""
+    cmd = [
+        sys.executable,
+        "-m",
+        "orion.cli.run_showcase",
+        "--episode",
+        episode_id,
+        "--video",
+        str(video_path),
+        "--fps",
+        str(fps),
+        "--yolo-model",
+        str(yolo_model),
+        "--device",
+        str(device),
+        "--no-overlay",
+        "--memgraph",
+        "--memgraph-host",
+        str(host),
+        "--memgraph-port",
+        str(port),
+    ]
+    if memgraph_clear:
+        cmd.append("--memgraph-clear")
+
+    logger.info("[Showcase] Running end-to-end pipeline to populate Memgraph...")
+    subprocess.run(cmd, check=True)
+
+
 def run_evaluation(
     video_path: Path,
     episode_id: str,
     host: str = "127.0.0.1",
     port: int = 7687,
     use_gemini: bool = True,
+    gemini_model_name: str = DEFAULT_GEMINI_MODEL,
+    run_showcase_first: bool = False,
+    showcase_fps: float = 4.0,
+    showcase_yolo_model: str = "yolo11m",
+    showcase_device: str = "mps",
+    showcase_memgraph_clear: bool = False,
 ) -> EvaluationReport:
     """Run full evaluation of Orion v3 architecture."""
     
     from orion.query.rag_v2 import OrionRAG
     
+    if run_showcase_first:
+        maybe_run_showcase(
+            episode_id=episode_id,
+            video_path=video_path,
+            host=host,
+            port=port,
+            fps=showcase_fps,
+            yolo_model=showcase_yolo_model,
+            device=showcase_device,
+            memgraph_clear=showcase_memgraph_clear,
+        )
+
     logger.info(f"Connecting to Memgraph at {host}:{port}...")
     rag = OrionRAG(
         host=host,
@@ -223,15 +333,30 @@ def run_evaluation(
     logger.info(f"LLM: {stats['llm_model'] or 'disabled'}")
     
     # Setup Gemini if requested
-    gemini_model = setup_gemini() if use_gemini else None
+    gemini_model = setup_gemini(gemini_model_name) if use_gemini else None
+    video_payload = prepare_video_payload(video_path) if gemini_model else None
     
     # Run evaluation
     report = EvaluationReport(
         video_path=str(video_path),
         episode_id=episode_id,
         timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+        gemini_model=(gemini_model_name if gemini_model else "disabled"),
         total_questions=len(TEST_QUESTIONS),
     )
+
+    # Audit top detected classes for false positives (semantic filtering quality)
+    try:
+        top_classes = fetch_top_detected_classes(rag, limit=20)
+        report.top_detected_classes = top_classes
+        if gemini_model and video_payload is not None:
+            logger.info("\n[Audit] Verifying top detected classes with Gemini...")
+            report.class_audit = audit_classes_with_gemini(gemini_model, video_payload, top_classes)
+            absent = report.class_audit.get("absent", []) if isinstance(report.class_audit, dict) else []
+            if absent:
+                logger.info("[Audit] Gemini marked absent: %s", ", ".join(map(str, absent[:10])))
+    except Exception as e:
+        logger.warning("Class audit skipped (failed): %s", e)
     
     total_latency = 0.0
     neural_cypher_count = 0
@@ -261,10 +386,10 @@ def run_evaluation(
         
         # Validate with Gemini
         verdict, notes = "skipped", ""
-        if gemini_model:
+        if gemini_model and video_payload is not None:
             logger.info("  Validating with Gemini...")
             verdict, notes = validate_with_gemini(
-                gemini_model, video_path, question, result.answer
+                gemini_model, video_payload, question, result.answer
             )
             logger.info(f"  Verdict: {verdict}")
             
@@ -303,6 +428,7 @@ def print_report(report: EvaluationReport):
     print(f"Video: {report.video_path}")
     print(f"Episode: {report.episode_id}")
     print(f"Timestamp: {report.timestamp}")
+    print(f"Gemini: {report.gemini_model}")
     print()
     
     print("📊 PERFORMANCE METRICS")
@@ -311,6 +437,23 @@ def print_report(report: EvaluationReport):
     print(f"  Avg Latency: {report.avg_latency_ms:.0f}ms")
     print(f"  Neural Cypher Success: {report.neural_cypher_success_rate*100:.1f}%")
     print()
+
+    if report.top_detected_classes:
+        print("🔎 DETECTION QUALITY (Top Classes)")
+        print("-" * 40)
+        for it in report.top_detected_classes[:10]:
+            print(f"  - {it.get('class_name')}: {it.get('observations')}")
+        if report.class_audit and isinstance(report.class_audit, dict):
+            absent = report.class_audit.get("absent", [])
+            unsure = report.class_audit.get("unsure", [])
+            if absent:
+                print(f"  Gemini absent (likely false positives): {', '.join(map(str, absent[:10]))}")
+            if unsure:
+                print(f"  Gemini unsure: {', '.join(map(str, unsure[:10]))}")
+            notes = report.class_audit.get("notes")
+            if notes:
+                print(f"  Notes: {str(notes)[:120]}")
+        print()
     
     if report.correct_count + report.partial_count + report.incorrect_count > 0:
         print("🎯 ACCURACY (Gemini Validated)")
@@ -342,6 +485,16 @@ def main():
     parser.add_argument("--host", default="127.0.0.1", help="Memgraph host")
     parser.add_argument("--port", type=int, default=7687, help="Memgraph port")
     parser.add_argument("--no-gemini", action="store_true", help="Skip Gemini validation")
+    parser.add_argument("--gemini-model", default=DEFAULT_GEMINI_MODEL, help="Gemini model name")
+    parser.add_argument(
+        "--run-showcase",
+        action="store_true",
+        help="Run end-to-end showcase (FastVLM + semantic filtering + Memgraph export) before evaluation",
+    )
+    parser.add_argument("--showcase-fps", type=float, default=4.0, help="FPS used when --run-showcase")
+    parser.add_argument("--showcase-yolo-model", default="yolo11m", help="YOLO model used when --run-showcase")
+    parser.add_argument("--showcase-device", default="mps", choices=["cuda", "mps", "cpu"], help="Device used when --run-showcase")
+    parser.add_argument("--showcase-memgraph-clear", action="store_true", help="Clear Memgraph before ingest when --run-showcase")
     parser.add_argument("--output", help="Save report to JSON file")
     args = parser.parse_args()
     
@@ -356,6 +509,12 @@ def main():
         host=args.host,
         port=args.port,
         use_gemini=not args.no_gemini,
+        gemini_model_name=args.gemini_model,
+        run_showcase_first=args.run_showcase,
+        showcase_fps=args.showcase_fps,
+        showcase_yolo_model=args.showcase_yolo_model,
+        showcase_device=args.showcase_device,
+        showcase_memgraph_clear=args.showcase_memgraph_clear,
     )
     
     print_report(report)
@@ -369,12 +528,15 @@ def main():
             "video_path": report.video_path,
             "episode_id": report.episode_id,
             "timestamp": report.timestamp,
+            "gemini_model": report.gemini_model,
             "total_questions": report.total_questions,
             "correct_count": report.correct_count,
             "partial_count": report.partial_count,
             "incorrect_count": report.incorrect_count,
             "avg_latency_ms": report.avg_latency_ms,
             "neural_cypher_success_rate": report.neural_cypher_success_rate,
+            "top_detected_classes": report.top_detected_classes,
+            "class_audit": report.class_audit,
             "results": [
                 {
                     "question": r.question,
