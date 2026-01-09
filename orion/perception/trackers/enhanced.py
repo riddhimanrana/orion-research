@@ -76,6 +76,8 @@ class Track:
         if isinstance(self.metadata, dict) and self.metadata:
             for k in (
                 "detector_source",
+                "detector_source_origin",
+                "detector_source_last",
                 "hybrid_secondary_ran",
                 "hybrid_trigger_reason",
                 "hybrid_primary_count",
@@ -624,8 +626,15 @@ class EnhancedTracker:
 
         # Preserve detector provenance / hybrid debug metadata on the track.
         if hasattr(track, "metadata") and isinstance(track.metadata, dict):
+            # Track the detector source of the *current* update, while keeping the origin source.
+            det_src = detection.get("detector_source")
+            if det_src is not None:
+                track.metadata.setdefault("detector_source_origin", det_src)
+                track.metadata["detector_source_last"] = det_src
+                # Backwards-compatible field: historically this was the only field serialized.
+                track.metadata["detector_source"] = det_src
+
             for k in (
-                "detector_source",
                 "hybrid_secondary_ran",
                 "hybrid_trigger_reason",
                 "hybrid_primary_count",
@@ -691,8 +700,14 @@ class EnhancedTracker:
 
         # Capture detector provenance / hybrid metadata at creation time.
         meta: Dict[str, Any] = {}
+
+        det_src = detection.get("detector_source")
+        if det_src is not None:
+            meta["detector_source_origin"] = det_src
+            meta["detector_source_last"] = det_src
+            meta["detector_source"] = det_src
+
         for k in (
-            "detector_source",
             "hybrid_secondary_ran",
             "hybrid_trigger_reason",
             "hybrid_primary_count",
