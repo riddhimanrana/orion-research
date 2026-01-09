@@ -773,6 +773,20 @@ class FrameObserver:
                 detection["hybrid_primary_count"] = int(detection_source.get("hybrid_primary_count", 0) or 0)
                 detection["hybrid_secondary_count"] = int(detection_source.get("hybrid_secondary_count", 0) or 0)
                 detection["hybrid_merged_count"] = int(detection_source.get("hybrid_merged_count", 0) or 0)
+
+            # Preserve schema v2 hypothesis/verification fields (from openvocab backend)
+            for k in (
+                "label_hypotheses",
+                "label_hypotheses_topk",
+                "verification_status",
+                "verification_source",
+                "proposal_confidence",
+            ):
+                if k in detection_source:
+                    # Map label_hypotheses_topk to label_hypotheses for consistency
+                    key = "label_hypotheses" if k == "label_hypotheses_topk" else k
+                    detection[key] = detection_source[k]
+
             # Ensure YOLO-World detections have description and object_class fields
             if self.detector_backend == "yoloworld":
                 detection["description"] = class_name
