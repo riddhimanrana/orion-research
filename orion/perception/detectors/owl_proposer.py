@@ -449,8 +449,11 @@ class OWLProposerFallback:
             
             proposals.append(proposal)
         
-        # Add hypotheses from vocab bank
-        if self.vocab_bank is not None:
+        # Add hypotheses from vocab bank using proper CLIP image-text comparison
+        if self.vocab_bank is not None and self.clip is not None:
+            proposals = self._add_clip_hypotheses(proposals, frame)
+        elif self.vocab_bank is not None:
+            # Fallback to embedding-based matching (less accurate)
             for proposal in proposals:
                 embedding = proposal.get("visual_embedding")
                 if embedding is not None:
@@ -468,6 +471,71 @@ class OWLProposerFallback:
                         proposal["confidence"] = proposal["objectness"]
         
         return proposals[:self.config.max_proposals]
+    
+    def _add_clip_hypotheses(
+        self,
+        proposals: List[Dict[str, Any]],
+        frame: np.ndarray,
+    ) -> List[Dict[str, Any]]:
+        """Add label hypotheses using proper CLIP image-text comparison."""
+        import torch
+        from PIL import Image
+        from transformers import CLIPProcessor
+        
+        if not proposals:
+            return proposals
+        
+        # Get top candidate labels from vocab bank (use more for CLIP to rank)
+        candidate_labels = self.vocab_bank.labels[:100]  # Top 100 most common
+        
+        # Load processor if needed
+        processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        
+        for proposal in proposals:
+            x1, y1, x2, y2 = [int(v) for v in proposal["bbox_xyxy"]]
+            crop = frame[y1:y2, x1:x2]
+            if crop.size == 0:
+                continue
+            
+            # Convert to PIL
+            crop_rgb = crop[:, :, ::-1] if crop.shape[-1] == 3 else crop
+            pil_image = Image.fromarray(crop_rgb)
+            
+            # Run CLIP with image and text candidates
+            with torch.no_grad():
+                inputs = processor(
+                    text=candidate_labels,
+                    images=pil_image,
+                    return_tensors="pt",
+                    padding=True,
+                ).to(self.device)
+                
+                outputs = self.clip(**inputs)
+                logits = outputs.logits_per_image[0]  # (num_labels,)
+                probs = torch.softmax(logits, dim=0).cpu().numpy()
+            
+            # Get top-k hypotheses
+            top_indices = np.argsort(probs)[::-1][:self.config.top_k_hypotheses]
+            
+            hypotheses = []
+            for rank, idx in enumerate(top_indices):
+                hypotheses.append({
+                    "label": candidate_labels[idx],
+                    "score": float(probs[idx]),
+                    "source": "clip",
+                    "rank": rank,
+                })
+            
+            proposal["label_hypotheses"] = hypotheses
+            
+            if hypotheses:
+                proposal["label"] = hypotheses[0]["label"]
+                proposal["confidence"] = hypotheses[0]["score"]
+            else:
+                proposal["label"] = proposal.get("_yolo_label", "object")
+                proposal["confidence"] = proposal.get("objectness", 0.0)
+        
+        return proposals
     
     def _compute_clip_embedding(self, crop: np.ndarray) -> np.ndarray:
         """Compute CLIP visual embedding for crop."""
