@@ -311,7 +311,7 @@ class VocabularyBank:
         Create vocabulary bank from a preset.
         
         Args:
-            preset: One of 'lvis1200', 'coco80', 'objects365'
+            preset: One of 'lvis', 'lvis1200', 'coco', 'coco80', 'objects365'
             cache_dir: Directory to cache embeddings
             embedding_model: CLIP model for text embeddings
             device: Device for embedding computation
@@ -320,14 +320,14 @@ class VocabularyBank:
             Initialized VocabularyBank
         """
         # Get vocabulary for preset
-        if preset == "lvis1200":
+        if preset in ("lvis", "lvis1200"):
             labels = list(set(LVIS_VOCABULARY))  # Deduplicate
-        elif preset == "coco80":
+        elif preset in ("coco", "coco80"):
             labels = COCO_VOCABULARY.copy()
         elif preset == "objects365":
             labels = OBJECTS365_VOCABULARY.copy()
         else:
-            raise ValueError(f"Unknown preset: {preset}. Use 'lvis1200', 'coco80', or 'objects365'")
+            raise ValueError(f"Unknown preset: {preset}. Use 'lvis', 'coco', or 'objects365'")
         
         config = VocabularyBankConfig(
             preset=preset,
