@@ -69,8 +69,7 @@ def run_eval():
     results = processor.post_process_grounded_object_detection(
         outputs,
         inputs.input_ids,
-        box_threshold=0.3,
-        text_threshold=0.25,
+        threshold=0.3,
         target_sizes=target_sizes.to(device)
     )[0]
     gdino_time = time.time() - t0
