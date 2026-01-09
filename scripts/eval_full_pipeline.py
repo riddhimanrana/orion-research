@@ -137,11 +137,27 @@ def run_perception_pipeline(
     
     if skip_if_exists and tracks_path.exists():
         logger.info(f"Reusing existing tracks in {results_dir}")
+        metrics: Dict[str, Any] = {"skipped": True}
+
+        try:
+            with open(tracks_path) as f:
+                metrics["track_count"] = sum(1 for _ in f)
+        except Exception:
+            metrics["track_count"] = None
+
+        metadata_path = results_dir / "run_metadata.json"
+        if metadata_path.exists():
+            try:
+                metadata = json.loads(metadata_path.read_text())
+                metrics.update(metadata)
+            except Exception:
+                pass
+
         return StageResult(
             stage="perception",
             success=True,
             duration_seconds=0.0,
-            metrics={"skipped": True},
+            metrics=metrics,
         )
     
     start_time = time.time()
