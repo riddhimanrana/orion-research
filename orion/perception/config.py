@@ -135,6 +135,24 @@ class DetectionConfig:
     class_agnostic_nms_iou: float = 0.65
     """IoU threshold for class-agnostic NMS. Higher = more aggressive suppression."""
 
+    # Class-specific NMS thresholds (from deep research: small objects need lower IoU)
+    class_specific_nms_iou: dict = None
+    """Per-class NMS IoU thresholds. Keys are lowercase class names.
+    Small objects (clock, remote, scissors) need lower IoU to avoid over-suppression.
+    Example: {'clock': 0.3, 'remote': 0.35, 'scissors': 0.3}"""
+
+    # Hybrid detection mode (YOLO + GroundingDINO)
+    enable_hybrid_detection: bool = False
+    """If True, use HybridDetector combining YOLO11x speed with GroundingDINO recall.
+    YOLO runs always; GDINO triggers on low-detection frames or specific queries."""
+
+    hybrid_min_detections: int = 3
+    """If YOLO finds fewer than this many objects, trigger GroundingDINO."""
+
+    hybrid_always_verify: list = None
+    """List of class names to always verify with GroundingDINO.
+    Default: ['remote', 'clock', 'vase', 'scissors', 'toothbrush']"""
+
     # Cropping
     bbox_padding_percent: float = 0.1
     """Padding to add around bounding boxes when cropping (percentage of box size)."""

@@ -151,6 +151,12 @@ def _phase3_graph(args: argparse.Namespace, results_dir: Path) -> Dict:
         use_pose_for_held=args.use_pose_held,
         pose_hand_dist=args.pose_hand_dist,
         enable_class_filtering=not args.no_class_filter,
+        # Temporal smoothing (Deep Research v3)
+        enable_temporal_smoothing=args.temporal_smoothing,
+        temporal_window_size=args.temporal_window,
+        temporal_near_threshold=args.temporal_near_thresh,
+        temporal_on_threshold=args.temporal_on_thresh,
+        temporal_held_by_threshold=args.temporal_held_thresh,
     )
     save_scene_graphs(graphs, graph_path)
     summary = build_graph_summary(graphs)
@@ -234,6 +240,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--use-pose-held", action="store_true")
     parser.add_argument("--no-class-filter", action="store_true")
     parser.add_argument("--exclude-on-pair", action="append", help="Exclude class pair from 'on' relation (classA:classB)")
+    
+    # Temporal smoothing (Deep Research v3)
+    parser.add_argument("--temporal-smoothing", action="store_true", help="Enable temporal smoothing for scene graphs")
+    parser.add_argument("--temporal-window", type=int, default=5, help="Rolling window size for temporal smoothing")
+    parser.add_argument("--temporal-near-thresh", type=float, default=0.4, help="Threshold for 'near' relation")
+    parser.add_argument("--temporal-on-thresh", type=float, default=0.6, help="Threshold for 'on' relation")
+    parser.add_argument("--temporal-held-thresh", type=float, default=0.7, help="Threshold for 'held_by' relation")
 
     parser.add_argument("--no-overlay", action="store_true", help="Skip overlay rendering")
     parser.add_argument("--overlay-output", help="Explicit overlay path")

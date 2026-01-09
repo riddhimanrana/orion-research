@@ -6,6 +6,13 @@ import numpy as np
 
 from orion.graph.types import SceneGraph, SGNode, SGEdge, VideoSceneGraph
 
+# Temporal smoother import (optional)
+try:
+    from orion.graph.temporal_smoothing import SceneGraphSmoother
+    TEMPORAL_SMOOTHING_AVAILABLE = True
+except ImportError:
+    TEMPORAL_SMOOTHING_AVAILABLE = False
+
 
 def _emb_to_mem_map(memory: Dict[str, Any]) -> Dict[str, str]:
     m: Dict[str, str] = {}
@@ -80,6 +87,12 @@ def build_scene_graphs(
     use_pose_for_held: bool = False,
     pose_hand_dist: float = 0.03,
     enable_class_filtering: bool = True,
+    # Temporal smoothing parameters (Deep Research v3)
+    enable_temporal_smoothing: bool = False,
+    temporal_window_size: int = 5,
+    temporal_near_threshold: float = 0.4,
+    temporal_on_threshold: float = 0.6,
+    temporal_held_by_threshold: float = 0.7,
 ) -> List[Dict[str, Any]]:
     """
     Build per-frame scene graph snapshots with nodes (memory objects) and edges (relations).
@@ -88,6 +101,10 @@ def build_scene_graphs(
     Class filtering rules (when enabled):
     - held_by: subject must be portable (exclude furniture like bed, couch, table, chair, desk)
     - on: subject should be smaller/movable object, or use vertical position (higher object on lower)
+    
+    Temporal smoothing (when enabled):
+    - Uses rolling window to filter flickering edges
+    - Relation-specific thresholds control strictness
     """
     if relations is None:
         relations = ["near", "on", "held_by"]
@@ -299,6 +316,25 @@ def build_scene_graphs(
             "nodes": nodes,
             "edges": edges,
         })
+
+    # Apply temporal smoothing if enabled (Deep Research v3)
+    if enable_temporal_smoothing and TEMPORAL_SMOOTHING_AVAILABLE:
+        try:
+            from orion.graph.temporal_smoothing import TemporalSmoothingConfig
+            
+            smooth_config = TemporalSmoothingConfig(
+                window_size=temporal_window_size,
+                relation_specific_thresholds={
+                    "near": temporal_near_threshold,
+                    "on": temporal_on_threshold,
+                    "held_by": temporal_held_by_threshold,
+                },
+            )
+            smoother = SceneGraphSmoother(config=smooth_config)
+            graphs = smoother.smooth_graphs(graphs)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Temporal smoothing failed: {e}")
 
     return graphs
 

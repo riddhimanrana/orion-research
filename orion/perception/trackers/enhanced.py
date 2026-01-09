@@ -424,7 +424,12 @@ class EnhancedTracker:
         so we give appearance stronger weight while still using spatial/semantic
         as hard gates to prevent implausible matches.
         
-        Cost = 0.30*spatial + 0.10*size + 0.15*semantic + 0.45*appearance
+        Cost = 0.25*spatial + 0.10*size + 0.10*semantic + 0.55*appearance
+        
+        Deep Research Update (v3):
+        - Increased appearance weight from 0.45 to 0.55 (V-JEPA2 is strong)
+        - Decreased spatial weight from 0.30 to 0.25 (wearable cameras move fast)
+        - Added confidence-aware gating for low-confidence detections
         """
         def get_bbox(det: Dict) -> List[float]:
             """Get bbox from detection, handling both bbox_2d and bbox keys."""
@@ -447,6 +452,14 @@ class EnhancedTracker:
             for d_idx, det in enumerate(detections):
                 # Get bbox (handles both bbox_2d and bbox keys)
                 det_bbox = get_bbox(det)
+                
+                # Deep Research: Gate very low confidence detections more strictly
+                det_conf = det.get('confidence', 0.5)
+                if det_conf < 0.20:
+                    # Extremely low confidence - require very strong appearance match
+                    if embeddings is None or track.avg_appearance is None:
+                        cost_matrix[t_idx, d_idx] = 999.0
+                        continue
                 
                 # 1. Spatial cost: distance between predicted and detected position
                 det_center = np.array([
@@ -517,13 +530,14 @@ class EnhancedTracker:
                             cost_matrix[t_idx, d_idx] = 999.0
                             continue
                 
-                # Combined cost with balanced weights for V-JEPA2
-                # V-JEPA2 is more discriminative than CLIP, so appearance gets higher weight
+                # Combined cost with balanced weights for V-JEPA2 (Deep Research v3)
+                # V-JEPA2 is highly discriminative, so appearance gets dominant weight
+                # Reduced spatial weight to handle wearable camera jitter
                 cost_matrix[t_idx, d_idx] = (
-                    0.30 * spatial_cost +
+                    0.25 * spatial_cost +
                     0.10 * size_cost +
-                    0.15 * semantic_cost +
-                    0.45 * appearance_cost
+                    0.10 * semantic_cost +
+                    0.55 * appearance_cost
                 )
         
         return cost_matrix
