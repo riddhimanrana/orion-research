@@ -42,6 +42,21 @@ class HybridDetectorConfig:
     secondary_backend: str = "groundingdino"
     secondary_model: str = "IDEA-Research/grounding-dino-tiny"
     secondary_confidence: float = 0.30
+
+    # Secondary detector vocabulary control
+    include_coco_in_secondary: bool = False
+    """If True, include the full COCO label set in the GroundingDINO text prompt.
+
+    Default is False because YOLO already covers COCO classes; prompting GDINO with
+    all COCO categories tends to add false positives (Gemini audit: microwave/
+    suitcase/teddy bear hallucinations).
+    """
+
+    secondary_categories: Optional[List[str]] = None
+    """Optional custom list of categories to use for GroundingDINO when query_objects is None.
+
+    If provided, this overrides the built-in focused list.
+    """
     
     # Triggering conditions
     min_detections_for_skip: int = 3  # If YOLO finds >= N objects, skip GDINO
@@ -188,13 +203,78 @@ class HybridDetector:
         
         # Build text prompt
         if query_objects:
-            categories = query_objects
+            categories = list(query_objects)
+        elif self.config.secondary_categories:
+            categories = list(self.config.secondary_categories)
         else:
-            # Use COCO + common indoor objects
-            categories = self.coco_classes + [
-                "remote control", "wall clock", "scissors", "toothbrush",
-                "power strip", "cable", "charger", "headphones"
-            ]
+            # Focus GDINO on categories YOLO is likely to miss or under-label.
+            # NOTE: We intentionally do NOT include all COCO labels by default.
+            categories = []
+            if bool(self.config.include_coco_in_secondary):
+                categories.extend(self.coco_classes)
+
+            # Always-verify classes (small/ambiguous items)
+            categories.extend(list(self.config.always_verify_classes or []))
+
+            # Common household + structural objects (often missing from COCO-trained detectors)
+            categories.extend(
+                [
+                    "stairs",
+                    "staircase",
+                    "railing",
+                    "banister",
+                    "window",
+                    "door",
+                    "doorway",
+                    "picture frame",
+                    "wall art",
+                    "painting",
+                    "ceiling light",
+                    "chandelier",
+                    "lamp",
+                    "floor lamp",
+                    "curtains",
+                    "blinds",
+                    "rug",
+                    "kitchen island",
+                    "kitchen cabinets",
+                    "cabinet",
+                    "refrigerator",
+                    "fireplace",
+                    "tv",
+                    "bookshelf",
+                    "bookcase",
+                    "ottoman",
+                    "stool",
+                    "coffee table",
+                    "vase",
+                    "flowers",
+                    # A few common small indoor items that help in office/home scenes
+                    "remote control",
+                    "wall clock",
+                    "power strip",
+                    "cable",
+                    "charger",
+                    "headphones",
+                ]
+            )
+
+        # Deduplicate / clean prompt tokens
+        cleaned: List[str] = []
+        seen = set()
+        for c in categories:
+            s = str(c).strip()
+            if not s:
+                continue
+            key = s.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(s)
+        categories = cleaned
+
+        if not categories:
+            return []
         
         text_prompt = " . ".join(categories) + " ."
         
