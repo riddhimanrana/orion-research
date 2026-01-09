@@ -19,6 +19,7 @@ Date: January 2026
 """
 
 import logging
+import os
 import time
 from typing import Dict, List, Any, Optional, Generator
 from dataclasses import dataclass
@@ -111,6 +112,15 @@ class OrionRAG:
         )
         logger.info(f"RAG connected to Memgraph at {host}:{port}")
         
+        # Allow runtime overrides without needing to thread params everywhere.
+        # Useful for Lambda where we may prefer a smaller model.
+        env_url = os.environ.get("ORION_OLLAMA_URL")
+        if env_url:
+            ollama_url = str(env_url)
+        env_model = os.environ.get("ORION_OLLAMA_MODEL")
+        if env_model:
+            llm_model = str(env_model)
+
         # Initialize LLM reasoning (Stage 6)
         self.reasoning_model = None
         self.llm_enabled = False
