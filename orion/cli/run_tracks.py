@@ -60,7 +60,7 @@ def process_video_to_tracks(
     hybrid_min_detections: int = 3,
     hybrid_always_verify: str | None = None,
     hybrid_secondary_conf: float = 0.30,
-    openvocab_proposer: str = "yolo_clip",
+    openvocab_proposer: str = "yoloworld_clip",
     openvocab_vocab: str = "lvis",
     openvocab_top_k: int = 5,
     confidence_threshold: float = 0.25,
@@ -86,7 +86,7 @@ def process_video_to_tracks(
         yolo_model: YOLO variant to use
         detector_backend: Detection backend ('yolo', 'yoloworld', 'groundingdino', 'hybrid', 'openvocab')
         gdino_model: GroundingDINO model ID when using groundingdino/hybrid
-        openvocab_proposer: OpenVocab proposer ('owl', 'yolo_clip')
+        openvocab_proposer: OpenVocab proposer ('owl', 'yolo_clip', 'yoloworld_clip')
         openvocab_vocab: OpenVocab vocabulary preset ('lvis', 'coco', 'objects365')
         openvocab_top_k: Number of label hypotheses for openvocab backend
         confidence_threshold: Min detection confidence
