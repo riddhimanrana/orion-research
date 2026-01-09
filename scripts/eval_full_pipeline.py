@@ -255,16 +255,32 @@ def run_memgraph_ingest(
         
         duration = time.time() - start_time
         
+        # MemgraphExportResult fields:
+        #   observations_written, relations_written, entities_indexed, scene_graph_edges, cis_edges_written
+        metrics: Dict[str, Any] = {
+            "entities": getattr(result, "entities_indexed", None),
+            "observations": getattr(result, "observations_written", None),
+            "relationships": getattr(result, "relations_written", None),
+            "scene_graph_edges": getattr(result, "scene_graph_edges", None),
+            "cis_edges_written": getattr(result, "cis_edges_written", 0),
+            "host": getattr(result, "output_host", memgraph_host),
+            "port": getattr(result, "output_port", 7687),
+        }
+
+        # Best-effort frame count from graph summary (if present)
+        try:
+            summary_path = results_dir / "graph_summary.json"
+            if summary_path.exists():
+                summary = json.loads(summary_path.read_text())
+                metrics["frames"] = summary.get("total_frames")
+        except Exception:
+            pass
+
         return StageResult(
             stage="memgraph_ingest",
             success=True,
             duration_seconds=duration,
-            metrics={
-                "entities": result.entity_count,
-                "frames": result.frame_count,
-                "observations": result.observation_count,
-                "relationships": result.relationship_count,
-            },
+            metrics=metrics,
         )
         
     except Exception as e:
