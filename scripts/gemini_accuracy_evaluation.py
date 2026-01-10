@@ -135,7 +135,8 @@ def load_tracks(tracks_path: Path) -> Tuple[Dict[int, List[Dict]], List[Dict]]:
             if not line.strip():
                 continue
             track = json.loads(line)
-            frame_idx = track.get("frame_idx", 0)
+            # Handle both frame_idx and frame_id formats
+            frame_idx = track.get("frame_idx") or track.get("frame_id", 0)
             tracks_by_frame[frame_idx].append(track)
             all_tracks.append(track)
     
