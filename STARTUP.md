@@ -14,10 +14,21 @@ pip install -e .
 ```
 
 ### 2. Validate Setup
+
 ```bash
 python scripts/validate_setup.py
 # Should see: ✅ ALL CHECKS PASSED
 ```
+
+### 2b. (NEW) Validate Phase 4 Improvements
+
+```bash
+# Test improvements made to remote filtering, spatial/temporal queries
+python scripts/test_improvements.py
+# Should see: ✅ ALL TESTS PASSED
+```
+
+### 3. Run Test
 
 ### 3. Run Test
 ```bash
