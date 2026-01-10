@@ -1,4 +1,5 @@
 # orion research
+.env
 /ml-fastvlm
 /models
 src/
