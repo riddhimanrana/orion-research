@@ -41,15 +41,14 @@ class HybridDetectorConfig:
     # Secondary detector (triggered conditionally)
     secondary_backend: str = "groundingdino"
     secondary_model: str = "IDEA-Research/grounding-dino-tiny"
-    secondary_confidence: float = 0.30
+    secondary_confidence: float = 0.40  # Raised from 0.30 to reduce false positives when checking COCO
 
     # Secondary detector vocabulary control
-    include_coco_in_secondary: bool = False
+    include_coco_in_secondary: bool = True
     """If True, include the full COCO label set in the GroundingDINO text prompt.
 
-    Default is False because YOLO already covers COCO classes; prompting GDINO with
-    all COCO categories tends to add false positives (Gemini audit: microwave/
-    suitcase/teddy bear hallucinations).
+    Changed to True to catch YOLO misses. Uses higher confidence (0.40) to reduce false positives.
+    This allows GDINO to detect COCO objects that YOLO missed without excessive noise.
     """
 
     secondary_categories: Optional[List[str]] = None

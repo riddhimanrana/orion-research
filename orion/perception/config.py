@@ -95,11 +95,44 @@ class DetectionConfig:
     """
 
     # Detection thresholds (shared)
-    confidence_threshold: float = 0.20
-    """Minimum detection confidence (0-1). Balanced for recall vs precision."""
+    confidence_threshold: float = 0.25
+    """Minimum detection confidence (0-1). Raised from 0.20 to reduce false positives."""
 
     iou_threshold: float = 0.45
     """NMS IoU threshold for overlapping boxes."""
+
+    # Temporal consistency filtering (NEW)
+    enable_temporal_filtering: bool = True
+    """If True, reject detections that don't persist across multiple frames."""
+
+    min_consecutive_frames: int = 2
+    """Minimum consecutive frames a detection must appear in to be accepted."""
+
+    temporal_iou_threshold: float = 0.5
+    """IoU threshold for matching detections across frames."""
+
+    temporal_memory_frames: int = 5
+    """Number of previous frames to keep for temporal matching."""
+
+    # Adaptive confidence thresholding (NEW)
+    enable_adaptive_confidence: bool = True
+    """If True, adjust confidence threshold based on frame density."""
+
+    adaptive_high_density_threshold: int = 20
+    """If detections exceed this count, raise confidence threshold."""
+
+    adaptive_confidence_boost: float = 0.10
+    """Amount to increase confidence threshold in high-density frames."""
+
+    # Depth-based validation (NEW)
+    enable_depth_validation: bool = True
+    """If True, reject detections with impossible spatial properties."""
+
+    max_object_height_meters: float = 3.5
+    """Maximum plausible object height in meters (e.g., reject 10m tall chair)."""
+
+    min_object_height_meters: float = 0.02
+    """Minimum plausible object height in meters (2cm, filters noise)."""
 
     # Filtering
     min_object_size: int = 24

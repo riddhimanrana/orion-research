@@ -35,6 +35,14 @@ except ImportError:
     Perception3DEngine = None
     PERCEPTION_3D_AVAILABLE = False
 
+# Temporal filtering
+try:
+    from orion.perception.temporal_filter import TemporalFilter
+    TEMPORAL_FILTER_AVAILABLE = True
+except ImportError:
+    TemporalFilter = None
+    TEMPORAL_FILTER_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -153,11 +161,32 @@ class FrameObserver:
         self.scene_context_classes: Optional[set] = None  # Classes to keep based on scene
         self.scene_context_suppress: set = set()  # Classes to always suppress (e.g., outdoor objects in indoor scene)
         
+        # Temporal filtering (NEW)
+        self.temporal_filter: Optional[TemporalFilter] = None
+        if getattr(config, "enable_temporal_filtering", False) and TEMPORAL_FILTER_AVAILABLE:
+            try:
+                self.temporal_filter = TemporalFilter(
+                    min_consecutive_frames=getattr(config, "min_consecutive_frames", 2),
+                    temporal_iou_threshold=getattr(config, "temporal_iou_threshold", 0.5),
+                    temporal_memory_frames=getattr(config, "temporal_memory_frames", 5),
+                    max_gap_frames=2,
+                )
+                logger.info(f"  ✓ Temporal filtering enabled (min_frames={self.temporal_filter.min_consecutive_frames})")
+            except Exception as e:
+                logger.warning(f"Failed to initialize temporal filter: {e}")
+                self.temporal_filter = None
+        
+        # Adaptive confidence tracking (NEW)
+        self.enable_adaptive_confidence = getattr(config, "enable_adaptive_confidence", False)
+        self.base_confidence_threshold = config.confidence_threshold
+        self.frame_detection_history: List[int] = []  # Track detection counts per frame
+        
         logger.debug(
-            "FrameObserver initialized: backend=%s, target_fps=%s, 3d_enabled=%s",
+            "FrameObserver initialized: backend=%s, target_fps=%s, 3d_enabled=%s, temporal_filter=%s",
             self.detector_backend,
             target_fps,
             self.perception_engine is not None,
+            self.temporal_filter is not None,
         )
 
     def _preferred_torch_device(self) -> str:
@@ -650,6 +679,28 @@ class FrameObserver:
         Returns:
             List of detection dictionaries
         """
+        # Adaptive confidence thresholding (NEW)
+        if self.enable_adaptive_confidence:
+            # Track detection count for adaptive thresholding
+            self.frame_detection_history.append(len(detection_candidates) if detection_candidates else 0)
+            if len(self.frame_detection_history) > 10:
+                self.frame_detection_history.pop(0)
+            
+            # If recent frames have high detection density, raise threshold
+            if len(self.frame_detection_history) >= 3:
+                avg_detections = sum(self.frame_detection_history) / len(self.frame_detection_history)
+                high_density_threshold = getattr(self.config, "adaptive_high_density_threshold", 20)
+                confidence_boost = getattr(self.config, "adaptive_confidence_boost", 0.10)
+                
+                if avg_detections > high_density_threshold:
+                    # Temporarily raise confidence threshold
+                    adjusted_threshold = min(0.95, self.base_confidence_threshold + confidence_boost)
+                    # Apply boost by filtering detection_candidates
+                    detection_candidates = [
+                        d for d in detection_candidates
+                        if d.get("confidence", 0) >= adjusted_threshold
+                    ]
+        
         detection_candidates = self._run_detection_backend(frame)
         
         # Run 3D perception if enabled
@@ -821,6 +872,46 @@ class FrameObserver:
         
         # Post-NMS deduplication: merge highly overlapping same-class detections
         detections = self._post_nms_dedup(detections, iou_threshold=0.55)
+        
+        # Depth-based validation (NEW): Reject objects with impossible heights
+        if getattr(self.config, "enable_depth_validation", False) and perception_3d is not None:
+            detections = self._validate_detections_with_depth(
+                detections, 
+                frame_height,
+                max_height_meters=getattr(self.config, "max_object_height_meters", 3.5),
+                min_height_meters=getattr(self.config, "min_object_height_meters", 0.02),
+            )
+        
+        # Temporal consistency filtering (NEW): Reject 1-frame detections
+        if self.temporal_filter is not None:
+            # Convert detections to temporal filter format
+            temporal_detections = [
+                {
+                    "bbox": det.get("bbox", [0, 0, 0, 0]),
+                    "class_name": det.get("class_name", "object"),
+                    "confidence": det.get("confidence", 0.0),
+                    **det  # Preserve all other fields
+                }
+                for det in detections
+            ]
+            
+            # Apply temporal filter
+            filtered_detections = self.temporal_filter.process_frame(
+                temporal_detections,
+                frame_number
+            )
+            
+            # Restore original detection format
+            detections = filtered_detections
+        
+        # Apply depth-based validation if enabled
+        if self.config.enable_depth_validation and detections:
+            detections = self._validate_detections_with_depth(
+                detections,
+                frame_height=frame.shape[0],
+                max_height_meters=self.config.max_object_height_meters,
+                min_height_meters=self.config.min_object_height_meters,
+            )
         
         return detections
     
@@ -1109,21 +1200,77 @@ class FrameObserver:
         union = area1 + area2 - inter_area
         return inter_area / union if union > 0 else 0.0
     
-    def _compute_spatial_zone(
+    def _validate_detections_with_depth(
         self,
-        centroid: Tuple[float, float],
-        frame_width: int,
+        detections: List[Dict],
         frame_height: int,
-    ) -> str:
+        max_height_meters: float = 3.5,
+        min_height_meters: float = 0.02,
+    ) -> List[Dict]:
         """
-        Compute coarse spatial zone for object centroid.
+        Validate detections using depth information.
         
-        Divides frame into 3x3 grid: top/middle/bottom x left/center/right
+        Rejects detections with impossible physical properties:
+        - Objects too tall (> max_height_meters, e.g., 10m chair)
+        - Objects too small (< min_height_meters, e.g., 5mm object)
         
         Args:
-            centroid: (x, y) centroid
-            frame_width: Frame width
-            frame_height: Frame height
+            detections: List of detection dicts with depth_mm and bbox
+            frame_height: Frame height in pixels
+            max_height_meters: Maximum plausible object height
+            min_height_meters: Minimum plausible object height
+            
+        Returns:
+            Filtered detections with impossible sizes removed
+        """
+        valid_detections = []
+        
+        for det in detections:
+            # Skip if no depth information
+            depth_mm = det.get("depth_mm")
+            if depth_mm is None or depth_mm <= 0:
+                valid_detections.append(det)
+                continue
+            
+            # Get bbox dimensions
+            bbox = det.get("bbox", [0, 0, 0, 0])
+            bbox_height_px = bbox[3] - bbox[1]
+            
+            if bbox_height_px <= 0:
+                continue
+            
+            # Estimate object height using simple pinhole camera model
+            # Assuming reasonable FOV (~60 degrees vertical)
+            # height_meters ≈ (bbox_height_px / frame_height) * depth_meters * tan(FOV/2) * 2
+            # Simplified: height_meters ≈ (bbox_height_px / frame_height) * depth_meters * 1.15
+            depth_meters = depth_mm / 1000.0
+            estimated_height_meters = (bbox_height_px / frame_height) * depth_meters * 1.15
+            
+            # Reject if height is impossible
+            if estimated_height_meters > max_height_meters:
+                logger.debug(
+                    f"Rejecting {det.get('class_name', 'object')}: "
+                    f"estimated height {estimated_height_meters:.2f}m > {max_height_meters}m"
+                )
+                continue
+            
+            if estimated_height_meters < min_height_meters:
+                logger.debug(
+                    f"Rejecting {det.get('class_name', 'object')}: "
+                    f"estimated height {estimated_height_meters:.2f}m < {min_height_meters}m"
+                )
+                continue
+            
+            # Add estimated height to detection for downstream use
+            det["estimated_height_meters"] = estimated_height_meters
+            valid_detections.append(det)
+        
+        if len(valid_detections) < len(detections):
+            logger.debug(
+                f"Depth validation: kept {len(valid_detections)}/{len(detections)} detections"
+            )
+        
+        return valid_detections
             
         Returns:
             Spatial zone string (e.g., "center", "top_left")
