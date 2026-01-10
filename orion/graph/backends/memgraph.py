@@ -31,7 +31,79 @@ try:
 except ImportError:
     mgclient = None
 
+try:
+    # Pure-Python Bolt driver (works with Memgraph as well as Neo4j).
+    from neo4j import GraphDatabase, basic_auth
+except Exception:  # pragma: no cover - optional dependency
+    GraphDatabase = None  # type: ignore
+    basic_auth = None  # type: ignore
+
 logger = logging.getLogger(__name__)
+
+
+class _Neo4jCursor:
+    """Tiny DB-API-like cursor shim over neo4j-driver.
+
+    This is intentionally minimal: enough for this backend's usage patterns
+    (execute + fetchone/fetchall), while keeping the rest of the code unchanged.
+    """
+
+    def __init__(self, driver, database: Optional[str] = None):
+        self._driver = driver
+        self._database = database
+        self._rows: List[Tuple[Any, ...]] = []
+        self._idx = 0
+
+    def execute(self, query: str, parameters: Optional[Dict[str, Any]] = None):
+        params = parameters or {}
+        self._rows = []
+        self._idx = 0
+
+        # Auto-commit transaction per query (neo4j-driver default).
+        # Memgraph supports Cypher over Bolt, so this works as a drop-in.
+        with self._driver.session(database=self._database) as session:
+            result = session.run(query, params)
+            # Materialize results into tuples (row[0], row[1], ...) like mgclient.
+            try:
+                self._rows = [tuple(record.values()) for record in result]
+            except Exception:
+                self._rows = []
+        return None
+
+    def fetchone(self):
+        if self._idx >= len(self._rows):
+            return None
+        row = self._rows[self._idx]
+        self._idx += 1
+        return row
+
+    def fetchall(self):
+        if self._idx >= len(self._rows):
+            return []
+        rows = self._rows[self._idx :]
+        self._idx = len(self._rows)
+        return rows
+
+
+class _Neo4jConnection:
+    """Connection shim that mimics the mgclient connection methods we use."""
+
+    def __init__(self, driver, database: Optional[str] = None):
+        self._driver = driver
+        self._database = database
+
+    def cursor(self):
+        return _Neo4jCursor(self._driver, database=self._database)
+
+    def commit(self):
+        # neo4j-driver auto-commits per session.run in this shim.
+        return None
+
+    def close(self):
+        try:
+            self._driver.close()
+        except Exception:
+            pass
 
 
 @dataclass
@@ -82,11 +154,6 @@ class MemgraphBackend:
             username: Memgraph username (default: memgraph)
             password: Memgraph password (default: memgraph)
         """
-        if mgclient is None:
-            raise ImportError(
-                "pymgclient not installed. Install with: pip install pymgclient"
-            )
-        
         self.host = host
         self.port = port
         self.username = username
@@ -98,14 +165,32 @@ class MemgraphBackend:
     def _connect(self):
         """Establish connection to Memgraph"""
         try:
-            self.connection = mgclient.connect(
-                host=self.host,
-                port=self.port,
-                username=self.username,
-                password=self.password,
-                lazy=False
-            )
-            logger.info(f"✓ Connected to Memgraph at {self.host}:{self.port}")
+            if mgclient is not None:
+                self.connection = mgclient.connect(
+                    host=self.host,
+                    port=self.port,
+                    username=self.username,
+                    password=self.password,
+                    lazy=False
+                )
+                logger.info(f"✓ Connected to Memgraph (mgclient) at {self.host}:{self.port}")
+                return
+
+            if GraphDatabase is None or basic_auth is None:
+                raise ImportError(
+                    "Memgraph backend requires either 'pymgclient' (mgclient) or the pure-Python 'neo4j' driver. "
+                    "Install one of: pip install pymgclient  OR  pip install neo4j"
+                )
+
+            uri = f"bolt://{self.host}:{self.port}"
+            driver = GraphDatabase.driver(uri, auth=basic_auth(self.username, self.password))
+
+            # Smoke test the connection so we fail fast.
+            with driver.session() as session:
+                session.run("RETURN 1 AS ok").consume()
+
+            self.connection = _Neo4jConnection(driver)
+            logger.info(f"✓ Connected to Memgraph (neo4j-driver) at {self.host}:{self.port}")
         except Exception as e:
             logger.error(f"Failed to connect to Memgraph: {e}")
             logger.error("Make sure Memgraph is running: docker compose up -d")
