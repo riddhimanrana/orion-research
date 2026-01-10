@@ -412,7 +412,7 @@ def validate_with_gemini(
     video_path: Path,
     perception_result: StageResult,
     query_result: StageResult,
-    model_name: str = "gemini-2.5-flash",
+    model_name: str = "gemini-3-flash-preview",
 ) -> Dict[str, Any]:
     """
     Comprehensive Gemini validation of Orion results.
@@ -722,7 +722,7 @@ def main():
     parser.add_argument("--no-llm", action="store_true", help="Disable LLM for queries")
     parser.add_argument("--questions", help="JSON file with custom test questions")
     parser.add_argument("--memgraph-host", default="127.0.0.1", help="Memgraph host")
-    parser.add_argument("--gemini-model", default="gemini-2.5-flash", help="Gemini model")
+    parser.add_argument("--gemini-model", default="gemini-3-flash-preview", help="Gemini model")
     
     args = parser.parse_args()
     
