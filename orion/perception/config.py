@@ -33,10 +33,9 @@ YOLOWORLD_PROMPT_COARSE = (
     "person . face . hand . "
     "container . bottle . cup . "
     "bag . box . "
-    "furniture . chair . table . "
-    "electronic device . phone . laptop . "
+    "furniture . chair . table . door . window . "
+    "electronic device . phone . laptop . monitor . "
     "text . "
-    "door . window . "
     ""  # background class marker; empty string handled by yoloworld_categories()
 )
 

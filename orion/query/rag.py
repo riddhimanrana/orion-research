@@ -96,13 +96,13 @@ class OrionRAG:
         elif "where" in question_lower and "appear" in question_lower:
             return self._query_object_location(question)
         
-        elif "near" in question_lower:
+        elif "near" in question_lower or "next to" in question_lower or "beside" in question_lower:
             return self._query_spatial_near(question)
         
-        elif "interact" in question_lower or "held" in question_lower:
+        elif "interact" in question_lower or "held" in question_lower or "holding" in question_lower or "main activity" in question_lower or "describe.*activity" in question_lower:
             return self._query_interactions(question)
         
-        elif "time" in question_lower or "frame" in question_lower:
+        elif "time" in question_lower or "frame" in question_lower or "first" in question_lower or "last" in question_lower or "when" in question_lower:
             return self._query_temporal(question)
         
         else:
@@ -193,75 +193,163 @@ class OrionRAG:
         obj_name = self._extract_object_name(question)
         
         cursor = self.backend.connection.cursor()
+        
+        # Try NEAR edges first (highest priority)
         cursor.execute("""
             MATCH (e1:Entity {class_name: $class_name})-[r:NEAR]->(e2:Entity)
             WITH e2.class_name AS nearby, count(r) AS times, avg(r.confidence) AS avg_conf
-            RETURN nearby, times, avg_conf
+            RETURN nearby, times, avg_conf, 'forward_near' AS edge_type
             ORDER BY times DESC
             LIMIT 10
         """, {"class_name": obj_name})
         
         results = cursor.fetchall()
+        edge_type = "forward_near"
         
-        evidence = [{"nearby": row[0], "count": row[1], "avg_confidence": row[2]} for row in results]
-        
+        # If no forward NEAR edges, try reverse
         if not results:
-            # Try reverse direction
             cursor.execute("""
                 MATCH (e1:Entity)-[r:NEAR]->(e2:Entity {class_name: $class_name})
                 WITH e1.class_name AS nearby, count(r) AS times, avg(r.confidence) AS avg_conf
-                RETURN nearby, times, avg_conf
+                RETURN nearby, times, avg_conf, 'reverse_near' AS edge_type
                 ORDER BY times DESC
                 LIMIT 10
             """, {"class_name": obj_name})
             results = cursor.fetchall()
-            evidence = [{"nearby": row[0], "count": row[1], "avg_confidence": row[2]} for row in results]
+            edge_type = "reverse_near"
+        
+        # If still no results, try ON relationships (objects on/under the target)
+        if not results:
+            cursor.execute("""
+                MATCH (e1:Entity {class_name: $class_name})-[r:ON]->(e2:Entity)
+                WITH e2.class_name AS nearby, count(r) AS times, avg(r.confidence) AS avg_conf
+                RETURN nearby, times, avg_conf, 'forward_on' AS edge_type
+                ORDER BY times DESC
+                LIMIT 10
+            """, {"class_name": obj_name})
+            results = cursor.fetchall()
+            edge_type = "forward_on"
+        
+        # Last resort: reverse ON (things the target is on)
+        if not results:
+            cursor.execute("""
+                MATCH (e1:Entity)-[r:ON]->(e2:Entity {class_name: $class_name})
+                WITH e1.class_name AS nearby, count(r) AS times, avg(r.confidence) AS avg_conf
+                RETURN nearby, times, avg_conf, 'reverse_on' AS edge_type
+                ORDER BY times DESC
+                LIMIT 10
+            """, {"class_name": obj_name})
+            results = cursor.fetchall()
+            edge_type = "reverse_on"
+        
+        evidence = [{"nearby": row[0], "count": row[1], "avg_confidence": row[2], "edge_type": row[3]} for row in results]
         
         if not results:
             answer = f"No spatial relationships found for '{obj_name}'."
+            confidence = 0.0
         else:
-            nearby_list = [row[0] for row in results]
-            answer = f"Objects near {obj_name}: " + ", ".join(nearby_list)
+            nearby_list = [f"{row[0]}" for row in results]
+            relation_type = "near" if "near" in edge_type else "on"
+            answer = f"Objects {relation_type} {obj_name}: " + ", ".join(nearby_list)
+            # Confidence based on average score from edges
+            avg_scores = [row[2] for row in results if row[2] is not None]
+            confidence = float(sum(avg_scores) / len(avg_scores)) if avg_scores else 0.5
         
         return QueryResult(
             query_type="spatial_near",
             question=question,
             answer=answer,
             evidence=evidence,
-            confidence=1.0 if results else 0.0,
+            confidence=confidence,
         )
     
     def _query_interactions(self, question: str) -> QueryResult:
-        """Query interaction relationships (HELD_BY, etc.)."""
+        """Query interaction relationships (HELD_BY, etc.) and activities."""
         cursor = self.backend.connection.cursor()
         
-        cursor.execute("""
-            MATCH (obj:Entity)-[r:HELD_BY]->(agent:Entity)
-            WITH obj.class_name AS object, agent.class_name AS holder, 
-                 count(r) AS times, avg(r.confidence) AS avg_conf
-            RETURN object, holder, times, avg_conf
-            ORDER BY times DESC
-        """)
+        # Check if asking about general activities/main actions
+        is_general_query = any(kw in question.lower() for kw in ["main activity", "what happen", "describe the", "activity", "action"])
         
-        results = cursor.fetchall()
+        if is_general_query:
+            # Query person activities: what people held/interacted with
+            cursor.execute("""
+                MATCH (person:Entity {class_name: "person"})-[r:HELD_BY]-(obj:Entity)
+                WITH obj.class_name AS object, count(r) AS times, 
+                     min(r.frame_idx) AS first_frame, max(r.frame_idx) AS last_frame
+                RETURN object, times, first_frame, last_frame
+                ORDER BY times DESC
+                LIMIT 10
+            """)
+            
+            held_results = cursor.fetchall()
+            
+            # Also check nearby objects (activities involve proximity)
+            cursor.execute("""
+                MATCH (person:Entity {class_name: "person"})-[r:NEAR]-(obj:Entity)
+                WITH obj.class_name AS object, count(r) AS times, 
+                     min(r.frame_idx) AS first_frame, max(r.frame_idx) AS last_frame
+                RETURN object, times, first_frame, last_frame
+                ORDER BY times DESC
+                LIMIT 5
+            """)
+            
+            near_results = cursor.fetchall()
+            
+            evidence = []
+            activity_list = []
+            confidence = 0.0
+            
+            if held_results:
+                for obj, times, first_frame, last_frame in held_results:
+                    activity_list.append(f"person handling {obj} ({times} times)")
+                    evidence.append({"activity": f"holding {obj}", "frequency": times, "frames": f"{first_frame}-{last_frame}"})
+                confidence = max(0.5, min(1.0, len(held_results) * 0.3))
+            
+            if near_results and not held_results:
+                for obj, times, first_frame, last_frame in near_results:
+                    activity_list.append(f"person near {obj} ({times} times)")
+                    evidence.append({"activity": f"near {obj}", "frequency": times, "frames": f"{first_frame}-{last_frame}"})
+                confidence = 0.4
+            
+            if activity_list:
+                answer = "Main activities: " + "; ".join(activity_list[:5])
+            else:
+                answer = "No clear activities detected."
+                confidence = 0.0
         
-        evidence = [
-            {"object": row[0], "holder": row[1], "count": row[2], "confidence": row[3]}
-            for row in results
-        ]
-        
-        if not results:
-            answer = "No interactions (held objects) detected."
         else:
-            interactions = [f"{row[0]} held by {row[1]} ({row[2]} times)" for row in results]
-            answer = "Interactions: " + "; ".join(interactions)
+            # Specific object interaction query
+            cursor.execute("""
+                MATCH (obj:Entity)-[r:HELD_BY]->(agent:Entity)
+                WITH obj.class_name AS object, agent.class_name AS holder, 
+                     count(r) AS times, avg(r.confidence) AS avg_conf
+                RETURN object, holder, times, avg_conf
+                ORDER BY times DESC
+            """)
+            
+            results = cursor.fetchall()
+            
+            evidence = [
+                {"object": row[0], "holder": row[1], "count": row[2], "confidence": row[3]}
+                for row in results
+            ]
+            
+            if not results:
+                answer = "No interactions (held objects) detected."
+                confidence = 0.0
+            else:
+                interactions = [f"{row[0]} held by {row[1]}" for row in results]
+                answer = "Interactions: " + "; ".join(interactions)
+                # Average confidence of the strongest interactions
+                avg_confs = [row[3] for row in results if row[3] is not None]
+                confidence = float(sum(avg_confs) / len(avg_confs)) if avg_confs else 0.6
         
         return QueryResult(
             query_type="interactions",
             question=question,
             answer=answer,
             evidence=evidence,
-            confidence=1.0 if results else 0.0,
+            confidence=confidence,
         )
     
     def _query_temporal(self, question: str) -> QueryResult:
@@ -273,9 +361,55 @@ class OrionRAG:
         time_match = re.search(r'(\d+(?:\.\d+)?)\s*s(?:ec)?', question)
         frame_match = re.search(r'frame[s]?\s*(\d+)', question)
         
+        # Check for temporal keywords like "first", "last", "start", "end", "beginning"
+        temporal_keywords = ["first", "appear", "start", "begin", "initial", "earliest", "last", "end", "final"]
+        has_temporal_keyword = any(kw in question.lower() for kw in temporal_keywords)
+        
         cursor = self.backend.connection.cursor()
         
-        if time_match:
+        if "first" in question.lower() or "start" in question.lower() or "begin" in question.lower():
+            # Query for first appearances
+            cursor.execute("""
+                MATCH (e:Entity)-[r:OBSERVED_IN]->(f:Frame)
+                WITH e.class_name AS class, e.id AS entity_id, min(f.timestamp) AS first_time, min(f.idx) AS first_frame
+                RETURN class, entity_id, first_time, first_frame
+                ORDER BY first_time ASC
+                LIMIT 20
+            """)
+            results = cursor.fetchall()
+            evidence = [{"class": row[0], "first_time_s": float(row[2]) if row[2] else None, "first_frame": row[3]} for row in results]
+            
+            if not results:
+                answer = "No object appearances found."
+                confidence = 0.0
+            else:
+                classes = list(set(row[0] for row in results))
+                earliest = results[0][2] if results else 0
+                answer = f"Objects first appeared at {earliest:.1f}s: " + ", ".join(classes[:5])
+                confidence = 0.7
+                
+        elif "last" in question.lower() or "end" in question.lower() or "final" in question.lower():
+            # Query for last appearances
+            cursor.execute("""
+                MATCH (e:Entity)-[r:OBSERVED_IN]->(f:Frame)
+                WITH e.class_name AS class, e.id AS entity_id, max(f.timestamp) AS last_time, max(f.idx) AS last_frame
+                RETURN class, entity_id, last_time, last_frame
+                ORDER BY last_time DESC
+                LIMIT 20
+            """)
+            results = cursor.fetchall()
+            evidence = [{"class": row[0], "last_time_s": float(row[2]) if row[2] else None, "last_frame": row[3]} for row in results]
+            
+            if not results:
+                answer = "No object observations found."
+                confidence = 0.0
+            else:
+                classes = list(set(row[0] for row in results))
+                latest = results[0][2] if results else 0
+                answer = f"Objects last appeared at {latest:.1f}s: " + ", ".join(classes[:5])
+                confidence = 0.7
+                
+        elif time_match:
             target_time = float(time_match.group(1))
             cursor.execute("""
                 MATCH (e:Entity)-[r:OBSERVED_IN]->(f:Frame)
@@ -283,6 +417,17 @@ class OrionRAG:
                 RETURN e.class_name AS class, f.idx AS frame, f.timestamp AS time
                 ORDER BY f.timestamp
             """, {"target_time": target_time})
+            results = cursor.fetchall()
+            evidence = [{"class": row[0], "frame": row[1], "time": row[2]} for row in results]
+            
+            if not results:
+                answer = f"No objects found at time {target_time:.1f}s."
+                confidence = 0.0
+            else:
+                objects = list(set(row[0] for row in results))
+                answer = f"At {target_time:.1f}s, detected: " + ", ".join(objects)
+                confidence = 0.8
+                
         elif frame_match:
             target_frame = int(frame_match.group(1))
             cursor.execute("""
@@ -291,30 +436,31 @@ class OrionRAG:
                 RETURN e.class_name AS class, f.idx AS frame, f.timestamp AS time
                 ORDER BY f.idx
             """, {"target_frame": target_frame})
+            results = cursor.fetchall()
+            evidence = [{"class": row[0], "frame": row[1], "time": row[2]} for row in results]
+            
+            if not results:
+                answer = f"No objects found near frame {target_frame}."
+                confidence = 0.0
+            else:
+                objects = list(set(row[0] for row in results))
+                answer = f"Near frame {target_frame}, detected: " + ", ".join(objects)
+                confidence = 0.8
         else:
             return QueryResult(
                 query_type="temporal",
                 question=question,
-                answer="Could not parse time/frame from question. Use format like '25s' or 'frame 500'.",
+                answer="Could not parse time/frame from question. Use format like '25s', 'frame 500', 'first', or 'last'.",
                 evidence=[],
                 confidence=0.0,
             )
-        
-        results = cursor.fetchall()
-        evidence = [{"class": row[0], "frame": row[1], "time": row[2]} for row in results]
-        
-        if not results:
-            answer = "No objects found at that time."
-        else:
-            objects = list(set(row[0] for row in results))
-            answer = f"At that time, detected: " + ", ".join(objects)
         
         return QueryResult(
             query_type="temporal",
             question=question,
             answer=answer,
             evidence=evidence,
-            confidence=1.0 if results else 0.0,
+            confidence=confidence,
         )
     
     def _query_object_info(self, question: str) -> QueryResult:
