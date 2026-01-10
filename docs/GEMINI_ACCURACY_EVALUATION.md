@@ -8,6 +8,12 @@
 
 This report presents Gemini-validated accuracy metrics for Orion's detection backends. Unlike raw detection counts, these metrics reflect **actual correctness** as validated by a state-of-the-art vision-language model.
 
+### About “class lists” and overfitting
+
+- **This evaluation does not use a predefined class list.** Gemini is asked to judge whether *each drawn box* corresponds to a real object and whether the *provided label* is semantically correct (with synonyms accepted, e.g., “monitor” vs “display”).
+- **However, the detectors themselves are label-constrained** (e.g., YOLO is trained on a fixed taxonomy; GroundingDINO/YOLO-World depend on the prompt/vocabulary you provide). So “limited classes” is mostly a *detector design choice*, not something we baked into the evaluation.
+- When we say “fix vocabulary,” we mean **label canonicalization/hierarchy** (e.g., treating “monitor/display/screen” consistently) rather than tailoring a tiny hand-picked list to a single video. Any vocabulary changes should be validated on a **held-out, more diverse video set** to avoid accidental domain overfit.
+
 ### Key Findings
 
 | Backend | Video | Precision | Recall | F1 Score | Label Acc |
