@@ -208,6 +208,9 @@ class OrionRAG:
         elif "similar" in question_lower or "like" in question_lower:
             result = self._query_similar_objects(question)
         
+        elif "describe" in question_lower or "activity" in question_lower or "doing" in question_lower or "happened" in question_lower:
+            result = self._query_activities(question)
+        
         else:
             # Default: try to find mentioned object
             result = self._query_object_info(question)
@@ -459,38 +462,71 @@ Common Patterns:
         """Query objects near a specific entity."""
         obj_name = self._extract_object_name(question)
         
-        # Try both directions for NEAR relationship
+        # Query NEAR edges in scene graph (created during stage 4)
+        # Look for this object in scene graph nodes and find what's nearby
         cypher = """
-            MATCH (e1:Entity {class_name: $class_name})-[r:NEAR]-(e2:Entity)
-            WITH e2.class_name AS nearby, count(r) AS times, avg(r.confidence) AS avg_conf
+            MATCH (f:Frame)
+            WHERE exists((f)-[:CONTAINS]->(sg:SceneGraphNode))
+            WITH f
+            MATCH (f)-[:CONTAINS]->(sg:SceneGraphNode {class_name: $class_name})
+            MATCH (f)-[:CONTAINS]->(near_sg:SceneGraphNode)
+            WHERE sg.id <> near_sg.id 
+            MATCH (sg)-[r:NEAR]-(near_sg)
+            WITH near_sg.class_name AS nearby, count(r) AS times, avg(r.confidence) AS avg_conf
             RETURN nearby, times, avg_conf
             ORDER BY times DESC
             LIMIT 10
         """
         
-        cursor = self.backend.connection.cursor()
-        cursor.execute(cypher, {"class_name": obj_name})
-        results = cursor.fetchall()
-        
-        evidence = [
-            {"nearby": row[0], "count": row[1], "avg_confidence": row[2]}
-            for row in results
-        ]
-        
-        if not results:
-            answer = f"No spatial relationships found for '{obj_name}'."
-        else:
-            nearby_list = [row[0] for row in results]
-            answer = f"Objects near {obj_name}: " + ", ".join(nearby_list)
-        
-        return QueryResult(
-            query_type="spatial_near",
-            question=question,
-            answer=answer,
-            evidence=evidence,
-            confidence=1.0 if results else 0.0,
-            cypher_query=cypher,
-        )
+        try:
+            cursor = self.backend.connection.cursor()
+            cursor.execute(cypher, {"class_name": obj_name})
+            results = cursor.fetchall()
+            
+            evidence = [
+                {"nearby": row[0], "count": row[1], "avg_confidence": row[2]}
+                for row in results
+            ]
+            
+            if not results:
+                # Fallback: Use entity observations for spatial proximity (less reliable but avoids empty results)
+                cypher_fallback = """
+                    MATCH (e1:Entity {class_name: $class_name})-[:OBSERVED_IN]->(f:Frame)
+                    MATCH (e2:Entity)-[:OBSERVED_IN]->(f)
+                    WHERE e1.id <> e2.id
+                    WITH e2.class_name AS nearby, count(DISTINCT f.idx) AS seen_together
+                    RETURN nearby, seen_together
+                    ORDER BY seen_together DESC
+                    LIMIT 10
+                """
+                cursor.execute(cypher_fallback, {"class_name": obj_name})
+                results = cursor.fetchall()
+                evidence = [
+                    {"nearby": row[0], "frames_together": row[1]}
+                    for row in results
+                ]
+                answer = f"Objects near {obj_name} (co-observed in {len(results)} frames): " + ", ".join([row[0] for row in results]) if results else f"No objects found near '{obj_name}'."
+            else:
+                nearby_list = [row[0] for row in results]
+                answer = f"Objects near {obj_name}: " + ", ".join(nearby_list)
+            
+            return QueryResult(
+                query_type="spatial_near",
+                question=question,
+                answer=answer,
+                evidence=evidence,
+                confidence=0.8 if results else 0.0,
+                cypher_query=cypher,
+            )
+        except Exception as e:
+            logger.debug(f"Spatial query error: {e}")
+            return QueryResult(
+                query_type="spatial_near",
+                question=question,
+                answer=f"Could not find spatial relationships for '{obj_name}'.",
+                evidence=[],
+                confidence=0.0,
+            )
     
     def _query_interactions(self, question: str) -> QueryResult:
         """Query interaction relationships (HELD_BY, etc.)."""
@@ -530,58 +566,85 @@ Common Patterns:
         """Query what happened at a specific time or frame range."""
         import re
         
-        # Try to extract time in seconds
+        # Try to extract time in seconds or "first appear"
         time_match = re.search(r'(\d+(?:\.\d+)?)\s*s(?:ec)?', question)
         frame_match = re.search(r'frame[s]?\s*(\d+)', question)
+        first_appear = "first" in question.lower() and ("appear" in question.lower() or "seen" in question.lower())
         
         cursor = self.backend.connection.cursor()
         
-        if time_match:
-            target_time = float(time_match.group(1))
-            cypher = """
-                MATCH (e:Entity)-[r:OBSERVED_IN]->(f:Frame)
-                WHERE abs(f.timestamp - $target_time) < 2.0
-                RETURN e.class_name AS class, f.idx AS frame, f.timestamp AS time
-                ORDER BY f.timestamp
-            """
-            cursor.execute(cypher, {"target_time": target_time})
+        try:
+            if time_match:
+                target_time = float(time_match.group(1))
+                cypher = """
+                    MATCH (e:Entity)-[r:OBSERVED_IN]->(f:Frame)
+                    WHERE abs(f.timestamp - $target_time) < 2.0
+                    RETURN e.class_name AS class, f.idx AS frame, f.timestamp AS time
+                    ORDER BY f.timestamp
+                """
+                cursor.execute(cypher, {"target_time": target_time})
+                
+            elif frame_match:
+                target_frame = int(frame_match.group(1))
+                cypher = """
+                    MATCH (e:Entity)-[r:OBSERVED_IN]->(f:Frame)
+                    WHERE abs(f.idx - $target_frame) < 20
+                    RETURN e.class_name AS class, f.idx AS frame, f.timestamp AS time
+                    ORDER BY f.idx
+                """
+                cursor.execute(cypher, {"target_frame": target_frame})
+                
+            elif first_appear:
+                # Query first appearance of objects
+                cypher = """
+                    MATCH (e:Entity)-[r:OBSERVED_IN]->(f:Frame)
+                    WITH e.class_name AS class, min(f.idx) AS first_frame, min(f.timestamp) AS first_time
+                    RETURN class, first_frame, first_time
+                    ORDER BY first_time ASC
+                    LIMIT 20
+                """
+                cursor.execute(cypher)
+            else:
+                return QueryResult(
+                    query_type="temporal",
+                    question=question,
+                    answer="Could not parse time/frame from question. Use format like '25s' or 'frame 500', or ask 'When did objects first appear?'.",
+                    evidence=[],
+                    confidence=0.0,
+                )
             
-        elif frame_match:
-            target_frame = int(frame_match.group(1))
-            cypher = """
-                MATCH (e:Entity)-[r:OBSERVED_IN]->(f:Frame)
-                WHERE abs(f.idx - $target_frame) < 20
-                RETURN e.class_name AS class, f.idx AS frame, f.timestamp AS time
-                ORDER BY f.idx
-            """
-            cursor.execute(cypher, {"target_frame": target_frame})
+            results = cursor.fetchall()
+            evidence = [{"class": row[0], "frame": row[1], "time": row[2]} for row in results]
             
-        else:
+            if not results:
+                answer = "No objects found at that time."
+                confidence = 0.0
+            else:
+                if first_appear:
+                    objects_times = [(row[0], row[2]) for row in results]
+                    answer = "First appearances: " + "; ".join([f"{obj} at {time:.1f}s" for obj, time in objects_times])
+                else:
+                    objects = list(set(row[0] for row in results))
+                    answer = f"At that time, detected: " + ", ".join(objects)
+                confidence = 0.7
+            
             return QueryResult(
                 query_type="temporal",
                 question=question,
-                answer="Could not parse time/frame from question. Use format like '25s' or 'frame 500'.",
+                answer=answer,
+                evidence=evidence,
+                confidence=confidence,
+                cypher_query=cypher if 'cypher' in locals() else None,
+            )
+        except Exception as e:
+            logger.debug(f"Temporal query error: {e}")
+            return QueryResult(
+                query_type="temporal",
+                question=question,
+                answer="Error querying temporal information.",
                 evidence=[],
                 confidence=0.0,
             )
-        
-        results = cursor.fetchall()
-        evidence = [{"class": row[0], "frame": row[1], "time": row[2]} for row in results]
-        
-        if not results:
-            answer = "No objects found at that time."
-        else:
-            objects = list(set(row[0] for row in results))
-            answer = f"At that time, detected: " + ", ".join(objects)
-        
-        return QueryResult(
-            query_type="temporal",
-            question=question,
-            answer=answer,
-            evidence=evidence,
-            confidence=1.0 if results else 0.0,
-            cypher_query=cypher if 'cypher' in locals() else None,
-        )
     
     def _query_similar_objects(self, question: str) -> QueryResult:
         """
@@ -715,6 +778,61 @@ Common Patterns:
             confidence=1.0,
             cypher_query=cypher,
         )
+    
+    def _query_activities(self, question: str) -> QueryResult:
+        """Query what activities/interactions happened in the video."""
+        cypher = """
+            MATCH (holder:Entity {class_name: "person"})-[r:HELD_BY]-(obj:Entity)
+            WITH DISTINCT obj.class_name AS activity_object, count(r) AS interaction_count
+            RETURN activity_object, interaction_count
+            ORDER BY interaction_count DESC
+            LIMIT 10
+        """
+        
+        try:
+            cursor = self.backend.connection.cursor()
+            cursor.execute(cypher)
+            results = cursor.fetchall()
+            
+            evidence = [{"object": row[0], "interactions": row[1]} for row in results]
+            
+            if not results:
+                # Fallback: Just list all objects detected (passive description)
+                cypher_all = """
+                    MATCH (e:Entity)
+                    RETURN DISTINCT e.class_name
+                    ORDER BY e.class_name
+                """
+                cursor.execute(cypher_all)
+                all_objects = [row[0] for row in cursor.fetchall()]
+                answer = f"The video contains: {', '.join(all_objects)}" if all_objects else "No activity detected."
+                evidence = [{"objects_present": all_objects}]
+                confidence = 0.5
+            else:
+                # Build activity description from interactions
+                activities = []
+                for obj, count in results:
+                    activities.append(f"person interacted with {count}x {obj}")
+                answer = "Activities: " + "; ".join(activities) + "."
+                confidence = 0.7
+            
+            return QueryResult(
+                query_type="activities",
+                question=question,
+                answer=answer,
+                evidence=evidence,
+                confidence=confidence,
+                cypher_query=cypher,
+            )
+        except Exception as e:
+            logger.debug(f"Activities query error: {e}")
+            return QueryResult(
+                query_type="activities",
+                question=question,
+                answer="Could not analyze activities in the video.",
+                evidence=[],
+                confidence=0.0,
+            )
     
     def _extract_object_name(self, question: str) -> str:
         """Extract object name from question."""
