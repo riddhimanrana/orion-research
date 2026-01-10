@@ -210,10 +210,11 @@ class DetectionConfig:
     # ===========================================
     # OpenVocab backend options (Propose → Label)
     # ===========================================
-    openvocab_proposer: Literal["owl", "yolo_clip"] = "yolo_clip"
+    openvocab_proposer: Literal["owl", "yolo_clip", "yoloworld_clip"] = "yolo_clip"
     """Proposal generator for openvocab backend.
     - 'owl': OWL-ViT2 class-agnostic proposals (HuggingFace model)
     - 'yolo_clip': YOLO11 proposals + CLIP visual embeddings (fallback, faster)
+    - 'yoloworld_clip': YOLO-World proposals + CLIP label scoring (strong open-vocab baseline)
     """
 
     openvocab_vocab_preset: Literal["lvis", "coco", "objects365"] = "lvis"
@@ -317,9 +318,10 @@ class DetectionConfig:
 
         # Validate openvocab backend options
         if self.backend == "openvocab":
-            if self.openvocab_proposer not in {"owl", "yolo_clip"}:
+            if self.openvocab_proposer not in {"owl", "yolo_clip", "yoloworld_clip"}:
                 raise ValueError(
-                    f"openvocab_proposer must be 'owl' or 'yolo_clip', got {self.openvocab_proposer}"
+                    "openvocab_proposer must be one of 'owl', 'yolo_clip', or 'yoloworld_clip', "
+                    f"got {self.openvocab_proposer}"
                 )
             if self.openvocab_vocab_preset not in {"lvis", "coco", "objects365"}:
                 raise ValueError(

@@ -3,7 +3,7 @@
 Run Re-ID + Memory (Phase 2)
 ============================
 
-Consumes tracks.jsonl and the source video to compute DINO embeddings,
+Consumes tracks.jsonl and the source video to compute V-JEPA2 embeddings,
 cluster tracks into persistent objects, and save memory.json. Also updates
 tracks.jsonl with embedding_id fields.
 

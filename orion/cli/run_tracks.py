@@ -20,8 +20,6 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from orion.perception.detectors.yolo import YOLODetector
-from orion.perception.hand_classifier import HandClassifier
 from orion.perception.trackers.enhanced import EnhancedTracker as ObjectTracker
 from orion.config import (
     get_episode_dir,
@@ -55,6 +53,7 @@ def process_video_to_tracks(
     yolo_model: str = "yolo11m",
     detector_backend: str = "yolo",
     yoloworld_open_vocab: bool = False,
+    yoloworld_prompt_preset: str | None = None,
     yoloworld_prompt: str | None = None,
     gdino_model: str = "IDEA-Research/grounding-dino-tiny",
     hybrid_min_detections: int = 3,
@@ -118,9 +117,7 @@ def process_video_to_tracks(
     # Use FrameObserver for advanced detection (supports 3D/Depth)
     from orion.perception.observer import FrameObserver
     from orion.perception.config import DetectionConfig
-    from ultralytics import YOLO
     from orion.managers.model_manager import ModelManager
-    from orion.perception.hybrid_detector import HybridDetector, HybridDetectorConfig
     
     # Initialize detector based on backend
     yolo = None
@@ -130,11 +127,15 @@ def process_video_to_tracks(
     hybrid_detector = None
 
     if detector_backend == "yolo":
+        from ultralytics import YOLO
         logger.info(f"Loading YOLO model: {yolo_model}")
         yolo = YOLO(f"{yolo_model}.pt")
     elif detector_backend == "yoloworld":
+        from ultralytics import YOLO
         # Get model from config (default: yolov8l-worldv2.pt)
         det_config_temp = DetectionConfig(backend="yoloworld")
+        if yoloworld_prompt_preset:
+            det_config_temp.yoloworld_prompt_preset = str(yoloworld_prompt_preset)
         if yoloworld_prompt:
             det_config_temp.yoloworld_prompt_preset = "custom"
             det_config_temp.yoloworld_prompt = yoloworld_prompt
@@ -163,6 +164,8 @@ def process_video_to_tracks(
         gdino, gdino_processor = manager.gdino
 
     elif detector_backend == "hybrid":
+        from ultralytics import YOLO
+        from orion.perception.hybrid_detector import HybridDetector, HybridDetectorConfig
         logger.info(f"Loading YOLO model (primary): {yolo_model}")
         yolo = YOLO(f"{yolo_model}.pt")
 
@@ -227,6 +230,9 @@ def process_video_to_tracks(
         confidence_threshold=confidence_threshold,
         yoloworld_use_custom_classes=(False if yoloworld_open_vocab else True),
     )
+
+    if yoloworld_prompt_preset:
+        det_config.yoloworld_prompt_preset = str(yoloworld_prompt_preset)
     
     # Add openvocab-specific config fields
     if detector_backend == "openvocab":
@@ -270,6 +276,8 @@ def process_video_to_tracks(
     hand_detector_info = None
     if enable_hand_detector:
         logger.info(f"\n[{current_step}/{total_steps}] Running hand classifier...")
+        # Lazy import to avoid requiring mediapipe unless the hand pipeline is enabled.
+        from orion.perception.hand_classifier import HandClassifier
         hand_detector = HandClassifier(
             max_hands=hand_max_hands,
             min_detection_confidence=hand_detection_confidence,
@@ -444,6 +452,17 @@ def main():
         help="When using --detector-backend hybrid: GroundingDINO confidence threshold (default: 0.30)",
     )
     parser.add_argument(
+        "--prompt-preset",
+        type=str,
+        default=None,
+        choices=["coco", "coarse", "indoor_full", "custom"],
+        help=(
+            "Prompt preset for YOLO-World *and* GroundingDINO category lists (default: config default). "
+            "If 'custom', you must also pass --yoloworld-prompt. "
+            "Note: for --detector-backend yoloworld with --yoloworld-open-vocab, this is ignored."
+        ),
+    )
+    parser.add_argument(
         "--yoloworld-open-vocab",
         action="store_true",
         help="When using --detector-backend yoloworld, do NOT call set_classes(); run YOLO-World in open-vocab mode",
@@ -530,6 +549,9 @@ def main():
     )
     
     args = parser.parse_args()
+
+    if args.prompt_preset == "custom" and not args.yoloworld_prompt:
+        raise SystemExit("--prompt-preset custom requires --yoloworld-prompt")
     
     # Determine video path
     if args.video:
@@ -555,6 +577,7 @@ def main():
             yolo_model=args.model,
             detector_backend=args.detector_backend,
             yoloworld_open_vocab=args.yoloworld_open_vocab,
+            yoloworld_prompt_preset=args.prompt_preset,
             yoloworld_prompt=args.yoloworld_prompt,
             gdino_model=args.gdino_model,
             hybrid_min_detections=args.hybrid_min_detections,
