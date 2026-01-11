@@ -679,6 +679,9 @@ class FrameObserver:
         Returns:
             List of detection dictionaries
         """
+        # Get initial detections
+        detection_candidates = self._run_detection_backend(frame)
+        
         # Adaptive confidence thresholding (NEW)
         if self.enable_adaptive_confidence:
             # Track detection count for adaptive thresholding
@@ -700,8 +703,6 @@ class FrameObserver:
                         d for d in detection_candidates
                         if d.get("confidence", 0) >= adjusted_threshold
                     ]
-        
-        detection_candidates = self._run_detection_backend(frame)
         
         # Run 3D perception if enabled
         perception_3d = None
@@ -1271,6 +1272,22 @@ class FrameObserver:
             )
         
         return valid_detections
+    
+    def _compute_spatial_zone(
+        self,
+        centroid: tuple[float, float],
+        frame_width: int,
+        frame_height: int
+    ) -> str:
+        """
+        Compute spatial zone for an object based on its centroid position.
+        
+        Divides frame into 9 zones (3x3 grid).
+        
+        Args:
+            centroid: (cx, cy) normalized pixel coordinates
+            frame_width: Frame width in pixels
+            frame_height: Frame height in pixels
             
         Returns:
             Spatial zone string (e.g., "center", "top_left")
