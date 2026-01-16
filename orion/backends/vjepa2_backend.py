@@ -8,7 +8,6 @@ Based on Shivank's recommendation to use video encoders for better Re-ID.
 """
 
 import logging
-from pathlib import Path
 from typing import Optional, Union
 import numpy as np
 
@@ -41,37 +40,65 @@ class VJepa2Embedder:
     ):
         self.model_name = model_name
         self.device = device
+        # float16 can be problematic on CPU for some transformer kernels.
+        if device == "cpu" and dtype == torch.float16:
+            dtype = torch.float32
         self.dtype = dtype
         self._model = None
         self._processor = None
         self._loaded = False
+        self._load_error: Exception | None = None
     
     def _ensure_loaded(self):
         """Lazy load model on first use."""
         if self._loaded:
             return
+
+        if self._load_error is not None:
+            # Fail fast if a previous load attempt already failed.
+            raise self._load_error
         
         logger.info(f"Loading V-JEPA2: {self.model_name}")
         
         try:
             from transformers import AutoVideoProcessor, AutoModel
-            
+
             self._processor = AutoVideoProcessor.from_pretrained(self.model_name)
-            self._model = AutoModel.from_pretrained(
-                self.model_name,
-                torch_dtype=self.dtype,
-                device_map="auto" if self.device == "cuda" else None,
-                attn_implementation="sdpa"  # Scaled dot-product attention (faster)
-            )
-            
-            if self.device != "cuda":
-                self._model = self._model.to(self.device)
-            
+
+            # IMPORTANT:
+            # - Avoid `device_map="auto"` by default because it requires `accelerate`,
+            #   which we intentionally do not depend on for server stability.
+            # - `attn_implementation` is available on newer transformers; fall back
+            #   cleanly if the installed version/model does not accept it.
+            model_kwargs = {"torch_dtype": self.dtype}
+            if self.device == "cuda":
+                model_kwargs["attn_implementation"] = "sdpa"
+
+            try:
+                self._model = AutoModel.from_pretrained(self.model_name, **model_kwargs)
+            except TypeError as e:
+                # Retry without newer kwargs (e.g., attn_implementation) if unsupported.
+                if "attn_implementation" in model_kwargs:
+                    model_kwargs.pop("attn_implementation", None)
+                    self._model = AutoModel.from_pretrained(self.model_name, **model_kwargs)
+                else:
+                    raise
+
+            # Explicit device placement for single-GPU and non-CUDA devices.
+            self._model = self._model.to(self.device)
             self._model.eval()
+
+            if not hasattr(self._model, "get_vision_features") and not hasattr(self._model, "get_video_features"):
+                logger.warning(
+                    "V-JEPA2 model does not expose get_vision_features()/get_video_features(); "
+                    "will fall back to forward() outputs for pooling."
+                )
+
             self._loaded = True
-            logger.info(f"✓ V-JEPA2 loaded on {self.device}")
-            
+            logger.info(f"✓ V-JEPA2 loaded on {self.device} (dtype={self.dtype})")
+
         except Exception as e:
+            self._load_error = e
             logger.error(f"Failed to load V-JEPA2: {e}")
             raise
     
@@ -116,14 +143,22 @@ class VJepa2Embedder:
             inputs['pixel_values_videos'] = inputs['pixel_values_videos'].repeat(1, 16, 1, 1, 1)
         
         with torch.no_grad():
-            # Use get_vision_features() per official docs
-            # Returns [batch, num_patches, hidden_dim] - need to pool
-            features = self._model.get_vision_features(**inputs)
-            
-            # Pool across patches (mean pooling)
-            # Shape: [batch, num_patches, 1024] -> [batch, 1024]
-            embedding = features.mean(dim=1)
-            
+            # Preferred API (V-JEPA2): get_vision_features / get_video_features.
+            if hasattr(self._model, "get_vision_features"):
+                features = self._model.get_vision_features(**inputs)
+                embedding = features.mean(dim=1)
+            elif hasattr(self._model, "get_video_features"):
+                features = self._model.get_video_features(**inputs)
+                embedding = features.mean(dim=1) if features.ndim == 3 else features
+            else:
+                outputs = self._model(**inputs)
+                if getattr(outputs, "pooler_output", None) is not None:
+                    embedding = outputs.pooler_output
+                elif getattr(outputs, "last_hidden_state", None) is not None:
+                    embedding = outputs.last_hidden_state.mean(dim=1)
+                else:
+                    raise RuntimeError("V-JEPA2 forward() returned no usable features")
+
             # L2 normalize for cosine similarity
             embedding = torch.nn.functional.normalize(embedding, p=2, dim=-1)
         
@@ -191,8 +226,21 @@ class VJepa2Embedder:
                 continue
             
             with torch.no_grad():
-                features = self._model.get_vision_features(pixel_values_videos=batch_input)
-                embeddings = features.mean(dim=1)  # Pool across patches
+                if hasattr(self._model, "get_vision_features"):
+                    features = self._model.get_vision_features(pixel_values_videos=batch_input)
+                    embeddings = features.mean(dim=1)
+                elif hasattr(self._model, "get_video_features"):
+                    features = self._model.get_video_features(pixel_values_videos=batch_input)
+                    embeddings = features.mean(dim=1) if features.ndim == 3 else features
+                else:
+                    outputs = self._model(pixel_values_videos=batch_input)
+                    if getattr(outputs, "pooler_output", None) is not None:
+                        embeddings = outputs.pooler_output
+                    elif getattr(outputs, "last_hidden_state", None) is not None:
+                        embeddings = outputs.last_hidden_state.mean(dim=1)
+                    else:
+                        raise RuntimeError("V-JEPA2 forward() returned no usable features")
+
                 embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=-1)
             
             # Split back into individual embeddings
@@ -247,14 +295,21 @@ class VJepa2Embedder:
         inputs = {k: v.to(self._model.device) for k, v in inputs.items()}
         
         with torch.no_grad():
-            # Use get_vision_features() per official V-JEPA2 docs
-            # Returns [batch, num_patches, hidden_dim] - need to pool
-            features = self._model.get_vision_features(**inputs)
-            
-            # Pool across patches (mean pooling)
-            embedding = features.mean(dim=1)
-            
-            # L2 normalize for cosine similarity
+            if hasattr(self._model, "get_vision_features"):
+                features = self._model.get_vision_features(**inputs)
+                embedding = features.mean(dim=1)
+            elif hasattr(self._model, "get_video_features"):
+                features = self._model.get_video_features(**inputs)
+                embedding = features.mean(dim=1) if features.ndim == 3 else features
+            else:
+                outputs = self._model(**inputs)
+                if getattr(outputs, "pooler_output", None) is not None:
+                    embedding = outputs.pooler_output
+                elif getattr(outputs, "last_hidden_state", None) is not None:
+                    embedding = outputs.last_hidden_state.mean(dim=1)
+                else:
+                    raise RuntimeError("V-JEPA2 forward() returned no usable features")
+
             embedding = torch.nn.functional.normalize(embedding, p=2, dim=-1)
         
         return embedding.cpu().float()

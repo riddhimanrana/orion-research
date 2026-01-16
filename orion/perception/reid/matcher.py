@@ -148,7 +148,9 @@ def compute_observation_embedding(
     reid_model = mm.reid_embedder  # V-JEPA2 (3D-aware video encoder)
     
     # V-JEPA2 API
-    emb_tensor = reid_model.embed_single_image(crop)
+    # NOTE: OpenCV frames/crops are BGR; V-JEPA2 expects RGB.
+    crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+    emb_tensor = reid_model.embed_single_image(crop_rgb)
     emb = emb_tensor.numpy().flatten()
     
     return emb.astype(np.float32)
@@ -215,6 +217,7 @@ def compute_track_embeddings(
     """
     mm = ModelManager.get_instance()
     reid_model = mm.reid_embedder  # V-JEPA2 (3D-aware video encoder)
+    emb_dim = int(getattr(reid_model, "embedding_dim", 1024))
 
     by_frame = _group_by(tracks, "frame_id")
     needed_frames = sorted(by_frame.keys())
@@ -251,6 +254,13 @@ def compute_track_embeddings(
             crop = frame[y1:y2, x1:x2]
             if crop.size == 0:
                 continue
+
+            # Store RGB crops for consistent embeddings.
+            try:
+                crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+            except Exception:
+                # If conversion fails for any reason, keep original crop.
+                pass
             
             all_crops.append(crop)
             crop_metadata.append((tid, current_count))
@@ -265,6 +275,8 @@ def compute_track_embeddings(
     # Check if model supports batch embedding
     has_batch = hasattr(reid_model, 'embed_batch')
 
+    embs: List[np.ndarray]
+
     if has_batch:
         # Use batch embedding when available (it will internally chunk by batch_size)
         try:
@@ -276,10 +288,25 @@ def compute_track_embeddings(
 
     if not has_batch:
         # Sequential fallback
-        embs = []
-        for crop in all_crops:
-            emb_tensor = reid_model.embed_single_image(crop)
-            embs.append(emb_tensor.numpy().flatten())
+        try:
+            embs = []
+            for crop in all_crops:
+                emb_tensor = reid_model.embed_single_image(crop)
+                embs.append(emb_tensor.numpy().flatten())
+        except Exception as e:
+            # Hard failure during model load/inference should not crash the whole pipeline.
+            # Fallback to zeros so Phase-2 can still write memory.json and the rest of the
+            # evaluation (Memgraph ingest, queries, Gemini) can proceed.
+            logger.exception(f"V-JEPA2 embedding failed during Phase-2 (falling back to zeros): {e}")
+            embs = [np.zeros((emb_dim,), dtype=np.float32) for _ in all_crops]
+
+    # If batch path produced an unexpected count, fall back defensively.
+    if len(embs) != len(all_crops):
+        logger.warning(
+            f"Embedding count mismatch (got {len(embs)} for {len(all_crops)} crops); "
+            "falling back to zeros"
+        )
+        embs = [np.zeros((emb_dim,), dtype=np.float32) for _ in all_crops]
 
     # Group embeddings by track
     for (tid, _), emb in zip(crop_metadata, embs):

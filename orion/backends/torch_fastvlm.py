@@ -65,15 +65,23 @@ class FastVLMTorchWrapper:
         logger.info(f"Initializing FastVLM with torch backend on device: {self.device}")
 
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_source, trust_remote_code=True)
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.model_source,
-            trust_remote_code=True,
-            torch_dtype=torch.float16 if self.device != "cpu" else torch.float32,
-            device_map="auto" if self.device == "cuda" else None,
-        )
-        
-        if self.device != "cuda":
-            self.model = self.model.to(self.device)
+
+        # Avoid `device_map="auto"` by default: it requires the `accelerate` package,
+        # which we intentionally don't depend on for server stability.
+        model_kwargs = {
+            "trust_remote_code": True,
+            "torch_dtype": torch.float16 if self.device != "cpu" else torch.float32,
+            # Helps reduce peak RAM during load on newer transformers.
+            "low_cpu_mem_usage": True,
+        }
+        try:
+            self.model = AutoModelForCausalLM.from_pretrained(self.model_source, **model_kwargs)
+        except TypeError:
+            # Older transformers may not accept low_cpu_mem_usage.
+            model_kwargs.pop("low_cpu_mem_usage", None)
+            self.model = AutoModelForCausalLM.from_pretrained(self.model_source, **model_kwargs)
+
+        self.model = self.model.to(self.device)
             
         self.model.eval()
         logger.info(f"✓ FastVLM model loaded on {self.device}")

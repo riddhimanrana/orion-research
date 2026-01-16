@@ -181,6 +181,15 @@ def run_perception_pipeline(
             text=True,
             timeout=600,  # 10 minute timeout
         )
+
+        # Always persist logs for post-mortem debugging.
+        stdout_path = results_dir / "perception_stdout.log"
+        stderr_path = results_dir / "perception_stderr.log"
+        try:
+            stdout_path.write_text(result.stdout or "")
+            stderr_path.write_text(result.stderr or "")
+        except Exception as e:
+            logger.warning(f"Failed to write perception logs: {e}")
         
         duration = time.time() - start_time
         success = result.returncode == 0
@@ -188,10 +197,18 @@ def run_perception_pipeline(
         errors = []
         if not success:
             errors.append(f"Exit code: {result.returncode}")
-            errors.append(result.stderr[-500:] if result.stderr else "No stderr")
+            errors.append(f"stdout_log: {stdout_path}")
+            errors.append(f"stderr_log: {stderr_path}")
+            if result.stderr:
+                tail = result.stderr[-4000:]
+                errors.append(f"stderr_tail:\n{tail}")
+            else:
+                errors.append("No stderr")
         
         # Load metrics from results
         metrics = {"duration": duration}
+        metrics["perception_stdout_log"] = str(results_dir / "perception_stdout.log")
+        metrics["perception_stderr_log"] = str(results_dir / "perception_stderr.log")
         if tracks_path.exists():
             with open(tracks_path) as f:
                 track_count = sum(1 for _ in f)
@@ -412,7 +429,7 @@ def validate_with_gemini(
     video_path: Path,
     perception_result: StageResult,
     query_result: StageResult,
-    model_name: str = "gemini-2.5-flash",
+    model_name: str = "gemini-3-flash-preview",
 ) -> Dict[str, Any]:
     """
     Comprehensive Gemini validation of Orion results.
@@ -722,7 +739,7 @@ def main():
     parser.add_argument("--no-llm", action="store_true", help="Disable LLM for queries")
     parser.add_argument("--questions", help="JSON file with custom test questions")
     parser.add_argument("--memgraph-host", default="127.0.0.1", help="Memgraph host")
-    parser.add_argument("--gemini-model", default="gemini-2.5-flash", help="Gemini model")
+    parser.add_argument("--gemini-model", default="gemini-3-flash-preview", help="Gemini model")
     
     args = parser.parse_args()
     

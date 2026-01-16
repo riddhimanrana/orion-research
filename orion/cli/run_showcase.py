@@ -304,9 +304,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--force-graph", action="store_true")
 
     parser.add_argument("--relations", nargs="+", default=["near", "on", "held_by"])
-    parser.add_argument("--near-dist", type=float, default=0.08)
-    parser.add_argument("--near-small-dist", type=float, default=0.06)
-    parser.add_argument("--near-small-area", type=float, default=0.05)
+    parser.add_argument("--near-dist", type=float, default=0.12, help="Spatial NEAR threshold as fraction of frame diagonal (default: 0.12 = 12%)")
+    parser.add_argument("--near-small-dist", type=float, default=0.08, help="NEAR threshold for small objects (default: 0.08)")
+    parser.add_argument("--near-small-area", type=float, default=0.05, help="Area threshold for 'small object' classification (default: 0.05)")
     parser.add_argument("--on-overlap", type=float, default=0.3)
     parser.add_argument("--on-vgap", type=float, default=0.02)
     parser.add_argument("--on-subj-overlap", type=float, default=0.5)
