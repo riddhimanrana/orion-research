@@ -158,6 +158,29 @@ def build_scene_graphs(
                 if kp and isinstance(kp, list):
                     person_keypoints[o["memory_id"]] = kp
 
+        # Infer frame dimensions if missing: estimate from max bbox extent
+        # (fallback to typical HD resolution if no bboxes)
+        frame_width = None
+        frame_height = None
+        if obs and obs[0].get("frame_width") and obs[0].get("frame_height"):
+            frame_width = obs[0].get("frame_width")
+            frame_height = obs[0].get("frame_height")
+        else:
+            # Estimate from bboxes
+            max_x, max_y = 0, 0
+            for o in obs:
+                if o.get("bbox"):
+                    bbox = o["bbox"]
+                    max_x = max(max_x, bbox[2])
+                    max_y = max(max_y, bbox[3])
+            if max_x > 0 and max_y > 0:
+                frame_width = int(max_x * 1.1)  # Add 10% margin
+                frame_height = int(max_y * 1.1)
+            else:
+                # Fallback to typical HD resolution
+                frame_width = 1280
+                frame_height = 720
+
         for i in range(n):
             A = obs[i]
             for j in range(n):
@@ -168,7 +191,7 @@ def build_scene_graphs(
                     continue
                 a_b = A["bbox"]
                 b_b = B["bbox"]
-                wh = (A.get("frame_width", 0), A.get("frame_height", 0))
+                wh = (frame_width, frame_height)
                 diag = _frame_diag(wh)
                 iou_val = _iou(a_b, b_b)
 
