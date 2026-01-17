@@ -51,7 +51,7 @@ def process_video_to_tracks(
     episode_id: str,
     target_fps: float = 5.0,
     yolo_model: str = "yolo11m",
-    detector_backend: str = "yolo",
+    detector_backend: str = "dinov3",
     yoloworld_open_vocab: bool = False,
     yoloworld_prompt_preset: str | None = None,
     yoloworld_prompt: str | None = None,
@@ -83,7 +83,7 @@ def process_video_to_tracks(
         episode_id: Episode identifier for results
         target_fps: Target FPS for processing
         yolo_model: YOLO variant to use
-        detector_backend: Detection backend ('yolo', 'yoloworld', 'groundingdino', 'hybrid', 'openvocab')
+        detector_backend: Detection backend ('yolo', 'yoloworld', 'groundingdino', 'hybrid', 'openvocab', 'dinov3')
         gdino_model: GroundingDINO model ID when using groundingdino/hybrid
         openvocab_proposer: OpenVocab proposer ('owl', 'yolo_clip', 'yoloworld_clip')
         openvocab_vocab: OpenVocab vocabulary preset ('lvis', 'coco', 'objects365')
@@ -162,6 +162,20 @@ def process_video_to_tracks(
         manager.gdino_model_name = gdino_model
         logger.info(f"Loading GroundingDINO model: {gdino_model} (device={device})")
         gdino, gdino_processor = manager.gdino
+
+    elif detector_backend == "dinov3":
+        # For dinov3 backend we prefer to use GroundingDINO as proposer (if available)
+        # and then run DINOv3 classification as a refinement step.
+        manager = ModelManager.get_instance()
+        manager.device = device
+        manager.gdino_model_name = gdino_model
+        logger.info(f"Loading GroundingDINO model for dinov3 proposals: {gdino_model} (device={device})")
+        try:
+            gdino, gdino_processor = manager.gdino
+        except Exception as e:
+            logger.warning(f"Failed to load GroundingDINO for dinov3 proposals: {e}")
+            gdino = None
+            gdino_processor = None
 
     elif detector_backend == "hybrid":
         from ultralytics import YOLO

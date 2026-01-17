@@ -26,6 +26,7 @@ from orion.perception.taxonomy import COARSE_TO_FINE_PROMPTS
 from orion.perception.types import ObjectClass, BoundingBox
 from orion.perception.config import DetectionConfig
 from orion.utils.profiling import profile
+from orion.backends.dino_classifier import classify_detections_with_context
 
 # Check if 3D perception is available
 try:
@@ -57,7 +58,7 @@ class FrameObserver:
     def __init__(
         self,
         config: DetectionConfig,
-        detector_backend: Literal["yolo", "yoloworld", "groundingdino", "hybrid", "openvocab"] = "yolo",
+        detector_backend: Literal["yolo", "yoloworld", "groundingdino", "hybrid", "openvocab", "dinov3"] = "yolo",
         yolo_model: Optional[Any] = None,
         yoloworld_model: Optional[Any] = None,
         gdino_model: Optional[Any] = None,
@@ -97,6 +98,14 @@ class FrameObserver:
         self.yoloworld = yoloworld_model if detector_backend == "yoloworld" else None
         self.gdino = gdino_model if detector_backend in {"groundingdino", "hybrid"} else None
         self.gdino_processor = gdino_processor if detector_backend in {"groundingdino", "hybrid"} else None
+        # Allow dinov3 backend: proposals come from groundingdino/hybrid/yolo and
+        # then DINOv3 is used to refine/classify proposals. We still accept gdino
+        # and yolo models as constructor params; FrameObserver will prefer provided
+        # gdino when available.
+        if detector_backend == "dinov3":
+            # If the caller provided a grounding dino model, use it as proposer.
+            # `self.gdino` and `self.gdino_processor` may already be set above.
+            pass
         self.hybrid_detector = hybrid_detector if detector_backend == "hybrid" else None
         self.openvocab_pipeline = openvocab_pipeline if detector_backend == "openvocab" else None
 
@@ -449,6 +458,8 @@ class FrameObserver:
             return self._detect_with_groundingdino(frame)
         elif self.detector_backend == "hybrid":
             return self._detect_with_hybrid(frame)
+        elif self.detector_backend == "dinov3":
+            return self._detect_with_dinov3(frame)
         elif self.detector_backend == "openvocab":
             return self._detect_with_openvocab(frame)
         else:
@@ -485,6 +496,59 @@ class FrameObserver:
                 }
             )
         return detections
+
+    @profile("observer_detect_with_dinov3")
+    def _detect_with_dinov3(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+        """Use an underlying proposer (GroundingDINO/YOLO/Hybrid) for boxes,
+        then classify/refine those proposals using DINOv3 full-frame features.
+
+        This preserves the repository's existing proposal generators while
+        improving label quality via DINOv3's scene-aware classification.
+        """
+        # Prefer GroundingDINO proposals if available
+        proposals: List[Dict[str, Any]] = []
+        try:
+            if self.gdino is not None and self.gdino_processor is not None:
+                proposals = self._detect_with_groundingdino(frame)
+            elif self.hybrid_detector is not None:
+                proposals = self._detect_with_hybrid(frame)
+            elif self.yoloworld is not None:
+                proposals = self._detect_with_yoloworld(frame)
+            else:
+                proposals = self._detect_with_yolo(frame)
+        except Exception as e:
+            logger.warning(f"Proposal generation for dinov3 failed: {e}")
+            proposals = []
+
+        if not proposals:
+            return []
+
+        # Run DINOv3 classification/refinement using the convenience helper.
+        device = self._preferred_torch_device()
+        try:
+            refined = classify_detections_with_context(frame, proposals, device=device)
+        except Exception as e:
+            logger.warning(f"DINOv3 classification failed: {e}")
+            return proposals
+
+        # Normalize refined outputs into the expected detection schema
+        normalized: List[Dict[str, Any]] = []
+        for det in refined:
+            # The classifier returns 'refined_class' and 'refinement_confidence'
+            refined_class = det.get("refined_class") or det.get("class_name")
+            refined_conf = float(det.get("refinement_confidence", det.get("confidence", 0.0)))
+
+            normalized.append({
+                "bbox": det.get("bbox", det.get("bounding_box") or [0, 0, 0, 0]),
+                "confidence": refined_conf,
+                "class_id": int(det.get("class_id", -1) if det.get("class_id", -1) is not None else -1),
+                "class_name": str(refined_class),
+                "source": "dinov3",
+                # Preserve any candidate labels or metadata
+                **{k: v for k, v in det.items() if k not in {"bbox", "confidence", "class_id", "class_name"}},
+            })
+
+        return normalized
 
     @profile("observer_detect_with_groundingdino")
     def _detect_with_groundingdino(self, frame: np.ndarray) -> List[Dict[str, Any]]:

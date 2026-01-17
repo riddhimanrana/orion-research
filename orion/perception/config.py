@@ -80,11 +80,13 @@ YOLOWORLD_PROMPT_INDOOR_FULL = (
 class DetectionConfig:
     """Detection backend configuration (YOLO, YOLO-World, GroundingDINO, or OpenVocab)."""
 
-    backend: Literal["yolo", "yoloworld", "groundingdino", "hybrid", "openvocab"] = "yoloworld"
-    """Primary detector to use for frame observations. Options: 'yolo', 'yoloworld', 'groundingdino', 'hybrid', 'openvocab'
-    
-    v2 default: 'yoloworld' for open-vocabulary detection without retraining.
-    v3 option: 'openvocab' for propose→label pipeline with vocabulary bank (no hand-picked prompts).
+    backend: Literal["yolo", "yoloworld", "groundingdino", "hybrid", "openvocab", "dinov3"] = "dinov3"
+    """Primary detector to use for frame observations. Options: 'yolo', 'yoloworld',
+    'groundingdino', 'hybrid', 'openvocab', 'dinov3'
+
+    New default: 'dinov3' — this uses DINOv3 for proposal classification/refinement
+    on top of an underlying proposer (GroundingDINO or YOLO) to improve label
+    quality while preserving the existing proposal generation logic.
     """
 
     # Model specific settings
@@ -283,9 +285,9 @@ class DetectionConfig:
 
     def __post_init__(self):
         """Validate detection config."""
-        if self.backend not in {"yolo", "yoloworld", "groundingdino", "hybrid", "openvocab"}:
+        if self.backend not in {"yolo", "yoloworld", "groundingdino", "hybrid", "openvocab", "dinov3"}:
             raise ValueError(
-                "backend must be 'yolo', 'yoloworld', 'groundingdino', 'hybrid', or 'openvocab', "
+                "backend must be 'yolo', 'yoloworld', 'groundingdino', 'hybrid', 'openvocab', or 'dinov3', "
                 f"got {self.backend}"
             )
 
