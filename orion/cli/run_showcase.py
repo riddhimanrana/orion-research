@@ -178,6 +178,10 @@ def _phase3_graph(args: argparse.Namespace, results_dir: Path) -> Dict:
         temporal_near_threshold=args.temporal_near_thresh,
         temporal_on_threshold=args.temporal_on_thresh,
         temporal_held_by_threshold=args.temporal_held_thresh,
+        # DINOv3 embedding verification
+        use_embedding_verification=args.use_embedding_verification,
+        embedding_weight=args.embedding_weight,
+        embedding_similarity_threshold=args.embedding_similarity_threshold,
     )
     save_scene_graphs(graphs, graph_path)
     summary = build_graph_summary(graphs)
@@ -355,6 +359,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--temporal-near-thresh", type=float, default=0.4, help="Threshold for 'near' relation")
     parser.add_argument("--temporal-on-thresh", type=float, default=0.6, help="Threshold for 'on' relation")
     parser.add_argument("--temporal-held-thresh", type=float, default=0.7, help="Threshold for 'held_by' relation")
+
+    # DINOv3 embedding verification for scene graphs
+    parser.add_argument("--use-embedding-verification", action="store_true", default=True, help="Enable DINOv3 embedding verification for relations")
+    parser.add_argument("--embedding-weight", type=float, default=0.3, help="Weight for embedding similarity in relation confidence")
+    parser.add_argument("--embedding-similarity-threshold", type=float, default=0.5, help="Minimum embedding similarity to keep relation")
 
     parser.add_argument("--no-overlay", action="store_true", help="Skip overlay rendering")
     parser.add_argument("--overlay-output", help="Explicit overlay path")

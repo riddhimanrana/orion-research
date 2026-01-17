@@ -67,6 +67,74 @@ def _horiz_overlap_ratio(a: List[float], b: List[float]) -> float:
     return float(ov / min(aw, bw))
 
 
+def _verify_edges_with_embeddings(
+    edges: List[Dict[str, Any]],
+    embeddings_by_mem_id: Dict[str, Any],
+    embedding_weight: float = 0.3,
+    embedding_similarity_threshold: float = 0.5,
+) -> List[Dict[str, Any]]:
+    """
+    Post-process edges to verify them with DINOv3 embeddings.
+    
+    Args:
+        edges: List of edge dicts with 'relation', 'subject', 'object'
+        embeddings_by_mem_id: Dict mapping memory_id -> embedding vector (numpy array)
+        embedding_weight: Weight for embedding similarity in confidence calculation
+        embedding_similarity_threshold: Minimum similarity to keep edge
+    
+    Returns:
+        Filtered and weighted edges
+    """
+    if not embeddings_by_mem_id:
+        return edges
+    
+    verified_edges = []
+    for edge in edges:
+        subject_id = edge.get("subject")
+        object_id = edge.get("object")
+        
+        # Get embeddings
+        subj_emb = embeddings_by_mem_id.get(subject_id)
+        obj_emb = embeddings_by_mem_id.get(object_id)
+        
+        if subj_emb is None or obj_emb is None:
+            # No embedding available, keep edge as-is
+            verified_edges.append(edge)
+            continue
+        
+        # Compute cosine similarity
+        try:
+            from sklearn.metrics.pairwise import cosine_similarity
+            sim = float(cosine_similarity([subj_emb], [obj_emb])[0][0])
+        except Exception:
+            # Fallback: manual cosine similarity
+            try:
+                dot_product = np.dot(subj_emb, obj_emb)
+                norm_a = np.linalg.norm(subj_emb)
+                norm_b = np.linalg.norm(obj_emb)
+                sim = float(dot_product / (norm_a * norm_b + 1e-8))
+            except Exception:
+                # If computation fails, keep edge as-is
+                verified_edges.append(edge)
+                continue
+        
+        # Only keep if similarity is above threshold
+        if sim >= embedding_similarity_threshold:
+            # Preserve existing score or create new one based on embedding confidence
+            if "score" in edge:
+                # Weight geometry score with embedding confidence
+                geom_score = edge["score"]
+                combined_score = geom_score * (1 - embedding_weight) + sim * embedding_weight
+                edge["score"] = float(combined_score)
+                edge["embedding_similarity"] = float(sim)
+            else:
+                edge["embedding_similarity"] = float(sim)
+            
+            verified_edges.append(edge)
+    
+    return verified_edges
+
+
 def build_scene_graphs(
     memory: Dict[str, Any],
     tracks: List[Dict[str, Any]],
@@ -93,6 +161,10 @@ def build_scene_graphs(
     temporal_near_threshold: float = 0.4,
     temporal_on_threshold: float = 0.6,
     temporal_held_by_threshold: float = 0.7,
+    # DINOv3 embedding verification (NEW)
+    use_embedding_verification: bool = True,
+    embedding_weight: float = 0.3,
+    embedding_similarity_threshold: float = 0.5,
 ) -> List[Dict[str, Any]]:
     """
     Build per-frame scene graph snapshots with nodes (memory objects) and edges (relations).
@@ -105,6 +177,10 @@ def build_scene_graphs(
     Temporal smoothing (when enabled):
     - Uses rolling window to filter flickering edges
     - Relation-specific thresholds control strictness
+    
+    DINOv3 embedding verification (when enabled):
+    - Post-processes geometric edges with embedding similarity verification
+    - Weights confidence using: geometry_score × (1 - embedding_weight) + embedding_similarity × embedding_weight
     """
     if relations is None:
         relations = ["near", "on", "held_by"]
@@ -112,6 +188,16 @@ def build_scene_graphs(
     # Class constraints
     FURNITURE_CLASSES = {"bed", "couch", "sofa", "table", "desk", "chair", "bench", "cabinet", "refrigerator"}
     PORTABLE_CLASSES = {"book", "bottle", "cup", "phone", "laptop", "remote", "keyboard", "mouse", "backpack", "handbag", "suitcase"}
+
+    # Load DINOv3 embeddings if available
+    embeddings_by_mem_id: Dict[str, Any] = {}
+    if use_embedding_verification:
+        try:
+            from orion.graph.embedding_scene_graph import load_embeddings_from_memory
+            embeddings_by_mem_id = load_embeddings_from_memory(memory)
+        except Exception as e:
+            print(f"⚠️  Failed to load embeddings: {e}. Continuing without embedding verification.")
+            use_embedding_verification = False
 
     emb_to_mem = _emb_to_mem_map(memory)
     mem_to_class: Dict[str, str] = {}
@@ -333,6 +419,15 @@ def build_scene_graphs(
             for e in best_held.values():
                 e.pop("score", None)  # Remove score before final output
                 edges.append(e)
+
+        # Apply DINOv3 embedding verification if available
+        if use_embedding_verification and embeddings_by_mem_id:
+            edges = _verify_edges_with_embeddings(
+                edges,
+                embeddings_by_mem_id,
+                embedding_weight=embedding_weight,
+                embedding_similarity_threshold=embedding_similarity_threshold,
+            )
 
         graphs.append({
             "frame": frame_id,

@@ -31,8 +31,10 @@ def load_pvsg(root: str | Path, split: str = "test") -> PVSGBundle:
         payload = json.load(fh)
     if isinstance(payload, dict) and "videos" in payload:
         annotations = payload["videos"]
+    elif isinstance(payload, dict) and "data" in payload:
+        annotations = payload["data"]
     elif isinstance(payload, list):
         annotations = payload
     else:
-        raise ValueError("Unsupported PVSG annotation format: expected list or {videos: []}")
+        raise ValueError("Unsupported PVSG annotation format: expected list or {videos: []} or {data: []}")
     return PVSGBundle(root=root, split=split, annotations=annotations)
