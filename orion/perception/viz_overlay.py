@@ -1,11 +1,9 @@
-"""Overlay API (compatibility shim).
+"""Overlay API (standalone implementation).
 
 The showcase CLI (`orion.cli.run_showcase`) imports `OverlayOptions` and
 `render_insight_overlay` from this module.
 
-The previous implementation of this file became unstable; to keep the public
-API intact while making overlays reliable again, we delegate rendering to the
-schema-flexible v4 renderer.
+This is now the main overlay renderer after v2-v4 were deprecated.
 """
 
 from __future__ import annotations
@@ -15,8 +13,6 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-
-from orion.perception.viz_overlay_v4 import OverlayRendererV4, OverlayV4Config
 
 
 @dataclass
