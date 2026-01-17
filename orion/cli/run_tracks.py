@@ -74,6 +74,8 @@ def process_video_to_tracks(
     enable_3d: bool = False,
     depth_model_size: str = "small",
     disable_slam: bool = False,
+    embedding_backend: str = "vjepa2",
+    dinov3_weights_dir: str | None = None,
 ) -> dict:
     """
     Process video through detection + tracking pipeline.

@@ -43,6 +43,16 @@ def process_video_to_tracks(
     episode_id: str,
     target_fps: float = 5.0,
     yolo_model: str = "yolo11m",
+    detector_backend: str = "yolo",
+    yoloworld_open_vocab: bool = False,
+    yoloworld_prompt: str = "",
+    gdino_model: str = "gdino_base",
+    hybrid_min_detections: int = 3,
+    hybrid_always_verify: bool = False,
+    hybrid_secondary_conf: float = 0.3,
+    openvocab_proposer: str = "yolo_clip",
+    openvocab_vocab: str = "lvis",
+    openvocab_top_k: int = 5,
     confidence_threshold: float = 0.25,
     iou_threshold: float = 0.3,
     max_age: int = 30,
@@ -52,6 +62,9 @@ def process_video_to_tracks(
     hand_max_hands: int = 2,
     hand_detection_confidence: float = 0.5,
     hand_tracking_confidence: float = 0.3,
+    enable_3d: bool = False,
+    embedding_backend: str = "vjepa2",
+    dinov3_weights_dir: str = None,
 ) -> dict:
     """
     Process video through detection + tracking pipeline.
@@ -61,11 +74,28 @@ def process_video_to_tracks(
         episode_id: Episode identifier for results
         target_fps: Target FPS for processing
         yolo_model: YOLO variant to use
+        detector_backend: Detection backend (yolo/yoloworld/gdino/hybrid)
+        yoloworld_open_vocab: Enable YOLO-World open vocabulary
+        yoloworld_prompt: Custom YOLO-World prompt
+        gdino_model: Grounding DINO model variant
+        hybrid_min_detections: Min detections for hybrid mode
+        hybrid_always_verify: Verify all detections in hybrid mode
+        hybrid_secondary_conf: Secondary confidence threshold for hybrid
+        openvocab_proposer: Open vocabulary proposer (yolo_clip/gdino)
+        openvocab_vocab: Vocabulary name (lvis/coco)
+        openvocab_top_k: Top K proposals for open vocab
         confidence_threshold: Min detection confidence
         iou_threshold: Min IoU for track association
         max_age: Frames to keep unmatched tracks
         device: Device to run on
         save_viz: Save visualization outputs
+        enable_hand_detector: Enable hand detection
+        hand_max_hands: Max hands to track
+        hand_detection_confidence: Hand detection threshold
+        hand_tracking_confidence: Hand tracking threshold
+        enable_3d: Enable 3D reconstruction
+        embedding_backend: Re-ID embedding backend (vjepa2/dinov2/dinov3)
+        dinov3_weights_dir: Path to DINOv3 weights directory
         
     Returns:
         Dictionary with statistics

@@ -59,6 +59,15 @@ def _phase1(args: argparse.Namespace, video_path: Path, results_dir: Path) -> Di
         return {}
 
     logger.info("[Phase 1] Running detection + tracking")
+    
+    # Validate embedding backend choice
+    if args.embedding_backend == "dinov3":
+        if not args.dinov3_weights:
+            raise ValueError(
+                "dinov3 backend requires --dinov3-weights argument. "
+                "Download from: https://ai.meta.com/resources/models-and-libraries/dinov3-downloads/"
+            )
+    
     return process_video_to_tracks(
         video_path=str(video_path),
         episode_id=args.episode,
@@ -84,6 +93,8 @@ def _phase1(args: argparse.Namespace, video_path: Path, results_dir: Path) -> Di
         hand_detection_confidence=args.hand_det_conf,
         hand_tracking_confidence=args.hand_track_conf,
         enable_3d=args.enable_3d,
+        embedding_backend=args.embedding_backend,
+        dinov3_weights_dir=getattr(args, 'dinov3_weights', None),
     )
 
 
@@ -279,6 +290,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--confidence", type=float, default=0.25, help="YOLO confidence threshold")
     parser.add_argument("--iou", type=float, default=0.3, help="Tracker IoU threshold")
     parser.add_argument("--max-age", type=int, default=30, help="Tracker max age")
+    
+    # Embedding backend selection
+    parser.add_argument(
+        "--embedding-backend",
+        choices=["vjepa2", "dinov2", "dinov3"],
+        default="vjepa2",
+        help="Visual embedding backend for Re-ID. "
+             "vjepa2: 3D-aware (default), dinov2: public DINO, dinov3: gated DINO",
+    )
+    
+    parser.add_argument(
+        "--dinov3-weights",
+        type=str,
+        default=None,
+        help="Path to DINOv3 local weights (required if --embedding-backend=dinov3). "
+             "Download from: https://ai.meta.com/resources/models-and-libraries/dinov3-downloads/",
+    )
+    
     # Default to auto so this works both on Apple Silicon (MPS) and Linux GPUs (CUDA)
     parser.add_argument("--device", default="auto", choices=["auto", "cuda", "mps", "cpu"])
     parser.add_argument("--save-viz", action="store_true", help="Persist detector debug outputs")

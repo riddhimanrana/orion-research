@@ -13,6 +13,7 @@ Date: October 2025
 
 from dataclasses import dataclass, field
 from typing import Literal, Optional
+from pathlib import Path
 
 import logging
 
@@ -439,16 +440,26 @@ class EmbeddingConfig:
     It provides 3D-aware video embeddings that handle viewpoint changes
     better than 2D encoders (CLIP/DINO).
     
-    CLIP is still used *separately* for candidate-label scoring (open-vocab),
-    but not for Re-ID embeddings.
+    DINOv3 and DINOv2 are available as alternatives:
+    - DINOv3: Vision Transformer with DINOv3 features (gated access, manual download)
+    - DINOv2: Public DINOv2 model (automatic download)
+    - V-JEPA2: Default, 3D-aware, best for Re-ID
     """
     
-    # V-JEPA2 model (the only supported Re-ID backend)
+    # Backend selection
+    backend: str = "vjepa2"
+    """Embedding backend: 'vjepa2' (default), 'dinov2' (public), 'dinov3' (gated)."""
+    
+    # V-JEPA2 model (the default Re-ID backbone)
     model: str = "facebook/vjepa2-vitl-fpc64-256"
     """V-JEPA2 model name from HuggingFace."""
     
+    # DINOv3 local weights path (required if backend='dinov3')
+    dinov3_weights_dir: Optional[str] = None
+    """Path to DINOv3 local weights directory (e.g., 'models/dinov3-vitb16')."""
+    
     embedding_dim: int = 1024
-    """Output embedding dimension (V-JEPA2 vitl = 1024)."""
+    """Output embedding dimension (V-JEPA2 vitl = 1024, DINOv2/v3 = 768)."""
 
     # Cluster / memory efficiency settings
     use_cluster_embeddings: bool = False
@@ -464,7 +475,6 @@ class EmbeddingConfig:
     reid_debug: bool = False
     """If True, print detailed pairwise similarity and merge decisions in Re-ID phase."""
     
-
     # Device selection
     device: str = "auto"  # "auto", "cuda", "mps", "cpu"
     """Device for embedding model (auto/cuda/mps/cpu)"""
@@ -475,6 +485,36 @@ class EmbeddingConfig:
     
     def __post_init__(self):
         """Validate embedding config."""
+        # Validate backend
+        valid_backends = {"vjepa2", "dinov2", "dinov3"}
+        if self.backend not in valid_backends:
+            raise ValueError(
+                f"backend must be one of {valid_backends}, got {self.backend}"
+            )
+        
+        # Validate DINOv3 weights path if using DINOv3
+        if self.backend == "dinov3":
+            if not self.dinov3_weights_dir:
+                raise ValueError(
+                    "backend='dinov3' requires dinov3_weights_dir. "
+                    "Download from: https://ai.meta.com/resources/models-and-libraries/dinov3-downloads/"
+                )
+            weights_path = Path(self.dinov3_weights_dir)
+            if not weights_path.exists():
+                logger.warning(
+                    f"DINOv3 weights directory not found: {self.dinov3_weights_dir}. "
+                    f"This will fail at runtime."
+                )
+        
+        # Auto-adjust embedding_dim based on backend
+        if self.backend in {"dinov2", "dinov3"}:
+            # DINO models use 768-dim embeddings
+            self.embedding_dim = 768
+        elif self.backend == "vjepa2":
+            # V-JEPA2 uses 1024-dim embeddings
+            self.embedding_dim = 1024
+        
+        # Validate other fields
         valid_dims = {768, 1024}
         if self.embedding_dim not in valid_dims:
             raise ValueError(
@@ -493,13 +533,16 @@ class EmbeddingConfig:
         if self.batch_size < 1:
             raise ValueError(f"batch_size must be >= 1, got {self.batch_size}")
         if self.batch_size > 64:
-            logger.warning(f"Large batch_size for V-JEPA2: {self.batch_size}. May cause OOM.")
+            logger.warning(f"Large batch_size: {self.batch_size}. May cause OOM.")
+        
         valid_devices = {"auto", "cuda", "mps", "cpu"}
         if self.device not in valid_devices:
             raise ValueError(f"device must be one of {valid_devices}, got {self.device}")
+        
         logger.debug(
-            f"EmbeddingConfig validated: model={self.model}, "
-            f"dim={self.embedding_dim}, batch_size={self.batch_size}, device={self.device}"
+            f"EmbeddingConfig validated: backend={self.backend}, "
+            f"model={self.model}, dim={self.embedding_dim}, "
+            f"batch_size={self.batch_size}, device={self.device}"
         )
 
 
@@ -1159,4 +1202,59 @@ def get_yoloworld_precision_config() -> PerceptionConfig:
         target_fps=5.0,
         enable_tracking=True,
         use_memgraph=False,
+    )
+
+
+def get_dinov3_config() -> PerceptionConfig:
+    """DINOv3 (gated access) Re-ID preset.
+    
+    Requires manual download of DINOv3 weights from Meta:
+    https://ai.meta.com/resources/models-and-libraries/dinov3-downloads/
+    
+    Extract to: models/dinov3-vitb16/
+    
+    Usage:
+        config = get_dinov3_config()
+        config.embedding.dinov3_weights_dir = "models/dinov3-vitb16"
+        engine = PerceptionEngine(config=config)
+    """
+    return PerceptionConfig(
+        detection=DetectionConfig(
+            backend="yolo",
+            model="yolo11m",
+            confidence_threshold=0.25,
+            enable_adaptive_confidence=True,
+        ),
+        embedding=EmbeddingConfig(
+            backend="dinov3",
+            dinov3_weights_dir="models/dinov3-vitb16",
+            batch_size=32,  # DINOv3 lighter than V-JEPA2
+            device="auto",
+        ),
+        target_fps=5.0,
+        enable_tracking=True,
+    )
+
+
+def get_dinov2_config() -> PerceptionConfig:
+    """DINOv2 (public) Re-ID preset.
+    
+    Automatically downloads DINOv2 weights from Hugging Face.
+    Faster inference than V-JEPA2, slightly lower Re-ID accuracy.
+    """
+    return PerceptionConfig(
+        detection=DetectionConfig(
+            backend="yolo",
+            model="yolo11m",
+            confidence_threshold=0.25,
+            enable_adaptive_confidence=True,
+        ),
+        embedding=EmbeddingConfig(
+            backend="dinov2",
+            model="facebook/dinov2-base",
+            batch_size=32,
+            device="auto",
+        ),
+        target_fps=5.0,
+        enable_tracking=True,
     )

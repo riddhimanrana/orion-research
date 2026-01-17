@@ -2,17 +2,18 @@
 Visual Embedder
 ===============
 
-Generates V-JEPA2 embeddings for detected objects (Re-ID backbone).
+Generates embeddings for detected objects (Re-ID backbone).
 
-V-JEPA2 is the canonical Re-ID backbone for Orion v2. It provides 3D-aware
-video embeddings that handle viewpoint changes better than 2D encoders.
-
-CLIP is used *separately* for candidate-label scoring (open-vocab), not Re-ID.
+Supports multiple backends:
+- V-JEPA2 (default): 3D-aware, video-native, best for Re-ID
+- DINOv2: Public, 2D-only, fast
+- DINOv3: Gated access, 3D-aware (if weights available)
 
 Responsibilities:
-- Convert cropped regions to V-JEPA2 embeddings
+- Convert cropped regions to embeddings
 - Normalize embeddings to unit length
 - Batch processing for efficiency
+- Backend selection based on config
 
 Author: Orion Research Team
 Date: October 2025 (updated January 2026)
@@ -31,9 +32,9 @@ logger = logging.getLogger(__name__)
 
 
 class VisualEmbedder:
-    """Generates visual Re-ID embeddings using V-JEPA2.
+    """Generates visual Re-ID embeddings using configurable backend.
 
-    V-JEPA2 is the only supported Re-ID embedding backend.
+    Supports V-JEPA2 (default), DINOv2 (public), DINOv3 (gated).
     """
 
     def __init__(
@@ -41,8 +42,14 @@ class VisualEmbedder:
         clip_model=None,  # Unused; kept for backward compat signature
         config: Optional[EmbeddingConfig] = None,
     ):
+        """Initialize visual embedder with configurable backend.
+        
+        Args:
+            clip_model: Unused, kept for backward compatibility
+            config: EmbeddingConfig specifying backend and hyperparameters
+        """
         self.config = config or EmbeddingConfig()
-        self.vjepa2 = None
+        self.backend = None
         
         # Resolve device
         import torch
@@ -56,13 +63,53 @@ class VisualEmbedder:
                 device = "cpu"
         self._device = device
         
-        # Always use V-JEPA2
-        from orion.backends.vjepa2_backend import VJepa2Embedder
-        self.vjepa2 = VJepa2Embedder(
-            model_name=self.config.model,
-            device=device,
+        # Initialize backend based on config
+        self._init_backend(device)
+        logger.info(
+            f"VisualEmbedder initialized: {self.config.backend} "
+            f"(device={device}, dim={self.config.embedding_dim})"
         )
-        logger.info(f"VisualEmbedder initialized: V-JEPA2 (device={device}, dim={self.config.embedding_dim})")
+    
+    def _init_backend(self, device: str):
+        """Initialize embedding backend based on config.backend."""
+        if self.config.backend == "vjepa2":
+            from orion.backends.vjepa2_backend import VJepa2Embedder
+            self.backend = VJepa2Embedder(
+                model_name=self.config.model,
+                device=device,
+            )
+            logger.debug("Initialized V-JEPA2 backend (3D-aware video embeddings)")
+        
+        elif self.config.backend == "dinov2":
+            from orion.backends.dino_backend import DINOEmbedder
+            self.backend = DINOEmbedder(
+                model_name="facebook/dinov2-base",
+                device=device,
+            )
+            logger.debug("Initialized DINOv2 backend (public, visual-only)")
+        
+        elif self.config.backend == "dinov3":
+            from orion.backends.dino_backend import DINOEmbedder
+            if not self.config.dinov3_weights_dir:
+                raise ValueError(
+                    "backend='dinov3' requires dinov3_weights_dir. "
+                    "Download from: https://ai.meta.com/resources/models-and-libraries/dinov3-downloads/"
+                )
+            self.backend = DINOEmbedder(
+                local_weights_dir=self.config.dinov3_weights_dir,
+                device=device,
+            )
+            logger.debug("Initialized DINOv3 backend (gated access, visual-only)")
+        
+        else:
+            raise ValueError(
+                f"Unknown embedding backend: {self.config.backend}. "
+                f"Valid options: vjepa2, dinov2, dinov3"
+            )
+        
+        if self.backend is None:
+            raise RuntimeError("Failed to initialize embedding backend")
+
     
     @profile("embedder_embed_detections")
     def embed_detections(self, detections: List[dict]) -> List[dict]:
@@ -106,30 +153,73 @@ class VisualEmbedder:
     
     @profile("embedder_embed_batch")
     def _embed_batch(self, batch: List[dict]) -> List[np.ndarray]:
+        """Embed a batch of detection crops using the configured backend.
+        
+        Args:
+            batch: List of detection dicts with 'crop' field
+            
+        Returns:
+            List of normalized embedding vectors
         """
-        Generate V-JEPA2 embeddings for a batch of detections.
-        """
-        embeddings: List[np.ndarray] = []
-        for detection in batch:
-            crop = detection.get("crop")
-            if crop is None or crop.size == 0:
-                # Fallback: zero embedding
-                embeddings.append(np.zeros((self.config.embedding_dim,), dtype=np.float32))
-                continue
-            # V-JEPA2 expects RGB
-            rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+        crops = []
+        valid_indices = []
+        
+        for i, detection in enumerate(batch):
+            if 'crop' in detection and detection['crop'] is not None:
+                crops.append(detection['crop'])
+                valid_indices.append(i)
+        
+        if not crops:
+            # Return zero embeddings if no valid crops
+            return [np.zeros(self.config.embedding_dim, dtype=np.float32) for _ in batch]
+        
+        # V-JEPA2 specific path (supports batch and single methods)
+        if self.config.backend == "vjepa2":
+            embeddings = []
+            for crop in crops:
+                rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+                try:
+                    embedding_tensor = self.backend.embed_single_image(rgb_crop)
+                    embedding = embedding_tensor.numpy().flatten().astype(np.float32)
+                    # Normalize
+                    norm = np.linalg.norm(embedding)
+                    if norm > 0:
+                        embedding = embedding / norm
+                    embeddings.append(embedding)
+                except Exception as e:
+                    logger.warning(f"V-JEPA2 embedding failed: {e}")
+                    embeddings.append(np.zeros(self.config.embedding_dim, dtype=np.float32))
+        
+        # DINOv2/DINOv3 path (use batch encoding if available)
+        else:
             try:
-                embedding_tensor = self.vjepa2.embed_single_image(rgb_crop)
-                embedding = embedding_tensor.numpy().flatten().astype(np.float32)
-                # Normalize
-                norm = np.linalg.norm(embedding)
-                if norm > 0:
-                    embedding = embedding / norm
-                embeddings.append(embedding)
+                if hasattr(self.backend, 'encode_images_batch') and len(crops) > 1:
+                    # Use batch encoding for efficiency
+                    embeddings = self.backend.encode_images_batch(crops, normalize=True)
+                else:
+                    # Fall back to single encoding
+                    embeddings = [self.backend.encode_image(crop, normalize=True) for crop in crops]
+                
+                # Ensure all embeddings are properly normalized
+                embeddings = [
+                    (e / np.linalg.norm(e)) if np.linalg.norm(e) > 0 else e
+                    for e in embeddings
+                ]
             except Exception as e:
-                logger.warning(f"V-JEPA2 embedding failed: {e}")
-                embeddings.append(np.zeros((self.config.embedding_dim,), dtype=np.float32))
-        return embeddings
+                logger.warning(f"{self.config.backend} batch embedding failed: {e}")
+                embeddings = [np.zeros(self.config.embedding_dim, dtype=np.float32) for _ in crops]
+        
+        # Reconstruct full batch with zero embeddings for invalid crops
+        result = []
+        emb_idx = 0
+        for i in range(len(batch)):
+            if i in valid_indices:
+                result.append(embeddings[emb_idx])
+                emb_idx += 1
+            else:
+                result.append(np.zeros(self.config.embedding_dim, dtype=np.float32))
+        
+        return result
 
     # -------------------------------
     # Clustering logic (IoU-based)
