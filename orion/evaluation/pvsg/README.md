@@ -26,7 +26,7 @@ The evaluator expects each annotation entry to contain:
 
 ## How evaluation works
 
-For each annotated frame, predictions are ranked by score and evaluated by:
+For each annotated frame that has a prediction (GT ∩ Pred), predictions are ranked by score and evaluated by:
 
 - **Recall@K**: fraction of GT relations recovered in top K predictions.
 - **mR@K**: mean recall across predicate classes.

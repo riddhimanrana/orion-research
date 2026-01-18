@@ -18,7 +18,7 @@ frames into video sequences.
 Given a video with `T` frames and observation fraction `F`:
 
 1. Observed prefix length = `floor(F * T)` (at least 1 frame).
-2. Evaluation occurs only on future frames (index > prefix).
+2. Evaluation occurs only on future frames (index > prefix) that have predictions (GT ∩ Pred).
 3. For each future frame, compute Recall@K and mR@K.
 4. Average across future frames and then across videos.
 

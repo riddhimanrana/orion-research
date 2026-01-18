@@ -79,7 +79,12 @@ class EvaluationRunner:
         mean_recall_totals = {k: 0.0 for k in self.top_ks}
         frame_count = 0
 
-        for frame in gt.ordered_frames():
+        gt_frames = gt.ordered_frames()
+        if pred.frames:
+            common_indices = sorted(set(gt.frames.keys()) & set(pred.frames.keys()))
+            gt_frames = [gt.frames[idx] for idx in common_indices]
+
+        for frame in gt_frames:
             pred_frame = pred.frames.get(frame.frame_index)
             predictions = pred_frame.relations if pred_frame else []
             for k in self.top_ks:

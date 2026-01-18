@@ -27,7 +27,7 @@ python scripts/evaluation/eval_action_genome_sga.py \
 
 ## Prediction JSONL format
 
-Each line corresponds to one frame:
+Each line corresponds to one frame. Evaluation is performed only on frames where predictions exist (GT ∩ Pred):
 
 ```json
 {

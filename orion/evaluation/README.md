@@ -32,7 +32,7 @@ Only relations are required for evaluation. Object lists are optional (for futur
 
 1. Load dataset annotations and convert to `VideoGraph` (frame → relations).
 2. Load predictions from JSONL.
-3. Compute R@K and mR@K for each frame, then average.
+3. Compute R@K and mR@K only on frames where predictions exist (GT ∩ Pred), then average.
 4. Write summary JSON artifacts for papers or tables.
 
 See `scripts/evaluation/README.md` for full CLI usage and dataset layout details.
