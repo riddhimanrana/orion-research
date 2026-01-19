@@ -889,7 +889,7 @@ class PerceptionEngine:
             "timings": metrics_timings,
             "sampled_frames": sampled_frames,
             "detections_per_sampled_frame": (len(detections) / sampled_frames) if sampled_frames else 0.0,
-            "embedding_backend": "vjepa2",
+            "embedding_backend": self.config.embedding.backend,
             "embedding_dim": self.config.embedding.embedding_dim,
             "detector_backend": self.config.detection.backend,
             "detector_model": (

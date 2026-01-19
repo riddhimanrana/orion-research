@@ -105,7 +105,7 @@ def _phase2(args: argparse.Namespace, video_path: Path, results_dir: Path) -> Di
     # V-JEPA2 is the only Re-ID backend
     from orion.managers.model_manager import ModelManager
     mm = ModelManager.get_instance()
-    logger.info("[Phase 2] Building memory.json (Re-ID backend: V-JEPA2)")
+    logger.info("[Phase 2] Building memory.json (Re-ID backend: %s)", args.embedding_backend)
     
     build_memory_from_tracks(
         episode_id=args.episode,
@@ -116,6 +116,7 @@ def _phase2(args: argparse.Namespace, video_path: Path, results_dir: Path) -> Di
         max_crops_per_track=args.max_crops_per_track,
         reid_batch_size=args.reid_batch_size,
         class_thresholds=None,
+        embedding_backend=args.embedding_backend,
     )
     return json.loads(memory_path.read_text())
 
@@ -167,6 +168,8 @@ def _phase3_graph(args: argparse.Namespace, results_dir: Path) -> Dict:
         temporal_near_threshold=args.temporal_near_thresh,
         temporal_on_threshold=args.temporal_on_thresh,
         temporal_held_by_threshold=args.temporal_held_thresh,
+        # Semantic relations
+        enable_semantic_relations=True,
     )
     save_scene_graphs(graphs, graph_path)
     summary = build_graph_summary(graphs)
@@ -294,6 +297,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=8,
         help="Batch size for V-JEPA2 Re-ID embedding in Phase 2",
+    )
+    parser.add_argument(
+        "--embedding-backend",
+        type=str,
+        default="vjepa2",
+        choices=["vjepa2", "dinov2", "dinov3"],
+        help="Embedding backend for Re-ID (default: vjepa2)",
     )
 
     parser.add_argument("--skip-phase1", action="store_true")

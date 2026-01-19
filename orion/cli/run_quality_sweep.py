@@ -192,6 +192,7 @@ def _graph_stage(spec: EpisodeSpec, args: argparse.Namespace) -> Dict:
         use_pose_for_held=args.use_pose_held,
         pose_hand_dist=args.pose_hand_dist,
         enable_class_filtering=not args.no_class_filter,
+        enable_semantic_relations=True,
     )
     save_scene_graphs(graphs, graph_path)
     summary = build_graph_summary(graphs)

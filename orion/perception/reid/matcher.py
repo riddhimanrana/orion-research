@@ -198,6 +198,7 @@ def compute_track_embeddings(
     tracks: List[Dict[str, Any]],
     max_crops_per_track: int = 5,
     batch_size: int = 8,
+    embedding_backend: str = "vjepa2",
 ) -> Dict[int, np.ndarray]:
     """
     Compute an average embedding per track by cropping detections from frames.
@@ -209,12 +210,23 @@ def compute_track_embeddings(
         tracks: Parsed list of track observations (from tracks.jsonl)
         max_crops_per_track: Cap number of crops per track for speed
         batch_size: Number of crops to process at once (GPU batch)
+        embedding_backend: Embedding backend to use ("vjepa2", "dinov2", "dinov3")
 
     Returns:
         Dict mapping track_id -> embedding vector (np.ndarray)
     """
     mm = ModelManager.get_instance()
-    reid_model = mm.reid_embedder  # V-JEPA2 (3D-aware video encoder)
+    
+    # Select embedder based on backend
+    if embedding_backend == "vjepa2":
+        reid_model = mm.reid_embedder  # V-JEPA2 (3D-aware video encoder)
+    elif embedding_backend in ["dinov2", "dinov3"]:
+        from orion.perception.embedder import VisualEmbedder
+        from orion.perception.config import EmbeddingConfig
+        embedder_config = EmbeddingConfig(backend=embedding_backend, batch_size=batch_size, device="auto")
+        reid_model = VisualEmbedder(config=embedder_config)
+    else:
+        raise ValueError(f"Unknown embedding backend: {embedding_backend}")
 
     by_frame = _group_by(tracks, "frame_id")
     needed_frames = sorted(by_frame.keys())
@@ -263,9 +275,9 @@ def compute_track_embeddings(
     logger.info(f"Embedding {len(all_crops)} crops from {len(crops_per_track)} tracks (batch_size={batch_size})")
     
     # Check if model supports batch embedding
-    has_batch = hasattr(reid_model, 'embed_batch')
+    has_batch = hasattr(reid_model, 'embed_batch') or hasattr(reid_model, '_embed_batch')
 
-    if has_batch:
+    if has_batch and embedding_backend == "vjepa2":
         # Use batch embedding when available (it will internally chunk by batch_size)
         try:
             embeddings = reid_model.embed_batch(all_crops, batch_size=batch_size)
@@ -273,13 +285,25 @@ def compute_track_embeddings(
         except Exception as e:
             logger.warning(f"Batch embedding failed ({e}), falling back to sequential")
             has_batch = False
+    elif has_batch and embedding_backend in ["dinov2", "dinov3"]:
+        # Use DINO batch embedding
+        try:
+            embeddings = reid_model._embed_batch(all_crops)
+            embs = [emb.flatten() for emb in embeddings]
+        except Exception as e:
+            logger.warning(f"DINO batch embedding failed ({e}), falling back to sequential")
+            has_batch = False
 
     if not has_batch:
         # Sequential fallback
         embs = []
         for crop in all_crops:
-            emb_tensor = reid_model.embed_single_image(crop)
-            embs.append(emb_tensor.numpy().flatten())
+            if embedding_backend == "vjepa2":
+                emb_tensor = reid_model.embed_single_image(crop)
+                embs.append(emb_tensor.numpy().flatten())
+            elif embedding_backend in ["dinov2", "dinov3"]:
+                emb = reid_model.encode_image(crop)
+                embs.append(emb.flatten())
 
     # Group embeddings by track
     for (tid, _), emb in zip(crop_metadata, embs):
@@ -436,6 +460,7 @@ def build_memory_from_tracks(
     max_crops_per_track: int = 5,
     reid_batch_size: int = 8,
     class_thresholds: Optional[Dict[str, float]] = None,
+    embedding_backend: str = "vjepa2",
 ) -> Path:
     """
     Phase 2: Build memory.json and update tracks with embedding ids.
@@ -452,6 +477,7 @@ def build_memory_from_tracks(
         tracks,
         max_crops_per_track=max_crops_per_track,
         batch_size=reid_batch_size,
+        embedding_backend=embedding_backend,
     )
     logger.info(f"✓ Got embeddings for {len(track_embs)} tracks")
 

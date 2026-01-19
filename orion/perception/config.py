@@ -11,12 +11,14 @@ Author: Orion Research Team
 Date: October 2025
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Literal, Optional
 
 import logging
 
-from .types import DEFAULT_INTRINSICS_PRESET, INTRINSICS_PRESETS, ObjectClass
+from .types import DEFAULT_INTRINSICS_PRESET, INTRINSICS_PRESETS, ObjectClass, CameraIntrinsics
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +206,13 @@ class DetectionConfig:
     - coarse: small, stable super-categories
     - indoor_full: legacy ~100 class indoor vocabulary (ablation/research)
     - custom: use yoloworld_prompt as provided
+    """
+    # Optional runtime device hint for detectors
+    device: Optional[str] = None
+    """Preferred device for detection backends (e.g., 'cuda', 'mps', 'cpu').
+
+    This field is provided for backward compatibility with older scripts/tests
+    that pass a `device` parameter to `DetectionConfig` during initialization.
     """
 
     yoloworld_prompt: str = ""
@@ -437,6 +446,7 @@ class DetectionConfig:
 class EmbeddingConfig:
     """Re-ID embedding configuration.
     
+    Supports multiple backends: V-JEPA2 (3D-aware), DINOv2, DINOv3.
     V-JEPA2 is the canonical Re-ID backbone for Orion v2.
     It provides 3D-aware video embeddings that handle viewpoint changes
     better than 2D encoders (CLIP/DINO).
@@ -445,13 +455,20 @@ class EmbeddingConfig:
     but not for Re-ID embeddings.
     """
     
+    backend: Literal["vjepa2", "dinov2", "dinov3"] = "dinov3"
+    """Embedding backend: vjepa2 (3D-aware), dinov2, dinov3"""
+    
     # V-JEPA2 model (the only supported Re-ID backend)
     model: str = "facebook/vjepa2-vitl-fpc64-256"
     """V-JEPA2 model name from HuggingFace."""
     
     embedding_dim: int = 1024
-    """Output embedding dimension (V-JEPA2 vitl = 1024)."""
+    """Output embedding dimension (V-JEPA2 vitl = 1024, DINO = 768)."""
 
+    # DINOv3 specific
+    dinov3_weights: str = ""
+    """Path to DINOv3 weights directory (auto-download if empty)."""
+    
     # Cluster / memory efficiency settings
     use_cluster_embeddings: bool = False
     """If True, aggregate overlapping detections per frame into cluster embeddings to reduce memory."""
@@ -477,6 +494,23 @@ class EmbeddingConfig:
     
     def __post_init__(self):
         """Validate embedding config."""
+        if self.backend not in {"vjepa2", "dinov2", "dinov3"}:
+            raise ValueError(
+                f"backend must be 'vjepa2', 'dinov2', or 'dinov3', got {self.backend}"
+            )
+        
+        # Auto-adjust embedding_dim based on backend
+        if self.backend == "vjepa2":
+            expected_dim = 1024
+        elif self.backend in {"dinov2", "dinov3"}:
+            expected_dim = 768
+        else:
+            expected_dim = self.embedding_dim  # Fallback
+        
+        if self.embedding_dim != expected_dim:
+            logger.info(f"Auto-adjusting embedding_dim from {self.embedding_dim} to {expected_dim} for {self.backend}")
+            object.__setattr__(self, 'embedding_dim', expected_dim)
+        
         valid_dims = {768, 1024}
         if self.embedding_dim not in valid_dims:
             raise ValueError(
@@ -495,12 +529,12 @@ class EmbeddingConfig:
         if self.batch_size < 1:
             raise ValueError(f"batch_size must be >= 1, got {self.batch_size}")
         if self.batch_size > 64:
-            logger.warning(f"Large batch_size for V-JEPA2: {self.batch_size}. May cause OOM.")
+            logger.warning(f"Large batch_size for {self.backend}: {self.batch_size}. May cause OOM.")
         valid_devices = {"auto", "cuda", "mps", "cpu"}
         if self.device not in valid_devices:
             raise ValueError(f"device must be one of {valid_devices}, got {self.device}")
         logger.debug(
-            f"EmbeddingConfig validated: model={self.model}, "
+            f"EmbeddingConfig validated: backend={self.backend}, model={self.model}, "
             f"dim={self.embedding_dim}, batch_size={self.batch_size}, device={self.device}"
         )
 
@@ -1161,4 +1195,35 @@ def get_yoloworld_precision_config() -> PerceptionConfig:
         target_fps=5.0,
         enable_tracking=True,
         use_memgraph=False,
+    )
+
+
+def get_dinov3_config() -> PerceptionConfig:
+    """
+    DINOv3 mode: Uses DINOv3 for embeddings with YOLO-World detection.
+    
+    Best for high-quality Re-ID and scene graph generation.
+    """
+    return PerceptionConfig(
+        detection=DetectionConfig(
+            backend="yoloworld",
+            yoloworld_prompt_preset="coarse",
+            yoloworld_use_custom_classes=True,
+            yoloworld_enable_candidate_labels=True,
+            yoloworld_candidate_top_k=5,
+            confidence_threshold=0.25,
+        ),
+        embedding=EmbeddingConfig(
+            backend="dinov3",
+            batch_size=16,
+            device="auto",
+        ),
+        description=DescriptionConfig(
+            max_tokens=200,
+            temperature=0.2,
+        ),
+        target_fps=4.0,
+        enable_3d=False,
+        enable_depth=False,
+        enable_tracking=True,
     )

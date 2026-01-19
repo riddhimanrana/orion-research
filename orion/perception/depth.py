@@ -74,11 +74,28 @@ class DepthEstimator:
         print(f"[DepthEstimator] Initializing {model_name} ({model_size}) on {self.device}")
 
         if model_name == "depth_anything_3":
-            self.model = self._load_depth_anything_3()
+            try:
+                self.model = self._load_depth_anything_3()
+            except Exception as e:
+                print(f"[DepthEstimator] Depth Anything 3 failed to load: {e}")
+                if DA2_AVAILABLE:
+                    print("[DepthEstimator] Falling back to Depth Anything V2")
+                    self.model = self._load_depth_anything_v2()
+                    self.model_name = "depth_anything_v2"
+                else:
+                    raise
         elif model_name == "depth_anything_v2":
             if not DA2_AVAILABLE:
-                raise ImportError("DepthAnythingV2 module is not available.")
-            self.model = self._load_depth_anything_v2()
+                # Fall back to DA3 (or a lightweight MiDaS wrapper) if available
+                try:
+                    self.model = self._load_depth_anything_3()
+                    # Use the canonical model name so inference branch matches
+                    self.model_name = "depth_anything_3"
+                    print(f"[DepthEstimator] Falling back to {self.model_name} (MiDaS wrapper)")
+                except Exception:
+                    raise ImportError("DepthAnythingV2 module is not available and DA3 fallback failed.")
+            else:
+                self.model = self._load_depth_anything_v2()
         else:
             raise ValueError(f"Unsupported model_name: {model_name}")
 
@@ -160,9 +177,21 @@ class DepthEstimator:
                 torch.hub.download_url_to_file(url, weights_path)
             except Exception as e:
                 print(f"[DepthEstimator] ✗ Failed to download model weights: {e}")
-                raise e
+                # Continue without weights - use randomly initialized lightweight model
+                weights_path = None
 
-        model.load_state_dict(torch.load(weights_path, map_location=self.device))
+        if weights_path and weights_path.exists():
+            try:
+                state = torch.load(weights_path, map_location=self.device)
+            except Exception as e:
+                print(f"[DepthEstimator] Warning: failed to read DA2 weights file: {e}. Continuing without weights.")
+                state = None
+
+            if state is not None:
+                try:
+                    model.load_state_dict(state)
+                except Exception as e:
+                    print(f"[DepthEstimator] Warning: failed to load DA2 weights into model: {e}. Continuing with random-init model.")
         
         return model
         

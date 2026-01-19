@@ -1,122 +1,26 @@
-"""Overlay API (compatibility shim).
+"""Perception overlay renderer (compat shim).
 
-The showcase CLI (`orion.cli.run_showcase`) imports `OverlayOptions` and
-`render_insight_overlay` from this module.
-
-The previous implementation of this file became unstable; to keep the public
-API intact while making overlays reliable again, we delegate rendering to the
-schema-flexible v4 renderer.
+This module contains the legacy `InsightOverlayRenderer` used by the CLI.
+The previous file contained a duplicated V4 wrapper which caused accidental
+code duplication and undefined variables; the module below provides a single
+consistent implementation used by `orion.cli`.
 """
 
 from __future__ import annotations
 
 import json
-import shutil
+import logging
+from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Deque, Dict, List, Optional, Tuple
 
-from orion.perception.viz_overlay_v4 import OverlayRendererV4, OverlayV4Config
+import cv2
+import numpy as np
 
+from orion.perception.spatial_zones import ZoneManager
 
-@dataclass
-class OverlayOptions:
-    """Tunable parameters for the overlay.
-
-    These options are kept primarily for backwards compatibility with older
-    narrative overlays. The v4 renderer uses only a subset (output filename and
-    inferred FPS).
-    """
-
-    max_relations: int = 4
-    message_linger_seconds: float = 1.75
-    max_state_messages: int = 5
-    gap_frames_for_refind: int = 45
-    overlay_basename: str = "video_overlay_insights.mp4"
-    frame_offset: int = 0
-    use_timestamp_matching: bool = True
-    timestamp_offset: float = 0.0
-
-
-def _infer_target_fps(results_dir: Path) -> Optional[float]:
-    """Best-effort overlay FPS inference.
-
-    - showcase (`run_tracks`) metadata: run_metadata.json['target_fps']
-    - PerceptionEngine metadata: run_metadata.json['config']['target_fps']
-    """
-    meta_path = results_dir / "run_metadata.json"
-    if not meta_path.exists():
-        return None
-    try:
-        meta = json.loads(meta_path.read_text())
-    except Exception:
-        return None
-
-    v = meta.get("target_fps")
-    if v is not None:
-        try:
-            return float(v)
-        except Exception:
-            return None
-
-    cfg = meta.get("config")
-    if isinstance(cfg, dict) and cfg.get("target_fps") is not None:
-        try:
-            return float(cfg.get("target_fps"))
-        except Exception:
-            return None
-
-    return None
-
-
-def render_insight_overlay(
-    video_path: Path,
-    results_dir: Path,
-    output_path: Optional[Path] = None,
-    options: Optional[OverlayOptions] = None,
-) -> Path:
-    """Render an overlay video for a results directory.
-
-    Args:
-        video_path: Source video.
-        results_dir: Directory containing `tracks.jsonl` (and optionally `memory.json`).
-        output_path: Optional explicit output path.
-        options: Backwards-compat options (overlay_basename respected).
-    """
-    results_dir = Path(results_dir)
-    video_path = Path(video_path)
-    options = options or OverlayOptions()
-
-    if output_path is None:
-        output_path = results_dir / options.overlay_basename
-    else:
-        output_path = Path(output_path)
-
-    target_fps = _infer_target_fps(results_dir)
-
-    cfg = OverlayV4Config(
-        output_fps=target_fps,
-        output_filename=output_path.name,
-        tracks_filename="tracks.jsonl",
-        # QA panel intentionally off for showcase overlays by default.
-        eval_json_path=None,
-    )
-
-    renderer = OverlayRendererV4(video_path=video_path, results_dir=results_dir, config=cfg)
-    rendered_path = renderer.render()
-
-    # If caller requested a path outside results_dir, move it.
-    if rendered_path.resolve() != output_path.resolve():
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            shutil.move(str(rendered_path), str(output_path))
-            rendered_path = output_path
-        except Exception:
-            # Fallback to copy if move across devices fails.
-            shutil.copy2(str(rendered_path), str(output_path))
-            rendered_path = output_path
-
-    return rendered_path
+logger = logging.getLogger(__name__)
 
 
 import json
@@ -220,56 +124,7 @@ class InsightOverlayRenderer:
         # Scaling factors for mis-aligned processing dimensions
         self.scale_x = 1.0
         self.scale_y = 1.0
-
-    def _load_tracks(self) -> None:
-        """Loads tracks and groups them by track_id."""
-        with open(self.tracks_path, "r") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                det = json.loads(line)
-
-        # Find the minimum frame_id in the detection data
-        min_detection_frame = None
-        for track_id, detections in self.tracks_by_id.items():
-            for det in detections:
-                fid = det.get("frame_id")
-                if min_detection_frame is None or (fid is not None and fid < min_detection_frame):
-                    min_detection_frame = fid
-
-        frame_idx = 0
-        try:
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-
-                # Align detection frame indices so that the first detection frame matches the first video frame
-                detection_frame_idx = frame_idx + (min_detection_frame if min_detection_frame is not None else 0)
-
-                detections_to_render = []
-                for track_id, detections in self.tracks_by_id.items():
-                    for det in detections:
-                        if det.get("frame_id") == detection_frame_idx:
-                            detections_to_render.append(det)
-                print(f"[Overlay] Frame {frame_idx} (detection frame {detection_frame_idx}): drawing {len(detections_to_render)} detections: {[d.get('class_name') for d in detections_to_render]}")
-
-                active_memories = self._annotate_detections(
-                    frame, detections_to_render, frame_idx, overlay_ttl
-                )
-                narrative_lines = self._compose_panel_lines(
-                    frame_idx, fps, total_frames, detections_to_render, active_memories
-                )
-                self._draw_narrative_panel(frame, narrative_lines)
-                writer.write(frame)
-                frame_idx += 1
-        finally:
-            cap.release()
-            writer.release()
-
-
-        return self.output_path
+    
 
     def _load_memory(self) -> None:
         data = json.loads(self.memory_path.read_text())

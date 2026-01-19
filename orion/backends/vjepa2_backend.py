@@ -129,6 +129,12 @@ class VJepa2Embedder:
         
         return embedding.cpu().float()
 
+    # Backwards-compatible alias expected by some tests
+    def encode_image(self, image: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
+        """Alias for embed_single_image that returns a numpy array."""
+        emb = self.embed_single_image(image)
+        return emb.cpu().numpy()
+
     def embed_batch(
         self, 
         images: list[Union[np.ndarray, torch.Tensor]],
@@ -403,3 +409,8 @@ def get_embedder(
         return VideoMAEEmbedder(device=device, **kwargs)
     else:
         raise ValueError(f"Unknown embedder backend: {backend}")
+
+
+# Backwards-compatible alias: some external code refers to VJEPA2Embedder
+# (all-caps 'JEPA2') — provide alias to avoid import errors.
+VJEPA2Embedder = VJepa2Embedder

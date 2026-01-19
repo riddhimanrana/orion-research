@@ -142,7 +142,7 @@ def test_depth_estimation():
         # Test on dummy frame
         import numpy as np
         test_frame = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
-        depth_map = depth_estimator.estimate(test_frame)
+        depth_map, _ = depth_estimator.estimate(test_frame)
         print(f"  ✅ Depth estimation works: shape={depth_map.shape}, range=[{depth_map.min():.1f}, {depth_map.max():.1f}]mm")
         
     except Exception as e:

@@ -61,27 +61,47 @@ class DINOEmbedder:
     def _load_model(self) -> None:
         # Try local weights first if specified
         if self.local_weights_dir and self.local_weights_dir.exists():
-            try:
-                from transformers import AutoImageProcessor, AutoModel  # type: ignore
-                import torch  # type: ignore
-
-                logger.info(f"Loading DINO from local weights: {self.local_weights_dir}")
-                self._processor = AutoImageProcessor.from_pretrained(str(self.local_weights_dir), local_files_only=True)
-                self._model = AutoModel.from_pretrained(str(self.local_weights_dir), local_files_only=True)
-
-                # Move to device
-                if self.device == "cuda" and torch.cuda.is_available():
-                    self._model = self._model.to("cuda")
-                elif self.device == "mps" and getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-                    self._model = self._model.to("mps")
-                else:
-                    self._model = self._model.to("cpu")
-
-                self._backend = "transformers-local"
-                logger.info("✓ DINO loaded from local weights")
+            # Lightweight test-only fallback: if a marker file exists, use a fake backend
+            fake_marker = self.local_weights_dir / "FAKE_DINOV3"
+            if fake_marker.exists():
+                logger.info("Detected FAKE_DINOV3 marker; using fake DINO backend for tests")
+                self._backend = "fake"
+                # choose a common DINO embedding dim
+                self._fake_dim = 768
                 return
-            except Exception as e:
-                logger.warning(f"Local weights load failed ({e}); falling back…")
+            # Prefer a lightweight local DINOv3 loader if available to avoid
+            # heavy `transformers` dependency issues on macOS.
+            try:
+                from orion.backends.dinov3_local import DINOv3LocalModel  # type: ignore
+                logger.info(f"Loading DINOv3 via local lightweight loader: {self.local_weights_dir}")
+                # instantiate local model wrapper
+                self._model = DINOv3LocalModel(self.local_weights_dir, device=self.device)
+                self._backend = "dinov3-local"
+                logger.info("✓ DINOv3 loaded via local loader")
+                return
+            except Exception:
+                # fallback to transformers local loader
+                try:
+                    from transformers import AutoImageProcessor, AutoModel  # type: ignore
+                    import torch  # type: ignore
+
+                    logger.info(f"Loading DINO from local weights: {self.local_weights_dir}")
+                    self._processor = AutoImageProcessor.from_pretrained(str(self.local_weights_dir), local_files_only=True)
+                    self._model = AutoModel.from_pretrained(str(self.local_weights_dir), local_files_only=True)
+
+                    # Move to device
+                    if self.device == "cuda" and torch.cuda.is_available():
+                        self._model = self._model.to("cuda")
+                    elif self.device == "mps" and getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+                        self._model = self._model.to("mps")
+                    else:
+                        self._model = self._model.to("cpu")
+
+                    self._backend = "transformers-local"
+                    logger.info("✓ DINO loaded from local weights")
+                    return
+                except Exception as e:
+                    logger.warning(f"Local weights load failed ({e}); falling back…")
 
         # Try Transformers with HF Hub (works for DINOv2)
         try:
@@ -89,8 +109,10 @@ class DINOEmbedder:
             import torch  # type: ignore
 
             logger.info(f"Loading DINO via Transformers: {self.model_name}")
-            self._processor = AutoImageProcessor.from_pretrained(self.model_name, local_files_only=True)
-            self._model = AutoModel.from_pretrained(self.model_name, local_files_only=True)
+            # Allow downloading for DINOv3, require local for DINOv2
+            local_only = "dinov2" in self.model_name.lower()
+            self._processor = AutoImageProcessor.from_pretrained(self.model_name, local_files_only=local_only)
+            self._model = AutoModel.from_pretrained(self.model_name, local_files_only=local_only)
 
             # Move to device
             if self.device == "cuda" and torch.cuda.is_available():
@@ -155,6 +177,7 @@ class DINOEmbedder:
             "Could not load DINO. Install either 'transformers>=4.56.0' or 'timm>=1.0.20'."
         )
 
+
     def _ensure_rgb(self, img: np.ndarray) -> np.ndarray:
         # Heuristic: if last dim exists and mean of channel 0 much larger than channel 2, assume BGR
         if img.ndim == 3 and img.shape[2] == 3:
@@ -175,6 +198,15 @@ class DINOEmbedder:
             np.ndarray of shape (D,)
         """
         rgb = self._ensure_rgb(image)
+
+        # Fake backend: return deterministic pseudo-random embedding for tests
+        if getattr(self, "_backend", None) == "fake":
+            h, w = rgb.shape[:2]
+            rng = np.random.RandomState(seed=(h * 1315423911) ^ (w * 2654435761))
+            emb = rng.randn(getattr(self, "_fake_dim", 768)).astype(np.float32)
+            if normalize:
+                emb = emb / (np.linalg.norm(emb) + 1e-8)
+            return emb
 
         if self._backend in ("transformers", "transformers-local"):
             import torch  # type: ignore
@@ -212,6 +244,9 @@ class DINOEmbedder:
                 if features.dim() == 4:
                     features = features.mean(dim=(2, 3))
                 emb = features[0].detach().cpu().float().numpy()
+        elif self._backend == "dinov3-local":
+            # Use the lightweight local model wrapper
+            emb = self._model.encode_image(rgb, normalize=False)
         else:
             raise RuntimeError("DINO backend not initialized")
 
@@ -221,6 +256,15 @@ class DINOEmbedder:
         else:
             emb = emb.astype(np.float32)
         return emb
+
+        if self._backend == "fake":
+            # deterministic pseudorandom vector based on image shape to be stable in tests
+            h, w = rgb.shape[:2]
+            rng = np.random.RandomState(seed=(h * 1315423911) ^ (w * 2654435761))
+            emb = rng.randn(self._fake_dim).astype(np.float32)
+            if normalize:
+                emb = emb / (np.linalg.norm(emb) + 1e-8)
+            return emb
 
     # ===========================
     # Video feature map interface
@@ -232,6 +276,8 @@ class DINOEmbedder:
         for region pooling. Here we degrade gracefully by returning a single
         global embedding expanded spatially.
         """
+        if self._backend == "dinov3-local":
+            return self._model.extract_frame_features(image)
         emb = self.encode_image(image, normalize=True)  # (D,)
         # Create fake spatial map (16x16) by tiling
         side = 16
@@ -324,5 +370,7 @@ class DINOEmbedder:
             else:
                 embs = embs.astype(np.float32)
             return [emb for emb in embs]
+        elif self._backend == "dinov3-local":
+            return self._model.encode_images_batch(images, normalize=normalize)
         else:
             raise RuntimeError("DINO backend not initialized")

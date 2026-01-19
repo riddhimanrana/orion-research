@@ -23,7 +23,7 @@
     },
     {
       "video_id": "0020_5323209509",
-      "pred_count": 8,
+      "pred_count": 40,
       "gt_count": 9,
       "matches": 1,
       "matched_triplets": [

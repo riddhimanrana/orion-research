@@ -31,10 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 class VisualEmbedder:
-    """Generates visual Re-ID embeddings using V-JEPA2.
-
-    V-JEPA2 is the only supported Re-ID embedding backend.
-    """
+    """Generates visual Re-ID embeddings using configurable backend (V-JEPA2, DINOv2, DINOv3)."""
 
     def __init__(
         self,
@@ -42,7 +39,7 @@ class VisualEmbedder:
         config: Optional[EmbeddingConfig] = None,
     ):
         self.config = config or EmbeddingConfig()
-        self.vjepa2 = None
+        self.embedder = None
         
         # Resolve device
         import torch
@@ -56,18 +53,35 @@ class VisualEmbedder:
                 device = "cpu"
         self._device = device
         
-        # Always use V-JEPA2
-        from orion.backends.vjepa2_backend import VJepa2Embedder
-        self.vjepa2 = VJepa2Embedder(
-            model_name=self.config.model,
-            device=device,
-        )
-        logger.info(f"VisualEmbedder initialized: V-JEPA2 (device={device}, dim={self.config.embedding_dim})")
+        # Factory pattern for backend selection
+        if self.config.backend == "vjepa2":
+            from orion.backends.vjepa2_backend import VJepa2Embedder
+            self.embedder = VJepa2Embedder(
+                model_name=self.config.model,
+                device=device,
+            )
+        elif self.config.backend == "dinov2":
+            from orion.backends.dino_backend import DINOEmbedder
+            self.embedder = DINOEmbedder(
+                model_name="facebook/dinov2-base",
+                device=device,
+            )
+        elif self.config.backend == "dinov3":
+            from orion.backends.dino_backend import DINOEmbedder
+            self.embedder = DINOEmbedder(
+                model_name="facebook/dinov3-vitb16-pretrain-lvd1689m",
+                local_weights_dir=self.config.dinov3_weights or None,
+                device=device,
+            )
+        else:
+            raise ValueError(f"Unsupported embedding backend: {self.config.backend}")
+        
+        logger.info(f"VisualEmbedder initialized: {self.config.backend.upper()} (device={device}, dim={self.config.embedding_dim})")
     
     @profile("embedder_embed_detections")
     def embed_detections(self, detections: List[dict]) -> List[dict]:
         """
-        Add V-JEPA2 embeddings to detections.
+        Add embeddings to detections using configured backend.
         
         Args:
             detections: List of detection dicts from FrameObserver
@@ -76,10 +90,10 @@ class VisualEmbedder:
             Same detections with 'embedding' field added
         """
         logger.info("=" * 80)
-        logger.info("PHASE 1B: VISUAL EMBEDDING GENERATION (V-JEPA2)")
+        logger.info(f"PHASE 1B: VISUAL EMBEDDING GENERATION ({self.config.backend.upper()})")
         logger.info("=" * 80)
         
-        logger.info(f"Generating {self.config.embedding_dim}-dim V-JEPA2 embeddings...")
+        logger.info(f"Generating {self.config.embedding_dim}-dim {self.config.backend.upper()} embeddings...")
         logger.info(f"  Processing {len(detections)} detections...")
         
         # Optionally cluster detections per frame before embedding extraction
@@ -99,7 +113,7 @@ class VisualEmbedder:
             if (batch_idx + 1) % 5 == 0 or batch_idx == total_batches - 1:
                 logger.info(f"  Processed {end_idx}/{len(detections)} detections")
         
-        logger.info(f"✓ Generated {len(detections)} V-JEPA2 embeddings")
+        logger.info(f"✓ Generated {len(detections)} {self.config.backend.upper()} embeddings")
         logger.info("=" * 80 + "\n")
         
         return detections
@@ -107,7 +121,7 @@ class VisualEmbedder:
     @profile("embedder_embed_batch")
     def _embed_batch(self, batch: List[dict]) -> List[np.ndarray]:
         """
-        Generate V-JEPA2 embeddings for a batch of detections.
+        Generate embeddings for a batch of detections using configured backend.
         """
         embeddings: List[np.ndarray] = []
         for detection in batch:
@@ -116,18 +130,18 @@ class VisualEmbedder:
                 # Fallback: zero embedding
                 embeddings.append(np.zeros((self.config.embedding_dim,), dtype=np.float32))
                 continue
-            # V-JEPA2 expects RGB
+            # Convert to RGB
             rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
             try:
-                embedding_tensor = self.vjepa2.embed_single_image(rgb_crop)
-                embedding = embedding_tensor.numpy().flatten().astype(np.float32)
+                embedding = self.embedder.encode_image(rgb_crop, normalize=False)
+                embedding = embedding.astype(np.float32)
                 # Normalize
                 norm = np.linalg.norm(embedding)
                 if norm > 0:
                     embedding = embedding / norm
                 embeddings.append(embedding)
             except Exception as e:
-                logger.warning(f"V-JEPA2 embedding failed: {e}")
+                logger.warning(f"{self.config.backend.upper()} embedding failed: {e}")
                 embeddings.append(np.zeros((self.config.embedding_dim,), dtype=np.float32))
         return embeddings
 

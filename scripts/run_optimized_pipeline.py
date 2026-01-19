@@ -131,6 +131,7 @@ def run_pipeline(video_path: str, episode_id: str, device: str = "cuda") -> dict
             tracks,
             relations=["near", "on", "held_by"],
             enable_class_filtering=True,
+            enable_semantic_relations=True,
         )
         
         graph_path = results_dir / "scene_graph.jsonl"
