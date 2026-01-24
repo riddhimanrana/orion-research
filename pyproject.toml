@@ -20,9 +20,9 @@ authors = [
 keywords = ["research", "orion", "computer-vision", "transformers", "video-understanding", "re-id"]
 dependencies = [
     "torch==2.6.0", "torchvision==0.21.0",
-    "transformers>=4.47.1", "tokenizers==0.21.0",
+    "transformers>=4.56.0", "tokenizers>=0.22.0",
     "numpy==1.26.4", "scikit-learn==1.2.2", "opencv-python>=4.8.0",
-    "timm==1.0.15", "einops==0.6.1", "ultralytics==8.3.217",
+    "timm>=1.0.20", "einops==0.6.1", "ultralytics==8.3.217",
     "hdbscan", "mediapipe>=0.10.14", "pillow>=10.0.0", "rich",
     # Phase 1 additions
     "scipy>=1.10.0",  # For Hungarian algorithm in tracker

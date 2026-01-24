@@ -192,6 +192,7 @@ class PerceptionEngine:
 
         # Tracking history
         self.tracking_history: Dict[int, List[Track]] = {}  # To store track history
+        self.frame_timestamps: Dict[int, float] = {}
         
         # Stage 4: CIS scorer and temporal buffer
         self.cis_scorer = None
@@ -215,8 +216,8 @@ class PerceptionEngine:
         
         # YOLO-World detector
         yoloworld_model = None
-        if self.config.detection.backend == "yoloworld":
-            logger.info("Initializing YOLO-World detector...")
+        if self.config.detection.backend in ["yoloworld", "dinov3"]:
+            logger.info("Initializing YOLO-World detector (as primary or proposer)...")
             # Set model name and classes before loading
             self.model_manager.yoloworld_model_name = self.config.detection.yoloworld_model
             self.model_manager.yoloworld_classes = (
@@ -304,8 +305,10 @@ class PerceptionEngine:
             target_fps=self.config.target_fps,
             enable_3d=self.config.enable_3d,
             enable_occlusion=self.config.enable_occlusion,
+            depth_model=self.config.depth.model_name,
+            depth_model_size=self.config.depth.model_size,
         )
-        # Visual embedder (always V-JEPA2 for Re-ID)
+        # Visual embedder (DINOv3 or V-JEPA2 for Re-ID)
         self.embedder = VisualEmbedder(config=self.config.embedding)
         # Entity tracker (optional, can be None)
         self.tracker = EntityTracker(self.config)
@@ -1031,7 +1034,6 @@ class PerceptionEngine:
         #                 if valid.size > 0:
         #                     depth_value = float(np.median(valid))
         #                 else:
-        _value = None
         #         except Exception as exc:
         #             logger.warning(f"Depth estimation failed for frame {frame_number}: {exc}")
         #     if depth_map is None:
@@ -1508,6 +1510,8 @@ class PerceptionEngine:
         
         for fidx in sorted(by_frame.keys()):
             frame_dets = by_frame[fidx]
+            if frame_dets:
+                self.frame_timestamps[fidx] = frame_dets[0].get("timestamp", 0.0)
             # Build arrays for tracker
             converted, embs = self._convert_for_enhanced_tracker(frame_dets)
 
@@ -1697,12 +1701,11 @@ class PerceptionEngine:
 
             with open(output_path, 'w') as f:
                 for frame_idx, tracks in self.tracking_history.items():
+                    timestamp_sec = self.frame_timestamps.get(frame_idx, frame_idx / fps)
                     for track in tracks:
-                        # Calculate timestamp in milliseconds
-                        timestamp_msec = (frame_idx / fps) * 1000
                         track_data = {
                             "frame_id": frame_idx,
-                            "timestamp": timestamp_msec,
+                            "timestamp": timestamp_sec,
                             "track_id": track.id,
                             "class_name": track.class_name,
                             "bbox_2d": track.bbox_2d.tolist(),

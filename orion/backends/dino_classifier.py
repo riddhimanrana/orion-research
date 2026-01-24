@@ -110,10 +110,16 @@ def get_dino_model(device: str = "mps"):
             
             # Check for local DINOv3 model first
             local_dinov3 = Path("models/dinov3-vitl16")
+            local_dinov3_b = Path("models/dinov3-vitb16")
+            
             if local_dinov3.exists():
                 model_id = str(local_dinov3)
                 logger.info(f"Loading local DINOv3 model: {model_id}")
+            elif local_dinov3_b.exists():
+                model_id = str(local_dinov3_b)
+                logger.info(f"Loading local DINOv3 model: {model_id}")
             else:
+                logger.warning(f"Local DINOv3 weights not found at {local_dinov3} or {local_dinov3_b}. Falling back to DINOv2.")
                 model_id = "facebook/dinov2-large"
                 logger.info(f"Loading DINOv2 model (fallback): {model_id}")
             

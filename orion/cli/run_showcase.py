@@ -216,8 +216,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--detector-backend",
         type=str,
-        default="yolo",
-        choices=["yolo", "yoloworld", "groundingdino", "hybrid", "openvocab"],
+        default="dinov3",
+        choices=["yolo", "yoloworld", "groundingdino", "hybrid", "openvocab", "dinov3"],
         help="Detection backend for Phase 1 (default: yolo)",
     )
     parser.add_argument(
@@ -301,9 +301,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--embedding-backend",
         type=str,
-        default="vjepa2",
+        default="dinov3",
         choices=["vjepa2", "dinov2", "dinov3"],
-        help="Embedding backend for Re-ID (default: vjepa2)",
+        help="Embedding backend for Re-ID (default: dinov3)",
     )
 
     parser.add_argument("--skip-phase1", action="store_true")

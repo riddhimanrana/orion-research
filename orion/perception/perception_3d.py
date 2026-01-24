@@ -125,6 +125,7 @@ class Perception3DEngine:
         enable_slam: bool = False,
         depth_model_size: str = "small",
         camera_intrinsics: Optional[CameraIntrinsics] = None,
+        model_name: str = "depth_anything_3",
     ):
         self.enable_depth = enable_depth
         self.enable_hands = enable_hands
@@ -136,9 +137,8 @@ class Perception3DEngine:
         self.depth_estimator = None
         if enable_depth:
             try:
-                # Use "depth_anything_3" as per depth.py implementation
                 self.depth_estimator = DepthEstimator(
-                    model_name="depth_anything_3",
+                    model_name=model_name,
                     model_size=self.depth_model_size,
                 )
                 logger.info("Perception3DEngine: DepthEstimator initialized")

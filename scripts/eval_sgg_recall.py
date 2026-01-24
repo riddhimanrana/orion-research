@@ -8,6 +8,7 @@ import json
 import os
 from typing import Dict, List, Set, Tuple
 from collections import defaultdict
+import argparse
 import numpy as np
 
 def load_pvsg_ground_truth(pvsg_json_path: str) -> Dict[str, Dict]:
@@ -76,17 +77,17 @@ def normalize_predicate(pred: str) -> str:
     }
     return mappings.get(pred, pred)
 
-def load_orion_triplets(video_id: str, results_dir: str) -> List[Tuple[str, str, str]]:
+def load_orion_triplets(episode_id: str, results_dir: str) -> List[Tuple[str, str, str]]:
     """
     Load Orion predicted triplets from scene_graph.jsonl.
     Returns: List of (subject_class, predicate, object_class) tuples
     """
-    sg_file = os.path.join(results_dir, video_id, 'scene_graph.jsonl')
+    sg_file = os.path.join(results_dir, episode_id, 'scene_graph.jsonl')
     if not os.path.exists(sg_file):
         return []
     
     # Load memory.json to map memory IDs to classes
-    memory_file = os.path.join(results_dir, video_id, 'memory.json')
+    memory_file = os.path.join(results_dir, episode_id, 'memory.json')
     mem_to_class = {}
     if os.path.exists(memory_file):
         with open(memory_file, 'r') as f:
@@ -173,13 +174,16 @@ def compute_recall_at_k(pred_triplets: List[Tuple], gt_triplets: List[Tuple], k:
     
     return (matched / len(gt_triplets)) * 100.0
 
-def evaluate_video(video_id: str, results_dir: str, gt_videos: Dict) -> Dict:
+def evaluate_video(video_id: str, results_dir: str, gt_videos: Dict, episode_id: str = None) -> Dict:
     """Evaluate a single video."""
     if video_id not in gt_videos:
         return {'video_id': video_id, 'error': 'Not in GT'}
     
+    # Use episode_id if provided (for custom output dirs), otherwise assume video_id is the dir
+    target_dir_name = episode_id if episode_id else video_id
+
     # Load predictions and ground truth
-    pred_triplets = load_orion_triplets(video_id, results_dir)
+    pred_triplets = load_orion_triplets(target_dir_name, results_dir)
     gt_triplets = load_gt_triplets(gt_videos[video_id])
     
     if len(gt_triplets) == 0:
@@ -215,6 +219,11 @@ def evaluate_video(video_id: str, results_dir: str, gt_videos: Dict) -> Dict:
     return results
 
 def main():
+    parser = argparse.ArgumentParser(description="Evaluate SGG Recall")
+    parser.add_argument("--episode", help="Episode ID (directory name in results/)")
+    parser.add_argument("--video-id", help="PVSG Video ID (for Ground Truth)")
+    args = parser.parse_args()
+
     # Configuration - NEW batch of 10 videos
     video_ids = [
         "0020_10793023296", "0020_5323209509", "0021_2446450580", "0021_4999665957",
@@ -229,6 +238,26 @@ def main():
     print("Loading PVSG ground truth...")
     gt_videos = load_pvsg_ground_truth(pvsg_json)
     print(f"Loaded {len(gt_videos)} videos\n")
+
+    # Single video evaluation mode
+    if args.episode and args.video_id:
+        print(f"Evaluating Episode '{args.episode}' against GT Video '{args.video_id}'...")
+        result = evaluate_video(args.video_id, results_dir, gt_videos, episode_id=args.episode)
+        
+        if 'error' in result:
+            print(f"ERROR: {result['error']}")
+        else:
+            print("\n" + "="*40)
+            print(f"RESULTS FOR {args.video_id}")
+            print(f"Pred Triplets: {result['pred_count']}")
+            print(f"GT Triplets:   {result['gt_count']}")
+            print(f"Matches:       {result['matches']}")
+            print("-" * 40)
+            print(f"R@20:   {result['R@20']:.1f}%  (mR@20: {result['mR@20']:.1f}%)")
+            print(f"R@50:   {result['R@50']:.1f}%  (mR@50: {result['mR@50']:.1f}%)")
+            print(f"R@100:  {result['R@100']:.1f}%  (mR@100: {result['mR@100']:.1f}%)")
+            print("="*40 + "\n")
+        return
     
     # Evaluate each video
     print("Evaluating videos...")

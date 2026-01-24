@@ -54,9 +54,21 @@ class VJepa2Embedder:
         logger.info(f"Loading V-JEPA2: {self.model_name}")
         
         try:
-            from transformers import AutoVideoProcessor, AutoModel
+            try:
+                from transformers import AutoVideoProcessor
+            except ImportError:
+                # Fallback for older transformers or specific installs
+                from transformers import AutoImageProcessor as AutoVideoProcessor
+
+            from transformers import AutoModel
             
-            self._processor = AutoVideoProcessor.from_pretrained(self.model_name)
+            try:
+                self._processor = AutoVideoProcessor.from_pretrained(self.model_name)
+            except (OSError, ValueError) as e:
+                logger.warning(f"Could not load processor for {self.model_name}: {e}. Falling back to VideoMAE processor.")
+                from transformers import VideoMAEImageProcessor
+                self._processor = VideoMAEImageProcessor.from_pretrained("MCG-NJU/videomae-base")
+
             self._model = AutoModel.from_pretrained(
                 self.model_name,
                 torch_dtype=self.dtype,

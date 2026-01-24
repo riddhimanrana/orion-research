@@ -437,7 +437,7 @@ def main():
         "--detector-backend",
         type=str,
         default="yoloworld",
-        choices=["yolo", "yoloworld", "groundingdino", "hybrid", "openvocab"],
+        choices=["yolo", "yoloworld", "groundingdino", "hybrid", "openvocab", "dinov3"],
         help="Detection backend (default: yoloworld). 'openvocab' uses YOLO-World + CLIP for open-vocabulary detection."
     )
     parser.add_argument(

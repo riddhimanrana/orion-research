@@ -23,21 +23,6 @@ from orion.perception.spatial_zones import ZoneManager
 logger = logging.getLogger(__name__)
 
 
-import json
-import logging
-from collections import Counter, defaultdict, deque
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Deque, Dict, List, Optional, Tuple
-
-import cv2
-import numpy as np
-
-from orion.perception.spatial_zones import ZoneManager
-
-logger = logging.getLogger(__name__)
-
-
 def get_perception_run_dims(results_dir: Path) -> Optional[Tuple[int, int]]:
     """Get processing dimensions from run metadata."""
     meta_path = results_dir / "run_metadata.json"
@@ -146,32 +131,6 @@ class InsightOverlayRenderer:
                 tid = segment.get("track_id")
                 if tid is not None:
                     self.track_to_mem[int(tid)] = mem_id
-    
-    def _match_track_to_memory(self, track_id: int) -> Optional[str]:
-        """Finds the memory ID for a given track ID."""
-        return self.track_to_mem.get(track_id)
-
-        # Get FPS for timestamp calculations
-        cap = cv2.VideoCapture(str(self.video_path))
-        if not cap.isOpened():
-            logger.error(f"Unable to open video {self.video_path}")
-            raise RuntimeError(f"Unable to open video {self.video_path}")
-        self.fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        cap.release()
-
-        self._load_tracks()
-        self._load_memory()
-        self._load_scene_graphs()
-
-        self.mem_last_seen: Dict[str, Optional[int]] = {mid: None for mid in self.memory}
-        self.mem_tracks_seen: Dict[str, set[int]] = defaultdict(set)
-        self.state_messages: Deque[Tuple[str, Tuple[int, int, int], int]] = deque()
-        self.current_zone: Optional[int] = None
-
-        # Scaling factors for mis-aligned processing dimensions
-        self.scale_x = 1.0
-        self.scale_y = 1.0
-
     def _load_tracks(self) -> None:
         """Loads tracks and groups them by track_id."""
         with open(self.tracks_path, "r") as f:
@@ -180,6 +139,10 @@ class InsightOverlayRenderer:
                 if not line:
                     continue
                 det = json.loads(line)
+                # Auto-detect milliseconds timestamp and convert to seconds
+                # If timestamp is > 10000s (2.7 hours), it's likely ms (e.g. 33250)
+                if det.get("timestamp", 0) > 10000:
+                    det["timestamp"] = det["timestamp"] / 1000.0
                 track_id = det.get("track_id")
                 if track_id is not None:
                     self.tracks_by_id[int(track_id)].append(det)
@@ -224,31 +187,6 @@ class InsightOverlayRenderer:
                     "bboxes": bboxes,
                     "metadata": segment, # Keep original detections for labels etc.
                 }
-
-    def _load_memory(self) -> None:
-        data = json.loads(self.memory_path.read_text())
-        for obj in data.get("objects", []):
-            mem_id = obj.get("memory_id")
-            if not mem_id:
-                continue
-            cls = obj.get("class", "object")
-            zone_id = obj.get("zone_id")
-            if zone_id is None:
-                zone_id = self.zone_manager.assign_zone_from_class(cls)
-            obj["zone_id"] = zone_id
-            obj["zone_name"] = self.zone_manager.get_zone_name(zone_id)
-            self.memory[mem_id] = obj
-            emb = obj.get("prototype_embedding")
-            if emb:
-                self.embed_to_mem[emb] = mem_id
-            for segment in obj.get("appearance_history", []):
-                tid = segment.get("track_id")
-                if tid is not None:
-                    self.track_to_mem[int(tid)] = mem_id
-    
-    def _match_track_to_memory(self, track_id: int) -> Optional[str]:
-        """Finds the memory ID for a given track ID."""
-        return self.track_to_mem.get(track_id)
 
     def _load_scene_graphs(self) -> None:
         if not self.graph_path.exists():
@@ -438,7 +376,7 @@ class InsightOverlayRenderer:
         # This function is now less direct, we match via track_id
         tid = detection.get("track_id")
         if tid is not None:
-            return self._match_track_to_memory(int(tid))
+            return self.track_to_mem.get(int(tid))
         return None
 
     def _annotate_detections(
@@ -449,7 +387,7 @@ class InsightOverlayRenderer:
         
         for det in detections:
             track_id = det.get("track_id")
-            mem_id = self._match_track_to_memory(track_id) if track_id is not None else None
+            mem_id = self.track_to_mem.get(int(track_id)) if track_id is not None else None
 
             x1_proc, y1_proc, x2_proc, y2_proc = det["bbox_2d"]
 
@@ -457,9 +395,9 @@ class InsightOverlayRenderer:
             if self.is_portrait:
                 proc_dims = get_perception_run_dims(self.results_dir)
                 proc_w, proc_h = proc_dims if proc_dims else (1920, 1080)
-                x1_unrotated = proc_w - 1 - y2_proc
+                x1_unrotated = proc_h - 1 - y2_proc
                 y1_unrotated = x1_proc
-                x2_unrotated = proc_w - 1 - y1_proc
+                x2_unrotated = proc_h - 1 - y1_proc
                 y2_unrotated = x2_proc
                 x1 = min(x1_unrotated, x2_unrotated)
                 y1 = min(y1_unrotated, y2_unrotated)

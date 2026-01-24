@@ -79,7 +79,8 @@ class DINOEmbedder:
                 self._backend = "dinov3-local"
                 logger.info("✓ DINOv3 loaded via local loader")
                 return
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Lightweight DINOv3 loader failed: {e}")
                 # fallback to transformers local loader
                 try:
                     from transformers import AutoImageProcessor, AutoModel  # type: ignore
@@ -101,7 +102,7 @@ class DINOEmbedder:
                     logger.info("✓ DINO loaded from local weights")
                     return
                 except Exception as e:
-                    logger.warning(f"Local weights load failed ({e}); falling back…")
+                    logger.warning(f"Local weights load failed ({e}); falling back…", exc_info=True)
 
         # Try Transformers with HF Hub (works for DINOv2)
         try:
@@ -240,6 +241,9 @@ class DINOEmbedder:
                 features = self._timm_model.forward_features(tensor)
                 if isinstance(features, (list, tuple)):
                     features = features[-1]
+                # Pool tokens if output is (Batch, Tokens, Dim)
+                if features.dim() == 3:
+                    features = features.mean(dim=1)
                 # Global average pooling if needed
                 if features.dim() == 4:
                     features = features.mean(dim=(2, 3))
@@ -256,15 +260,6 @@ class DINOEmbedder:
         else:
             emb = emb.astype(np.float32)
         return emb
-
-        if self._backend == "fake":
-            # deterministic pseudorandom vector based on image shape to be stable in tests
-            h, w = rgb.shape[:2]
-            rng = np.random.RandomState(seed=(h * 1315423911) ^ (w * 2654435761))
-            emb = rng.randn(self._fake_dim).astype(np.float32)
-            if normalize:
-                emb = emb / (np.linalg.norm(emb) + 1e-8)
-            return emb
 
     # ===========================
     # Video feature map interface

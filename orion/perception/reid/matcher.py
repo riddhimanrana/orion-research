@@ -198,7 +198,7 @@ def compute_track_embeddings(
     tracks: List[Dict[str, Any]],
     max_crops_per_track: int = 5,
     batch_size: int = 8,
-    embedding_backend: str = "vjepa2",
+    embedding_backend: str = "dinov3",
 ) -> Dict[int, np.ndarray]:
     """
     Compute an average embedding per track by cropping detections from frames.
@@ -224,7 +224,8 @@ def compute_track_embeddings(
         from orion.perception.embedder import VisualEmbedder
         from orion.perception.config import EmbeddingConfig
         embedder_config = EmbeddingConfig(backend=embedding_backend, batch_size=batch_size, device="auto")
-        reid_model = VisualEmbedder(config=embedder_config)
+        # Unwrap the underlying backend (DINOEmbedder) to access encode_image/encode_images_batch
+        reid_model = VisualEmbedder(config=embedder_config).embedder
     else:
         raise ValueError(f"Unknown embedding backend: {embedding_backend}")
 
@@ -275,7 +276,7 @@ def compute_track_embeddings(
     logger.info(f"Embedding {len(all_crops)} crops from {len(crops_per_track)} tracks (batch_size={batch_size})")
     
     # Check if model supports batch embedding
-    has_batch = hasattr(reid_model, 'embed_batch') or hasattr(reid_model, '_embed_batch')
+    has_batch = hasattr(reid_model, 'embed_batch') or hasattr(reid_model, 'encode_images_batch')
 
     if has_batch and embedding_backend == "vjepa2":
         # Use batch embedding when available (it will internally chunk by batch_size)
@@ -288,7 +289,7 @@ def compute_track_embeddings(
     elif has_batch and embedding_backend in ["dinov2", "dinov3"]:
         # Use DINO batch embedding
         try:
-            embeddings = reid_model._embed_batch(all_crops)
+            embeddings = reid_model.encode_images_batch(all_crops)
             embs = [emb.flatten() for emb in embeddings]
         except Exception as e:
             logger.warning(f"DINO batch embedding failed ({e}), falling back to sequential")
@@ -460,7 +461,7 @@ def build_memory_from_tracks(
     max_crops_per_track: int = 5,
     reid_batch_size: int = 8,
     class_thresholds: Optional[Dict[str, float]] = None,
-    embedding_backend: str = "vjepa2",
+    embedding_backend: str = "dinov3",
 ) -> Path:
     """
     Phase 2: Build memory.json and update tracks with embedding ids.

@@ -82,7 +82,7 @@ YOLOWORLD_PROMPT_INDOOR_FULL = (
 class DetectionConfig:
     """Detection backend configuration (YOLO, YOLO-World, GroundingDINO, or OpenVocab)."""
 
-    backend: Literal["yolo", "yoloworld", "groundingdino", "hybrid", "openvocab", "dinov3"] = "dinov3"
+    backend: Literal["yolo", "yoloworld", "groundingdino", "hybrid", "openvocab", "dinov3"] = "yolo"
     """Primary detector to use for frame observations. Options: 'yolo', 'yoloworld',
     'groundingdino', 'hybrid', 'openvocab', 'dinov3'
 
@@ -106,7 +106,7 @@ class DetectionConfig:
     """NMS IoU threshold for overlapping boxes."""
 
     # Temporal consistency filtering (NEW)
-    enable_temporal_filtering: bool = True
+    enable_temporal_filtering: bool = False
     """If True, reject detections that don't persist across multiple frames."""
 
     min_consecutive_frames: int = 2
@@ -455,7 +455,7 @@ class EmbeddingConfig:
     but not for Re-ID embeddings.
     """
     
-    backend: Literal["vjepa2", "dinov2", "dinov3"] = "dinov3"
+    backend: Literal["vjepa2", "dinov2", "dinov3"] = "vjepa2"
     """Embedding backend: vjepa2 (3D-aware), dinov2, dinov3"""
     
     # V-JEPA2 model (the only supported Re-ID backend)
@@ -466,8 +466,8 @@ class EmbeddingConfig:
     """Output embedding dimension (V-JEPA2 vitl = 1024, DINO = 768)."""
 
     # DINOv3 specific
-    dinov3_weights: str = ""
-    """Path to DINOv3 weights directory (auto-download if empty)."""
+    dinov3_weights: str = "orion-core-fs/orion-research/models/dinov3-vitb16/dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth"
+    """Path to DINOv3 weights file (local .pth)."""
     
     # Cluster / memory efficiency settings
     use_cluster_embeddings: bool = False
@@ -706,8 +706,8 @@ class SemanticVerificationConfig:
 class DepthConfig:
     """Depth estimation configuration for Phase 1 3D perception."""
 
-    model_name: Literal["depth_anything_v3", "depth_anything_v2"] = "depth_anything_v2"
-    model_size: Literal["small", "base", "large"] = "small"
+    model_name: Literal["depth_anything_3", "depth_anything_v2"] = "depth_anything_3"
+    model_size: Literal["small", "base", "large"] = "large"
     device: Optional[str] = None  # auto-detect by default
     half_precision: bool = True
     max_depth_mm: float = 10000.0
@@ -1206,7 +1206,7 @@ def get_dinov3_config() -> PerceptionConfig:
     """
     return PerceptionConfig(
         detection=DetectionConfig(
-            backend="yoloworld",
+            backend="dinov3",
             yoloworld_prompt_preset="coarse",
             yoloworld_use_custom_classes=True,
             yoloworld_enable_candidate_labels=True,
@@ -1223,7 +1223,9 @@ def get_dinov3_config() -> PerceptionConfig:
             temperature=0.2,
         ),
         target_fps=4.0,
-        enable_3d=False,
-        enable_depth=False,
+        enable_3d=True,
+        enable_depth=True,
         enable_tracking=True,
+        enable_cis=True,
+        depth=DepthConfig(model_name="depth_anything_3", model_size="large"),
     )

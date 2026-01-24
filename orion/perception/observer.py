@@ -68,7 +68,7 @@ class FrameObserver:
         target_fps: float = 2.0,
         show_progress: bool = True,
         enable_3d: bool = False,
-        depth_model: str = "midas",
+        depth_model: str = "depth_anything_3",
         depth_model_size: str = "small",
         enable_occlusion: bool = False,
         enable_slam: bool = False,
@@ -95,7 +95,7 @@ class FrameObserver:
         self.show_progress = show_progress
         self.detector_backend = detector_backend
         self.yolo = yolo_model if detector_backend in {"yolo", "hybrid"} else None
-        self.yoloworld = yoloworld_model if detector_backend == "yoloworld" else None
+        self.yoloworld = yoloworld_model if detector_backend in {"yoloworld", "dinov3"} else None
         self.gdino = gdino_model if detector_backend in {"groundingdino", "hybrid"} else None
         self.gdino_processor = gdino_processor if detector_backend in {"groundingdino", "hybrid"} else None
         # Allow dinov3 backend: proposals come from groundingdino/hybrid/yolo and
@@ -158,6 +158,7 @@ class FrameObserver:
                     enable_occlusion=enable_occlusion,
                     enable_slam=enable_slam,
                     depth_model_size=depth_model_size,
+                    model_name=depth_model,
                 )
                 logger.info("  ✓ Perception3DEngine initialized")
             except Exception as e:
@@ -528,7 +529,7 @@ class FrameObserver:
         try:
             refined = classify_detections_with_context(frame, proposals, device=device)
         except Exception as e:
-            logger.warning(f"DINOv3 classification failed: {e}")
+            logger.warning(f"DINOv3 classification failed: {e}", exc_info=True)
             return proposals
 
         # Normalize refined outputs into the expected detection schema

@@ -68,11 +68,18 @@ class VisualEmbedder:
             )
         elif self.config.backend == "dinov3":
             from orion.backends.dino_backend import DINOEmbedder
-            self.embedder = DINOEmbedder(
-                model_name="facebook/dinov3-vitb16-pretrain-lvd1689m",
-                local_weights_dir=self.config.dinov3_weights or None,
-                device=device,
-            )
+            try:
+                self.embedder = DINOEmbedder(
+                    model_name="facebook/dinov3-vitb16-pretrain-lvd1689m",
+                    local_weights_dir=self.config.dinov3_weights or None,
+                    device=device,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to load DINOv3 ({e}). Falling back to DINOv2.", exc_info=True)
+                self.embedder = DINOEmbedder(
+                    model_name="facebook/dinov2-base",
+                    device=device,
+                )
         else:
             raise ValueError(f"Unsupported embedding backend: {self.config.backend}")
         
@@ -123,26 +130,43 @@ class VisualEmbedder:
         """
         Generate embeddings for a batch of detections using configured backend.
         """
-        embeddings: List[np.ndarray] = []
-        for detection in batch:
+        # Prepare crops
+        crops: List[np.ndarray] = []
+        valid_indices: List[int] = []
+        embeddings: List[np.ndarray] = [None] * len(batch)
+
+        for i, detection in enumerate(batch):
             crop = detection.get("crop")
             if crop is None or crop.size == 0:
-                # Fallback: zero embedding
-                embeddings.append(np.zeros((self.config.embedding_dim,), dtype=np.float32))
+                embeddings[i] = np.zeros((self.config.embedding_dim,), dtype=np.float32)
                 continue
-            # Convert to RGB
-            rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-            try:
-                embedding = self.embedder.encode_image(rgb_crop, normalize=False)
-                embedding = embedding.astype(np.float32)
-                # Normalize
-                norm = np.linalg.norm(embedding)
-                if norm > 0:
-                    embedding = embedding / norm
-                embeddings.append(embedding)
-            except Exception as e:
-                logger.warning(f"{self.config.backend.upper()} embedding failed: {e}")
-                embeddings.append(np.zeros((self.config.embedding_dim,), dtype=np.float32))
+            crops.append(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
+            valid_indices.append(i)
+
+        if not crops:
+            return embeddings
+
+        # Run batch inference
+        try:
+            if hasattr(self.embedder, "encode_images_batch"):
+                # DINO backend (returns list of np.ndarray)
+                batch_embs = self.embedder.encode_images_batch(crops, normalize=True)
+            elif hasattr(self.embedder, "embed_batch"):
+                # V-JEPA2 backend (returns list of torch.Tensor)
+                batch_tensors = self.embedder.embed_batch(crops, batch_size=len(crops))
+                batch_embs = [t.cpu().numpy().flatten() for t in batch_tensors]
+            else:
+                # Fallback for backends without batch support
+                batch_embs = [self.embedder.encode_image(c, normalize=True) for c in crops]
+
+            for idx, emb in zip(valid_indices, batch_embs):
+                embeddings[idx] = emb.astype(np.float32)
+
+        except Exception as e:
+            logger.warning(f"{self.config.backend.upper()} batch embedding failed: {e}")
+            for idx in valid_indices:
+                embeddings[idx] = np.zeros((self.config.embedding_dim,), dtype=np.float32)
+
         return embeddings
 
     # -------------------------------

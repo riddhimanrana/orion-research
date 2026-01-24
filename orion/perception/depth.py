@@ -145,7 +145,6 @@ class DepthEstimator:
         except Exception as e:
             print(f"[DepthEstimator] Failed to load Depth Anything 3: {e}")
             raise
-            raise
 
     def _load_depth_anything_v2(self) -> torch.nn.Module:
         """Load Depth Anything V2 model directly from local files."""
@@ -182,9 +181,18 @@ class DepthEstimator:
 
         if weights_path and weights_path.exists():
             try:
-                state = torch.load(weights_path, map_location=self.device)
+                # PyTorch 2.6+ defaults weights_only=True which breaks some legacy checkpoints
+                try:
+                    state = torch.load(weights_path, map_location=self.device, weights_only=False)
+                except TypeError:
+                    # Fallback for older PyTorch versions
+                    state = torch.load(weights_path, map_location=self.device)
             except Exception as e:
-                print(f"[DepthEstimator] Warning: failed to read DA2 weights file: {e}. Continuing without weights.")
+                print(f"[DepthEstimator] Warning: failed to read DA2 weights file: {e}. Deleting corrupt file and continuing without weights.")
+                try:
+                    weights_path.unlink()
+                except Exception:
+                    pass
                 state = None
 
             if state is not None:
@@ -193,16 +201,6 @@ class DepthEstimator:
                 except Exception as e:
                     print(f"[DepthEstimator] Warning: failed to load DA2 weights into model: {e}. Continuing with random-init model.")
         
-        return model
-        
-        # Load pretrained weights
-        # Weights are typically downloaded to a cache dir by the model's own logic,
-        # or we can point to a local file if we download them manually.
-        # For now, we rely on the model's default weight loading.
-        model.load_state_dict(torch.load(f'https://huggingface.co/depth-anything/Depth-Anything-V2-{self.model_size.capitalize()}-hf/resolve/main/pytorch_model.bin', map_location='cpu'))
-
-        model = model.to(self.device)
-        print(f"[DepthEstimator] Depth Anything V2 ({self.model_size}) loaded successfully.")
         return model
     
     @torch.no_grad()

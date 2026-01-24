@@ -11,7 +11,7 @@ import json
 def test_phase1_detection():
     """Test Phase 1: Detection + Tracking"""
     print("\n" + "=" * 80)
-    print("PHASE 1: DETECTION + TRACKING")
+    print("PHASE 1: DETECTION + TRACKING (Testing YOLO backend)")
     print("=" * 80)
     
     try:
@@ -45,7 +45,7 @@ def test_phase1_detection():
 def test_phase2_reid():
     """Test Phase 2: Re-ID / Memory Clustering"""
     print("\n" + "=" * 80)
-    print("PHASE 2: RE-ID / MEMORY CLUSTERING")
+    print("PHASE 2: RE-ID / MEMORY CLUSTERING (Testing V-JEPA2 backend)")
     print("=" * 80)
     
     try:
@@ -170,6 +170,8 @@ def test_dino_backends():
             dino_v2 = DINOEmbedder(model_name="facebook/dinov2-base", device="mps")
             embed_v2 = dino_v2.encode_image(test_image)
             print(f"  ✅ DINOv2 works! Embedding shape: {embed_v2.shape}")
+            if embed_v2.shape != (768,):
+                print(f"  ❌ Shape mismatch! Expected (768,), got {embed_v2.shape}")
         except Exception as e:
             print(f"  ❌ DINOv2 failed: {e}")
         
@@ -181,6 +183,8 @@ def test_dino_backends():
                 dino_v3 = DINOEmbedder(local_weights_dir=dinov3_path, device="mps")
                 embed_v3 = dino_v3.encode_image(test_image)
                 print(f"  ✅ DINOv3 works! Embedding shape: {embed_v3.shape}")
+                if embed_v3.shape != (768,):
+                    print(f"  ❌ Shape mismatch! Expected (768,), got {embed_v3.shape}")
             except Exception as e:
                 print(f"  ❌ DINOv3 failed: {e}")
         else:
@@ -189,6 +193,56 @@ def test_dino_backends():
     
     except Exception as e:
         print(f"  ❌ DINO backend test failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+def test_visual_embedder_batch():
+    """Test VisualEmbedder batch processing and shape consistency."""
+    print("\n" + "=" * 80)
+    print("VISUAL EMBEDDER BATCH TEST")
+    print("=" * 80)
+
+    try:
+        from orion.perception.embedder import VisualEmbedder
+        from orion.perception.config import EmbeddingConfig
+        import numpy as np
+
+        # Test DINOv2 backend in VisualEmbedder
+        print("\n🔬 Testing VisualEmbedder with DINOv2 backend...")
+        config = EmbeddingConfig(
+            backend="dinov2",
+            model="facebook/dinov2-base",
+            device="mps",
+            batch_size=2
+        )
+        embedder = VisualEmbedder(config=config)
+        
+        # Create dummy detections
+        detections = []
+        for i in range(3):
+            detections.append({
+                "crop": np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8),
+                "frame_number": 0,
+                "bbox": [0, 0, 224, 224]
+            })
+            
+        # Run embedding
+        results = embedder.embed_detections(detections)
+        
+        # Verify
+        print(f"  ✅ Processed {len(results)} detections")
+        for i, res in enumerate(results):
+            emb = res.get("embedding")
+            if emb is not None:
+                shape = emb.shape
+                if shape != (768,):
+                     print(f"  ❌ Item {i} Shape mismatch! Expected (768,), got {shape}")
+            else:
+                print(f"  ❌ Item {i} missing embedding")
+        print("  ✅ All shapes verified (768,)")
+
+    except Exception as e:
+        print(f"  ❌ VisualEmbedder test failed: {e}")
         import traceback
         traceback.print_exc()
 
@@ -245,6 +299,7 @@ def main():
     test_phase3_scene_graph()
     test_depth_estimation()
     test_dino_backends()
+    test_visual_embedder_batch()
     test_end_to_end()
     
     print("\n" + "=" * 80)
