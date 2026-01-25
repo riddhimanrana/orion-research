@@ -33,10 +33,9 @@ YOLOWORLD_PROMPT_COARSE = (
     "person . face . hand . "
     "container . bottle . cup . "
     "bag . box . "
-    "furniture . chair . table . "
-    "electronic device . phone . laptop . "
+    "furniture . chair . table . door . window . "
+    "electronic device . phone . laptop . monitor . "
     "text . "
-    "door . window . "
     ""  # background class marker; empty string handled by yoloworld_categories()
 )
 
@@ -128,6 +127,20 @@ class DetectionConfig:
     Detections below their class-specific threshold are filtered out.
     Falls back to confidence_threshold if class not specified.
     Added per Gemini audit: 'hand' and 'laptop' often hallucinated on background features."""
+
+    # Default class-specific thresholds (tuned for known hallucination issues)
+    DEFAULT_CLASS_CONFIDENCE_THRESHOLDS = {
+        "remote": 0.50,  # Often hallucinated; requires higher confidence
+        "sink": 0.55,    # Frequently misdetected (e.g., monitors as sinks)
+        "suitcase": 0.50, # Low precision; needs strict confidence
+    }
+
+    # Default class-specific area constraints
+    DEFAULT_CLASS_MAX_AREA_RATIOS = {
+        "remote": 0.10,  # Remote control is small; anything larger is likely FP
+        "keyboard": 0.25, # Keyboard is medium-sized
+        "mouse": 0.05,   # Mouse is very small
+    }
 
     class_agnostic_nms: bool = False
     """If True, apply class-agnostic NMS to suppress overlapping boxes of different classes.
@@ -250,6 +263,23 @@ class DetectionConfig:
 
     def __post_init__(self):
         """Validate detection config."""
+        # Apply default class-specific thresholds if not explicitly set
+        if self.class_confidence_thresholds is None:
+            object.__setattr__(self, 'class_confidence_thresholds', self.DEFAULT_CLASS_CONFIDENCE_THRESHOLDS.copy())
+        else:
+            # Merge with defaults
+            merged = self.DEFAULT_CLASS_CONFIDENCE_THRESHOLDS.copy()
+            merged.update(self.class_confidence_thresholds)
+            object.__setattr__(self, 'class_confidence_thresholds', merged)
+
+        if self.class_max_area_ratios is None:
+            object.__setattr__(self, 'class_max_area_ratios', self.DEFAULT_CLASS_MAX_AREA_RATIOS.copy())
+        else:
+            # Merge with defaults
+            merged = self.DEFAULT_CLASS_MAX_AREA_RATIOS.copy()
+            merged.update(self.class_max_area_ratios)
+            object.__setattr__(self, 'class_max_area_ratios', merged)
+
         if self.backend not in {"yolo", "yoloworld", "groundingdino", "hybrid", "openvocab"}:
             raise ValueError(
                 "backend must be 'yolo', 'yoloworld', 'groundingdino', 'hybrid', or 'openvocab', "

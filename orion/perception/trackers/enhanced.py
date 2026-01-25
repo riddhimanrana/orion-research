@@ -15,7 +15,6 @@ import numpy as np
 from typing import List, Dict, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from collections import deque
-import cv2
 
 
 @dataclass
@@ -252,15 +251,15 @@ class EnhancedTracker:
         """
         if self.clip_model is None or embedding is None:
             return class_name, 1.0, "yolo_only"
-        
-        from sklearn.metrics.pairwise import cosine_similarity
+
+        # NOTE: We intentionally avoid importing scikit-learn here.
+        # On some deployment targets (e.g., server-side Python 3.12 with NumPy 2.x),
+        # compiled wheels can be ABI-incompatible and break imports.
+        # A simple NumPy cosine similarity is sufficient for these 1:1 comparisons.
         
         # Verify YOLO label
         yolo_text_emb = self.clip_model.encode_text(f"a photo of a {class_name}", normalize=True)
-        yolo_similarity = cosine_similarity(
-            embedding.reshape(1, -1),
-            yolo_text_emb.reshape(1, -1)
-        )[0][0]
+        yolo_similarity = float(self._cosine_similarity(embedding, yolo_text_emb))
         
         # If YOLO seems reasonable, use it
         if yolo_similarity > 0.28:
@@ -272,10 +271,7 @@ class EnhancedTracker:
         
         for category in self.workspace_categories:
             cat_text_emb = self.clip_model.encode_text(f"a photo of a {category}", normalize=True)
-            score = cosine_similarity(
-                embedding.reshape(1, -1),
-                cat_text_emb.reshape(1, -1)
-            )[0][0]
+            score = float(self._cosine_similarity(embedding, cat_text_emb))
             
             if score > best_score:
                 best_score = score

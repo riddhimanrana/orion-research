@@ -2,6 +2,10 @@
 
 This document outlines a **repeatable, non-overfit** way to stress-test Orion on a broad, real-world egocentric dataset (Ego4D) and then optionally run Gemini-based spot checks.
 
+For benchmark/task background, baseline repos, and a concrete mapping from Ego4D benchmarks → Orion modules, see:
+
+- `docs/EGO4D_BENCHMARK_RESEARCH.md`
+
 ## 0) Important constraints (read first)
 
 ### Dataset access & credentials

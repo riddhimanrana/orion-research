@@ -332,6 +332,15 @@ SUSPICIOUS_LABELS = {
         "common_confusions": ["window", "mirror", "picture frame", "dark opening", "doorway"],
         "min_confidence": 0.38,  # Often confused with windows/dark areas
     },
+    # NEW: Remote control - commonly hallucinated, needs strict filtering
+    "remote": {
+        "min_scene_similarity": 0.55,  # Requires scene similarity (must be in living room/tv context)
+        "requires_vlm_verification": True,  # Always verify with VLM
+        "vlm_check_keywords": ["remote control", "tv remote", "remote", "handheld control"],
+        "common_confusions": ["phone", "small object", "decoration", "picture", "handle", "knob"],
+        "min_confidence": 0.55,  # Very strict - remote is small and easily confused
+        "requires_surface": True,  # Must be detected on/near a surface (not floating)
+    },
 }
 
 # Semantic aliases for better matching
