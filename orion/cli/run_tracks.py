@@ -50,21 +50,15 @@ def process_video_to_tracks(
     video_path: str,
     episode_id: str,
     target_fps: float = 5.0,
-    yolo_model: str = "yolo11m",
     detector_backend: str = "dinov3",
-    yoloworld_open_vocab: bool = False,
-    yoloworld_prompt_preset: str | None = None,
-    yoloworld_prompt: str | None = None,
     gdino_model: str = "IDEA-Research/grounding-dino-tiny",
-    hybrid_min_detections: int = 3,
-    hybrid_always_verify: str | None = None,
-    hybrid_secondary_conf: float = 0.30,
     openvocab_proposer: str = "yoloworld_clip",
     openvocab_vocab: str = "lvis",
     openvocab_top_k: int = 5,
     confidence_threshold: float = 0.25,
     iou_threshold: float = 0.3,
     max_age: int = 30,
+    min_hits: int = 1,
     device: str = "auto",
     save_viz: bool = False,
     enable_hand_detector: bool = False,
@@ -74,6 +68,11 @@ def process_video_to_tracks(
     enable_3d: bool = False,
     depth_model_size: str = "small",
     disable_slam: bool = False,
+    enable_cis: bool = True,
+    cis_threshold: float = 0.50,
+    cis_compute_every: int = 5,
+    cis_depth_gate_mm: float = 2000.0,
+    **deprecated_kwargs: object,
 ) -> dict:
     """
     Process video through detection + tracking pipeline.
@@ -82,22 +81,31 @@ def process_video_to_tracks(
         video_path: Path to video file
         episode_id: Episode identifier for results
         target_fps: Target FPS for processing
-        yolo_model: YOLO variant to use
-        detector_backend: Detection backend ('yolo', 'yoloworld', 'groundingdino', 'hybrid', 'openvocab', 'dinov3')
-        gdino_model: GroundingDINO model ID when using groundingdino/hybrid
+        detector_backend: Detection backend ('dinov3', 'groundingdino', 'openvocab')
+        gdino_model: GroundingDINO model ID when using groundingdino/dinov3
         openvocab_proposer: OpenVocab proposer ('owl', 'yolo_clip', 'yoloworld_clip')
         openvocab_vocab: OpenVocab vocabulary preset ('lvis', 'coco', 'objects365')
         openvocab_top_k: Number of label hypotheses for openvocab backend
         confidence_threshold: Min detection confidence
         iou_threshold: Min IoU for track association
         max_age: Frames to keep unmatched tracks
+        min_hits: Min consecutive hits before a track is emitted
         device: Device to run on ('auto', 'cuda', 'mps', 'cpu')
         save_viz: Save visualization outputs
         enable_3d: Enable 3D perception (Depth/SLAM)
+        enable_cis: Enable CIS edge extraction
+        cis_threshold: Minimum CIS score to persist
+        cis_compute_every: Compute CIS every N frames
+        cis_depth_gate_mm: CIS depth gating threshold (mm)
 
     Returns:
         Dictionary with statistics
     """
+    if deprecated_kwargs:
+        logger.warning(
+            "Ignoring deprecated arguments in process_video_to_tracks: %s",
+            ", ".join(sorted(deprecated_kwargs.keys())),
+        )
     # Auto-detect device if needed
     if device == "auto":
         device = get_default_device()
@@ -120,42 +128,10 @@ def process_video_to_tracks(
     from orion.managers.model_manager import ModelManager
     
     # Initialize detector based on backend
-    yolo = None
-    yoloworld = None
     gdino = None
     gdino_processor = None
-    hybrid_detector = None
 
-    if detector_backend == "yolo":
-        from ultralytics import YOLO
-        logger.info(f"Loading YOLO model: {yolo_model}")
-        yolo = YOLO(f"{yolo_model}.pt")
-    elif detector_backend == "yoloworld":
-        from ultralytics import YOLO
-        # Get model from config (default: yolov8l-worldv2.pt)
-        det_config_temp = DetectionConfig(backend="yoloworld")
-        if yoloworld_prompt_preset:
-            det_config_temp.yoloworld_prompt_preset = str(yoloworld_prompt_preset)
-        if yoloworld_prompt:
-            det_config_temp.yoloworld_prompt_preset = "custom"
-            det_config_temp.yoloworld_prompt = yoloworld_prompt
-        yoloworld_model = det_config_temp.yoloworld_model
-        logger.info(f"Loading YOLO-World model: {yoloworld_model}")
-        yoloworld = YOLO(yoloworld_model)
-        
-        if yoloworld_open_vocab:
-            logger.info("  YOLO-World mode: default vocabulary (no set_classes)")
-        elif "custom" in yoloworld_model or "general" in yoloworld_model:
-            logger.info("  YOLO-World mode: using pre-baked custom/general vocabulary (skipping set_classes)")
-            # Verify classes match config if possible, but for now trust the file
-            logger.info(f"  Model classes: {yoloworld.names}")
-        else:
-            # Constrain YOLO-World to our configured prompt/categories
-            custom_classes = det_config_temp.yoloworld_categories()
-            logger.info(f"  Setting {len(custom_classes)} custom classes for open-vocab detection")
-            yoloworld.set_classes(custom_classes)
-
-    elif detector_backend == "groundingdino":
+    if detector_backend == "groundingdino":
         # GroundingDINO is loaded via ModelManager for consistent device placement.
         manager = ModelManager.get_instance()
         manager.device = device
@@ -176,48 +152,6 @@ def process_video_to_tracks(
             logger.warning(f"Failed to load GroundingDINO for dinov3 proposals: {e}")
             gdino = None
             gdino_processor = None
-
-    elif detector_backend == "hybrid":
-        from ultralytics import YOLO
-        from orion.perception.hybrid_detector import HybridDetector, HybridDetectorConfig
-        logger.info(f"Loading YOLO model (primary): {yolo_model}")
-        yolo = YOLO(f"{yolo_model}.pt")
-
-        manager = ModelManager.get_instance()
-        manager.device = device
-        manager.gdino_model_name = gdino_model
-        logger.info(f"Loading GroundingDINO model (secondary): {gdino_model} (device={device})")
-        gdino, gdino_processor = manager.gdino
-
-        # HybridDetectorConfig expects a python list for always_verify_classes; parse from CLI if provided.
-        always_verify_list = None
-        if hybrid_always_verify and str(hybrid_always_verify).strip():
-            always_verify_list = [c.strip() for c in str(hybrid_always_verify).split(",") if c.strip()]
-
-        hybrid_cfg = HybridDetectorConfig(
-            primary_backend="yolo",
-            primary_model=yolo_model,
-            primary_confidence=float(confidence_threshold),
-            secondary_backend="groundingdino",
-            secondary_model=gdino_model,
-            secondary_confidence=float(hybrid_secondary_conf),
-            min_detections_for_skip=int(hybrid_min_detections),
-            always_verify_classes=(always_verify_list if always_verify_list is not None else None) or [
-                "remote",
-                "clock",
-                "vase",
-                "scissors",
-                "toothbrush",
-            ],
-        )
-
-        hybrid_detector = HybridDetector(
-            config=hybrid_cfg,
-            yolo_model=yolo,
-            gdino_model=gdino,
-            gdino_processor=gdino_processor,
-            device=device,
-        )
 
     # OpenVocab pipeline (Propose → Label architecture)
     openvocab_pipeline = None
@@ -240,31 +174,23 @@ def process_video_to_tracks(
 
     det_config = DetectionConfig(
         backend=detector_backend,
-        model=yolo_model,
+        model=(gdino_model if detector_backend in {"groundingdino", "dinov3"} else DetectionConfig().model),
         confidence_threshold=confidence_threshold,
-        yoloworld_use_custom_classes=(False if yoloworld_open_vocab else True),
     )
-
-    if yoloworld_prompt_preset:
-        det_config.yoloworld_prompt_preset = str(yoloworld_prompt_preset)
     
     # Add openvocab-specific config fields
     if detector_backend == "openvocab":
         det_config.openvocab_proposer = openvocab_proposer
         det_config.openvocab_vocab_preset = openvocab_vocab
         det_config.openvocab_top_k = openvocab_top_k
-    if yoloworld_prompt:
-        det_config.yoloworld_prompt_preset = "custom"
-        det_config.yoloworld_prompt = yoloworld_prompt
-
     observer = FrameObserver(
         config=det_config,
         detector_backend=detector_backend,
-        yolo_model=yolo,
-        yoloworld_model=yoloworld,
+        yolo_model=None,
+        yoloworld_model=None,
         gdino_model=gdino,
         gdino_processor=gdino_processor,
-        hybrid_detector=hybrid_detector,
+        hybrid_detector=None,
         openvocab_pipeline=openvocab_pipeline,
         target_fps=target_fps,
         enable_3d=enable_3d,
@@ -279,6 +205,7 @@ def process_video_to_tracks(
     tracker = ObjectTracker(
         iou_threshold=iou_threshold,
         max_age=max_age,
+        min_hits=min_hits,
     )
     current_step += 1
 
@@ -315,6 +242,22 @@ def process_video_to_tracks(
             detections_by_frame[frame_id] = []
         detections_by_frame[frame_id].append(det)
     
+    # Optional CIS scorer
+    cis_scorer = None
+    cis_edges = []
+    if enable_cis:
+        try:
+            from orion.analysis.cis_scorer import CausalInfluenceScorer
+            cis_scorer = CausalInfluenceScorer(
+                cis_threshold=cis_threshold,
+                depth_gate_mm=cis_depth_gate_mm,
+                enable_depth_gating=True,
+            )
+            logger.info("  ✓ CIS scorer enabled")
+        except Exception as e:
+            logger.warning(f"CIS scorer unavailable: {e}")
+            cis_scorer = None
+
     # Track frame by frame
     all_tracks = []
     for frame_id in sorted(detections_by_frame.keys()):
@@ -328,6 +271,17 @@ def process_video_to_tracks(
             track_dict['frame_id'] = frame_id
             track_dict['timestamp'] = timestamp
             all_tracks.append(track_dict)
+        if cis_scorer is not None and tracked_dets and (frame_id % cis_compute_every == 0):
+            try:
+                cis_edges.extend(
+                    cis_scorer.compute_frame_edges(
+                        entities=tracked_dets,
+                        frame_id=frame_id,
+                        timestamp=timestamp,
+                    )
+                )
+            except Exception as e:
+                logger.warning(f"CIS computation failed at frame {frame_id}: {e}")
     current_step += 1
     
     # Save tracks
@@ -337,6 +291,12 @@ def process_video_to_tracks(
     # Save tracks.jsonl
     tracks_path = save_results_jsonl(episode_id, "tracks.jsonl", all_tracks)
     logger.info(f"  ✓ Saved {len(all_tracks)} track observations → {tracks_path}")
+
+    # Save CIS edges if available
+    cis_path = None
+    if cis_edges:
+        cis_path = save_results_jsonl(episode_id, "cis_edges.jsonl", cis_edges)
+        logger.info(f"  ✓ Saved {len(cis_edges)} CIS edges → {cis_path}")
     
     # Save run metadata
     tracker_stats = tracker.get_statistics()
@@ -344,22 +304,14 @@ def process_video_to_tracks(
         "backend": detector_backend,
         "confidence_threshold": confidence_threshold,
     }
-    if detector_backend == "yolo":
-        detector_info["model"] = yolo_model
-    elif detector_backend == "yoloworld":
-        detector_info["model"] = str(det_config.yoloworld_model)
-        detector_info["open_vocab"] = bool(yoloworld_open_vocab)
-        if yoloworld_prompt:
-            detector_info["prompt"] = yoloworld_prompt
-    elif detector_backend == "groundingdino":
+    if detector_backend == "groundingdino":
         detector_info["model"] = gdino_model
-    elif detector_backend == "hybrid":
-        detector_info["primary"] = {"backend": "yolo", "model": yolo_model, "conf": confidence_threshold}
-        detector_info["secondary"] = {"backend": "groundingdino", "model": gdino_model, "conf": hybrid_secondary_conf}
-        detector_info["hybrid"] = {
-            "min_detections": hybrid_min_detections,
-            "always_verify": hybrid_always_verify,
-        }
+    elif detector_backend == "dinov3":
+        detector_info["model"] = "dinov3"
+        detector_info["proposer"] = {"backend": "groundingdino", "model": gdino_model}
+    elif detector_backend == "openvocab":
+        detector_info["proposer"] = openvocab_proposer
+        detector_info["vocab"] = openvocab_vocab
     
     run_meta = {
         "episode_id": episode_id,
@@ -380,6 +332,15 @@ def process_video_to_tracks(
             "frames_processed": tracker_stats.get("frame_count", len(detections_by_frame)),
         }
     }
+    if enable_cis:
+        run_meta["cis"] = {
+            "enabled": cis_scorer is not None,
+            "threshold": cis_threshold,
+            "compute_every": cis_compute_every,
+            "depth_gate_mm": cis_depth_gate_mm,
+            "edges": len(cis_edges),
+            "path": str(cis_path) if cis_path else None,
+        }
     
     meta_path = results_dir / "run_metadata.json"
     with open(meta_path, 'w') as f:
@@ -427,68 +388,38 @@ def main():
         help="Target FPS for processing (default: 5.0)"
     )
     parser.add_argument(
-        "--model",
-        type=str,
-        default="yolo11m",
-        choices=["yolo11n", "yolo11s", "yolo11m", "yolo11x"],
-        help="YOLO model variant (default: yolo11m)"
-    )
-    parser.add_argument(
         "--detector-backend",
         type=str,
-        default="yoloworld",
-        choices=["yolo", "yoloworld", "groundingdino", "hybrid", "openvocab"],
-        help="Detection backend (default: yoloworld). 'openvocab' uses YOLO-World + CLIP for open-vocabulary detection."
+        default="dinov3",
+        choices=["dinov3", "groundingdino", "openvocab"],
+        help="Detection backend (default: dinov3). 'dinov3' uses GroundingDINO proposals + DINOv3 refinement."
     )
     parser.add_argument(
         "--gdino-model",
         type=str,
         default="IDEA-Research/grounding-dino-tiny",
         choices=["IDEA-Research/grounding-dino-tiny", "IDEA-Research/grounding-dino-base"],
-        help="GroundingDINO model ID (used for --detector-backend groundingdino|hybrid)",
+        help="GroundingDINO model ID (used for --detector-backend groundingdino|dinov3)",
     )
     parser.add_argument(
-        "--hybrid-min-detections",
+        "--openvocab-proposer",
+        type=str,
+        default="yoloworld_clip",
+        choices=["owl", "yolo_clip", "yoloworld_clip"],
+        help="OpenVocab proposer backend (default: yoloworld_clip)",
+    )
+    parser.add_argument(
+        "--openvocab-vocab",
+        type=str,
+        default="lvis",
+        choices=["lvis", "coco", "objects365"],
+        help="OpenVocab vocabulary preset (default: lvis)",
+    )
+    parser.add_argument(
+        "--openvocab-top-k",
         type=int,
-        default=3,
-        help="When using --detector-backend hybrid: if YOLO finds fewer than this many detections, trigger GroundingDINO (default: 3)",
-    )
-    parser.add_argument(
-        "--hybrid-always-verify",
-        type=str,
-        default=None,
-        help="When using --detector-backend hybrid: comma-separated class names to always verify with GroundingDINO (e.g. 'remote,clock,vase')",
-    )
-    parser.add_argument(
-        "--hybrid-secondary-conf",
-        type=float,
-        default=0.30,
-        help="When using --detector-backend hybrid: GroundingDINO confidence threshold (default: 0.30)",
-    )
-    parser.add_argument(
-        "--prompt-preset",
-        type=str,
-        default=None,
-        choices=["coco", "coarse", "indoor_full", "custom"],
-        help=(
-            "Prompt preset for YOLO-World *and* GroundingDINO category lists (default: config default). "
-            "If 'custom', you must also pass --yoloworld-prompt. "
-            "Note: for --detector-backend yoloworld with --yoloworld-open-vocab, this is ignored."
-        ),
-    )
-    parser.add_argument(
-        "--yoloworld-open-vocab",
-        action="store_true",
-        help="When using --detector-backend yoloworld, do NOT call set_classes(); run YOLO-World in open-vocab mode",
-    )
-    parser.add_argument(
-        "--yoloworld-prompt",
-        type=str,
-        default=None,
-        help=(
-            "Dot-separated prompt/classes for YOLO-World set_classes() (e.g. 'chair . table . lamp'). "
-            "Only used when --detector-backend yoloworld and --yoloworld-open-vocab is NOT set."
-        ),
+        default=5,
+        help="OpenVocab top-k label hypotheses (default: 5)",
     )
     parser.add_argument(
         "--conf-threshold",
@@ -507,6 +438,12 @@ def main():
         type=int,
         default=30,
         help="Max frames to keep unmatched tracks (default: 30)"
+    )
+    parser.add_argument(
+        "--min-hits",
+        type=int,
+        default=1,
+        help="Min consecutive hits before a track is emitted (default: 1)",
     )
     parser.add_argument(
         "--device",
@@ -561,12 +498,32 @@ def main():
         action="store_true",
         help="If --enable-3d is set, disable SLAM (keeps depth only; faster)",
     )
+    parser.add_argument(
+        "--disable-cis",
+        action="store_true",
+        help="Disable CIS edge extraction",
+    )
+    parser.add_argument(
+        "--cis-threshold",
+        type=float,
+        default=0.50,
+        help="Minimum CIS score to persist (default: 0.50)",
+    )
+    parser.add_argument(
+        "--cis-compute-every",
+        type=int,
+        default=5,
+        help="Compute CIS edges every N frames (default: 5)",
+    )
+    parser.add_argument(
+        "--cis-depth-gate-mm",
+        type=float,
+        default=2000.0,
+        help="Depth gating threshold in mm (default: 2000.0)",
+    )
     
     args = parser.parse_args()
 
-    if args.prompt_preset == "custom" and not args.yoloworld_prompt:
-        raise SystemExit("--prompt-preset custom requires --yoloworld-prompt")
-    
     # Determine video path
     if args.video:
         video_path = Path(args.video)
@@ -588,15 +545,11 @@ def main():
             video_path=str(video_path),
             episode_id=args.episode,
             target_fps=args.fps,
-            yolo_model=args.model,
             detector_backend=args.detector_backend,
-            yoloworld_open_vocab=args.yoloworld_open_vocab,
-            yoloworld_prompt_preset=args.prompt_preset,
-            yoloworld_prompt=args.yoloworld_prompt,
             gdino_model=args.gdino_model,
-            hybrid_min_detections=args.hybrid_min_detections,
-            hybrid_always_verify=args.hybrid_always_verify,
-            hybrid_secondary_conf=args.hybrid_secondary_conf,
+            openvocab_proposer=args.openvocab_proposer,
+            openvocab_vocab=args.openvocab_vocab,
+            openvocab_top_k=args.openvocab_top_k,
             enable_hand_detector=args.detect_hands,
             hand_max_hands=args.hand_max,
             hand_detection_confidence=args.hand_det_conf,
@@ -604,11 +557,16 @@ def main():
             confidence_threshold=args.conf_threshold,
             iou_threshold=args.iou_threshold,
             max_age=args.max_age,
+            min_hits=args.min_hits,
             device=args.device,
             save_viz=args.save_viz,
             enable_3d=args.enable_3d,
             depth_model_size=args.depth_model_size,
             disable_slam=args.disable_slam,
+            enable_cis=(not args.disable_cis),
+            cis_threshold=args.cis_threshold,
+            cis_compute_every=args.cis_compute_every,
+            cis_depth_gate_mm=args.cis_depth_gate_mm,
         )
     except Exception as e:
         logger.error(f"Pipeline failed: {e}", exc_info=True)

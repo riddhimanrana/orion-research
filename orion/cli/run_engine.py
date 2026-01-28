@@ -4,7 +4,7 @@ Run Perception Engine (v2)
 ===========================
 
 Full Phase 1 pipeline using PerceptionEngine with:
-- YOLO-World open-vocabulary detection + crop refinement
+- GroundingDINO proposals + DINOv3 refinement
 - FastVLM semantic verification (candidates_only mode)
 - V-JEPA2 embeddings for Re-ID
 - HDBSCAN entity clustering
@@ -15,8 +15,8 @@ Usage:
     python -m orion.cli.run_engine --video data/examples/test.mp4 --output results/engine_test
 
     # Full semantic verification pipeline
-    python -m orion.cli.run_engine --video data/examples/video.mp4 --output results/full_test \\
-        --enable-semantic-verifier --enable-crop-refinement
+    python -m orion.cli.run_engine --video data/examples/video.mp4 --output results/full_test \
+        --enable-semantic-verifier
 
     # Fast mode (no VLM, no crop refinement)
     python -m orion.cli.run_engine --video data/examples/test.mp4 --output results/fast_test --fast
@@ -82,22 +82,8 @@ def build_config(args: argparse.Namespace) -> tuple[PerceptionConfig, str]:
 
     # Detection backend
     config.detection.backend = args.detection_backend
-    if args.detection_backend == "yoloworld":
-        config.detection.yoloworld_model = args.yoloworld_model
-        config.detection.yoloworld_prompt_preset = args.yoloworld_prompt
-        # Candidate labels are a non-committal hypothesis layer that powers:
-        # - FastVLM semantic verification in `candidates_only` mode
-        # - richer overlays/debugging
-        # To avoid unexpected overhead, we only auto-enable them when semantic verification is enabled.
-        if args.disable_candidate_labels:
-            config.detection.yoloworld_enable_candidate_labels = False
-        else:
-            if bool(args.enable_semantic_verifier):
-                config.detection.yoloworld_enable_candidate_labels = True
-        # Crop refinement settings
-        config.detection.yoloworld_enable_crop_refinement = args.enable_crop_refinement
-        config.detection.yoloworld_refinement_every_n_sampled_frames = args.crop_refinement_every_n
-        config.detection.yoloworld_refinement_max_crops_per_class = args.crop_refinement_max_per_class
+    if args.detection_backend in {"groundingdino", "dinov3"}:
+        config.detection.model = args.gdino_model
 
     # Confidence threshold
     config.detection.confidence_threshold = args.confidence
@@ -118,6 +104,12 @@ def build_config(args: argparse.Namespace) -> tuple[PerceptionConfig, str]:
 
     # Sampling FPS
     config.target_fps = args.fps
+
+    # CIS settings
+    config.enable_cis = not args.disable_cis
+    config.cis_threshold = args.cis_threshold
+    config.cis_compute_every_n_frames = args.cis_compute_every
+    config.cis_depth_gate_mm = args.cis_depth_gate_mm
 
     return config, device
 
@@ -225,43 +217,18 @@ def main():
     parser.add_argument(
         "--detection-backend",
         type=str,
-        default="yoloworld",
-        choices=["yolo", "yoloworld", "openvocab"],
+        default="dinov3",
+        choices=["dinov3", "groundingdino", "openvocab"],
         help="Detection backend",
     )
     parser.add_argument(
-        "--yoloworld-model",
+        "--gdino-model",
         type=str,
-        default="yolov8l-worldv2.pt",
-        help="YOLO-World model file",
-    )
-    parser.add_argument(
-        "--yoloworld-prompt",
-        type=str,
-        default="coarse",
-        choices=["coarse", "coco", "indoor_full", "custom"],
-        help="YOLO-World prompt preset",
+        default="IDEA-Research/grounding-dino-tiny",
+        choices=["IDEA-Research/grounding-dino-tiny", "IDEA-Research/grounding-dino-base"],
+        help="GroundingDINO model ID (used for groundingdino|dinov3)",
     )
     parser.add_argument("--confidence", type=float, default=0.15, help="Detection confidence threshold")
-
-    # Crop refinement
-    parser.add_argument(
-        "--enable-crop-refinement",
-        action="store_true",
-        help="Enable YOLO-World crop-level refinement for fine-grained labels",
-    )
-    parser.add_argument(
-        "--crop-refinement-every-n",
-        type=int,
-        default=4,
-        help="Run crop refinement every N sampled frames",
-    )
-    parser.add_argument(
-        "--crop-refinement-max-per-class",
-        type=int,
-        default=3,
-        help="Max crops per class for refinement",
-    )
 
     # Semantic verifier (FastVLM)
     parser.add_argument(
@@ -289,15 +256,6 @@ def main():
         help="[DEPRECATED] Alias for --semantic-mode candidates_only",
     )
 
-    # Candidate labels (YOLO-World)
-    parser.add_argument(
-        "--disable-candidate-labels",
-        action="store_true",
-        help=(
-            "Disable CLIP-based candidate label hypotheses. "
-            "When semantic verification is enabled, candidate labels are auto-enabled unless you pass this flag."
-        ),
-    )
     parser.add_argument(
         "--rerank-blend",
         type=float,
@@ -317,6 +275,29 @@ def main():
         help="Compute device",
     )
     parser.add_argument("--fps", type=float, default=5.0, help="Target sample FPS")
+    parser.add_argument(
+        "--disable-cis",
+        action="store_true",
+        help="Disable CIS edge extraction",
+    )
+    parser.add_argument(
+        "--cis-threshold",
+        type=float,
+        default=0.50,
+        help="Minimum CIS score to persist (default: 0.50)",
+    )
+    parser.add_argument(
+        "--cis-compute-every",
+        type=int,
+        default=5,
+        help="Compute CIS edges every N frames (default: 5)",
+    )
+    parser.add_argument(
+        "--cis-depth-gate-mm",
+        type=float,
+        default=2000.0,
+        help="Depth gating threshold in mm (default: 2000.0)",
+    )
 
     # Visualization
     parser.add_argument(
@@ -350,10 +331,8 @@ def main():
     logger.info(f"Output: {output_dir}")
     logger.info(f"Device: {device}")
     logger.info(f"Backend: {config.detection.backend}")
-    if config.detection.backend == "yoloworld":
-        logger.info(f"  YOLO-World model: {config.detection.yoloworld_model}")
-        logger.info(f"  Prompt preset: {config.detection.yoloworld_prompt_preset}")
-        logger.info(f"  Crop refinement: {config.detection.yoloworld_enable_crop_refinement}")
+    if config.detection.backend in {"groundingdino", "dinov3"}:
+        logger.info(f"  GroundingDINO model: {config.detection.model}")
     logger.info(f"Semantic verifier: {config.semantic_verification.enabled}")
     logger.info(f"Tracking: {config.enable_tracking}")
     logger.info(f"Sample FPS: {config.target_fps}")
@@ -406,6 +385,16 @@ def main():
         json.dump(entities_data, f, indent=2)
     logger.info(f"  ✓ Saved {len(entities_data)} entities → {entities_path}")
 
+    # Save CIS edges if available
+    cis_edges = getattr(engine, "_cis_edges", [])
+    cis_path = output_dir / "cis_edges.jsonl"
+    if cis_edges:
+        with open(cis_path, "w") as f:
+            for edge in cis_edges:
+                payload = edge.to_dict() if hasattr(edge, "to_dict") else edge
+                f.write(json.dumps(payload) + "\n")
+        logger.info(f"  ✓ Saved {len(cis_edges)} CIS edges → {cis_path}")
+
     # Save run metadata
     meta_path = output_dir / "run_metadata.json"
     metadata = {
@@ -419,12 +408,13 @@ def main():
         "scene_caption": result.scene_caption,
         "config": {
             "detection_backend": config.detection.backend,
+            "gdino_model": (config.detection.model if config.detection.backend in {"groundingdino", "dinov3"} else None),
             "device": device,
             "target_fps": config.target_fps,
             "confidence_threshold": config.detection.confidence_threshold,
             "semantic_verifier_enabled": config.semantic_verification.enabled,
             "semantic_verifier_mode": config.semantic_verification.mode,
-            "crop_refinement": config.detection.yoloworld_enable_crop_refinement,
+            "cis_enabled": config.enable_cis,
         },
         "metrics": result.metrics,
     }

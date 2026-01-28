@@ -63,20 +63,15 @@ def _phase1(args: argparse.Namespace, video_path: Path, results_dir: Path) -> Di
         video_path=str(video_path),
         episode_id=args.episode,
         target_fps=args.fps,
-        yolo_model=args.yolo_model,
         detector_backend=args.detector_backend,
-        yoloworld_open_vocab=args.yoloworld_open_vocab,
-        yoloworld_prompt=args.yoloworld_prompt,
         gdino_model=args.gdino_model,
-        hybrid_min_detections=args.hybrid_min_detections,
-        hybrid_always_verify=args.hybrid_always_verify,
-        hybrid_secondary_conf=args.hybrid_secondary_conf,
-        openvocab_proposer=getattr(args, 'openvocab_proposer', 'yolo_clip'),
+        openvocab_proposer=getattr(args, 'openvocab_proposer', 'yoloworld_clip'),
         openvocab_vocab=getattr(args, 'openvocab_vocab', 'lvis'),
         openvocab_top_k=getattr(args, 'openvocab_top_k', 5),
         confidence_threshold=args.confidence,
         iou_threshold=args.iou,
         max_age=args.max_age,
+        min_hits=args.min_hits,
         device=args.device,
         save_viz=args.save_viz,
         enable_hand_detector=args.detect_hands,
@@ -84,6 +79,10 @@ def _phase1(args: argparse.Namespace, video_path: Path, results_dir: Path) -> Di
         hand_detection_confidence=args.hand_det_conf,
         hand_tracking_confidence=args.hand_track_conf,
         enable_3d=args.enable_3d,
+        enable_cis=(not args.disable_cis),
+        cis_threshold=args.cis_threshold,
+        cis_compute_every=args.cis_compute_every,
+        cis_depth_gate_mm=args.cis_depth_gate_mm,
     )
 
 
@@ -207,60 +206,29 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--episode", required=True, help="Episode ID for saving results")
     parser.add_argument("--video", help="Override video path (defaults to episode video)")
     parser.add_argument("--fps", type=float, default=4.0, help="Target FPS for detection sampling")
-    parser.add_argument("--yolo-model", default="yolo11m", choices=["yolo11n", "yolo11s", "yolo11m", "yolo11x"])
-
     # Detector backend selection (mirrors orion.cli.run_tracks)
     parser.add_argument(
         "--detector-backend",
         type=str,
-        default="yolo",
-        choices=["yolo", "yoloworld", "groundingdino", "hybrid", "openvocab"],
-        help="Detection backend for Phase 1 (default: yolo)",
+        default="dinov3",
+        choices=["dinov3", "groundingdino", "openvocab"],
+        help="Detection backend for Phase 1 (default: dinov3)",
     )
     parser.add_argument(
         "--gdino-model",
         type=str,
         default="IDEA-Research/grounding-dino-tiny",
         choices=["IDEA-Research/grounding-dino-tiny", "IDEA-Research/grounding-dino-base"],
-        help="GroundingDINO model ID (used for --detector-backend groundingdino|hybrid)",
-    )
-    parser.add_argument(
-        "--hybrid-min-detections",
-        type=int,
-        default=3,
-        help="When using --detector-backend hybrid: if YOLO finds fewer than this many detections, trigger GroundingDINO (default: 3)",
-    )
-    parser.add_argument(
-        "--hybrid-always-verify",
-        type=str,
-        default=None,
-        help="When using --detector-backend hybrid: comma-separated class names to always verify with GroundingDINO",
-    )
-    parser.add_argument(
-        "--hybrid-secondary-conf",
-        type=float,
-        default=0.30,
-        help="When using --detector-backend hybrid: GroundingDINO confidence threshold (default: 0.30)",
-    )
-    parser.add_argument(
-        "--yoloworld-open-vocab",
-        action="store_true",
-        help="When using --detector-backend yoloworld, do NOT call set_classes(); run YOLO-World in open-vocab mode",
-    )
-    parser.add_argument(
-        "--yoloworld-prompt",
-        type=str,
-        default=None,
-        help="Custom prompt/classes for YOLO-World set_classes() (dot-separated: 'chair . table . lamp')",
+        help="GroundingDINO model ID (used for --detector-backend groundingdino|dinov3)",
     )
     
     # OpenVocab backend settings (propose→label architecture)
     parser.add_argument(
         "--openvocab-proposer",
         type=str,
-        default="yolo_clip",
-        choices=["owl", "yolo_clip"],
-        help="OpenVocab proposer backend: owl (OWL-ViT2) or yolo_clip (YOLO+CLIP fallback)",
+        default="yoloworld_clip",
+        choices=["owl", "yolo_clip", "yoloworld_clip"],
+        help="OpenVocab proposer backend (default: yoloworld_clip)",
     )
     parser.add_argument(
         "--openvocab-vocab",
@@ -275,10 +243,39 @@ def build_parser() -> argparse.ArgumentParser:
         default=5,
         help="Number of label hypotheses per detection (openvocab backend)",
     )
+    parser.add_argument(
+        "--disable-cis",
+        action="store_true",
+        help="Disable CIS edge extraction",
+    )
+    parser.add_argument(
+        "--cis-threshold",
+        type=float,
+        default=0.50,
+        help="Minimum CIS score to persist (default: 0.50)",
+    )
+    parser.add_argument(
+        "--cis-compute-every",
+        type=int,
+        default=5,
+        help="Compute CIS edges every N frames (default: 5)",
+    )
+    parser.add_argument(
+        "--cis-depth-gate-mm",
+        type=float,
+        default=2000.0,
+        help="Depth gating threshold in mm (default: 2000.0)",
+    )
 
-    parser.add_argument("--confidence", type=float, default=0.25, help="YOLO confidence threshold")
+    parser.add_argument("--confidence", type=float, default=0.25, help="Detection confidence threshold")
     parser.add_argument("--iou", type=float, default=0.3, help="Tracker IoU threshold")
     parser.add_argument("--max-age", type=int, default=30, help="Tracker max age")
+    parser.add_argument(
+        "--min-hits",
+        type=int,
+        default=1,
+        help="Min consecutive hits before a track is emitted (default: 1)",
+    )
     # Default to auto so this works both on Apple Silicon (MPS) and Linux GPUs (CUDA)
     parser.add_argument("--device", default="auto", choices=["auto", "cuda", "mps", "cpu"])
     parser.add_argument("--save-viz", action="store_true", help="Persist detector debug outputs")

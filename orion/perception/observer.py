@@ -96,16 +96,16 @@ class FrameObserver:
         self.detector_backend = detector_backend
         self.yolo = yolo_model if detector_backend in {"yolo", "hybrid"} else None
         self.yoloworld = yoloworld_model if detector_backend == "yoloworld" else None
-        self.gdino = gdino_model if detector_backend in {"groundingdino", "hybrid"} else None
-        self.gdino_processor = gdino_processor if detector_backend in {"groundingdino", "hybrid"} else None
+        self.gdino = gdino_model if detector_backend in {"groundingdino", "hybrid", "dinov3"} else None
+        self.gdino_processor = gdino_processor if detector_backend in {"groundingdino", "hybrid", "dinov3"} else None
         # Allow dinov3 backend: proposals come from groundingdino/hybrid/yolo and
         # then DINOv3 is used to refine/classify proposals. We still accept gdino
         # and yolo models as constructor params; FrameObserver will prefer provided
         # gdino when available.
-        if detector_backend == "dinov3":
+        '''if detector_backend == "dinov3":
             # If the caller provided a grounding dino model, use it as proposer.
             # `self.gdino` and `self.gdino_processor` may already be set above.
-            pass
+            pass'''
         self.hybrid_detector = hybrid_detector if detector_backend == "hybrid" else None
         self.openvocab_pipeline = openvocab_pipeline if detector_backend == "openvocab" else None
 
@@ -120,6 +120,8 @@ class FrameObserver:
             raise ValueError("YOLO-World backend selected but yoloworld_model was not provided")
         if self.detector_backend == "groundingdino" and (self.gdino is None or self.gdino_processor is None):
             raise ValueError("GroundingDINO backend selected but model/processor was not provided")
+        if self.detector_backend == "dinov3" and (self.gdino is None or self.gdino_processor is None):
+            raise ValueError("DINOv3 backend requires GroundingDINO proposer (model/processor missing)")
         if self.detector_backend == "hybrid":
             if self.yolo is None:
                 raise ValueError("Hybrid backend selected but yolo_model was not provided")

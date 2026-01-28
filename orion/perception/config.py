@@ -90,10 +90,10 @@ class DetectionConfig:
     """
 
     # Model specific settings
-    model: str = "yolo11x"
-    """Model identifier. 
-    YOLO: 'yolo11n', 'yolo11s', 'yolo11m', 'yolo11x'
+    model: str = "IDEA-Research/grounding-dino-tiny"
+    """Model identifier.
     GroundingDINO: 'IDEA-Research/grounding-dino-tiny' or 'IDEA-Research/grounding-dino-base'
+    YOLO (legacy): 'yolo11n', 'yolo11s', 'yolo11m', 'yolo11x'
     """
 
     # Detection thresholds (shared)
@@ -292,9 +292,26 @@ class DetectionConfig:
             )
 
         # Model validation
-        valid_models = {"yolo11n", "yolo11s", "yolo11m", "yolo11x", "IDEA-Research/grounding-dino-tiny", "IDEA-Research/grounding-dino-base"}
-        if self.model not in valid_models:
-            logger.warning(f"Model {self.model} not in standard set. Proceeding anyway.")
+        valid_yolo = {"yolo11n", "yolo11s", "yolo11m", "yolo11x"}
+        valid_gdino = {"IDEA-Research/grounding-dino-tiny", "IDEA-Research/grounding-dino-base"}
+        if self.backend in {"yolo", "hybrid"}:
+            if self.model not in valid_yolo:
+                logger.warning(
+                    "DetectionConfig: backend=%s expects YOLO model, got %s",
+                    self.backend,
+                    self.model,
+                )
+        elif self.backend in {"groundingdino", "dinov3"}:
+            if self.model not in valid_gdino:
+                logger.warning(
+                    "DetectionConfig: backend=%s expects GroundingDINO model, got %s",
+                    self.backend,
+                    self.model,
+                )
+        else:
+            valid_models = valid_yolo | valid_gdino
+            if self.model not in valid_models:
+                logger.warning(f"Model {self.model} not in standard set. Proceeding anyway.")
 
         # Threshold validation
         if not (0 <= self.confidence_threshold <= 1):

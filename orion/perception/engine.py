@@ -169,8 +169,11 @@ class PerceptionEngine:
         
         # Model manager (lazy loading)
         self.model_manager = ModelManager.get_instance()
-        # Update YOLO model from config before it's loaded
-        self.model_manager.yolo_model_name = self.config.detection.model
+        # Update model names from config before they're loaded
+        if self.config.detection.backend in {"yolo", "hybrid"}:
+            self.model_manager.yolo_model_name = self.config.detection.model
+        if self.config.detection.backend in {"groundingdino", "dinov3"}:
+            self.model_manager.gdino_model_name = self.config.detection.model
         
         # Pipeline components (initialized lazily)
         self.observer: Optional[FrameObserver] = None
@@ -229,7 +232,7 @@ class PerceptionEngine:
         # Frame observer
         gdino_model = None
         gdino_processor = None
-        if self.config.detection.backend in {"groundingdino"} or use_hybrid:
+        if self.config.detection.backend in {"groundingdino", "dinov3"} or use_hybrid:
             gdino_model, gdino_processor = self.model_manager.gdino
 
         hybrid_detector = None

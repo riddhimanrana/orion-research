@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 _dino_model = None
 _dino_processor = None
 _sentence_model = None
+_scene_type_detector = None
+_dinov3_classifier_cache: Dict[str, "DINOv3Classifier"] = {}
 
 
 @dataclass
@@ -155,6 +157,24 @@ def get_sentence_model():
             return None
     
     return _sentence_model
+
+
+def get_scene_type_detector() -> "SceneTypeDetector":
+    """Return a cached SceneTypeDetector instance."""
+    global _scene_type_detector
+    if _scene_type_detector is None:
+        _scene_type_detector = SceneTypeDetector()
+    return _scene_type_detector
+
+
+def get_dinov3_classifier(device: str = "mps", scene_aware: bool = True) -> "DINOv3Classifier":
+    """Return a cached DINOv3Classifier for the requested device."""
+    cache_key = f"{device}:{'scene' if scene_aware else 'nosce'}"
+    cached = _dinov3_classifier_cache.get(cache_key)
+    if cached is None:
+        cached = DINOv3Classifier(device=device, scene_aware=scene_aware)
+        _dinov3_classifier_cache[cache_key] = cached
+    return cached
 
 
 class DINOv3Classifier:
@@ -608,14 +628,14 @@ def classify_detections_with_context(
         List of detections with refined classes
     """
     # Detect scene type
-    scene_detector = SceneTypeDetector()
+    scene_detector = get_scene_type_detector()
     detected_classes = [d.get("class_name", "") for d in detections]
     scene_type, scene_conf = scene_detector.detect_scene_type(detected_classes)
     
     logger.debug(f"Detected scene type: {scene_type} (confidence: {scene_conf:.2f})")
     
     # Classify detections
-    classifier = DINOv3Classifier(device=device, scene_aware=True)
+    classifier = get_dinov3_classifier(device=device, scene_aware=True)
     refined_detections = classifier.classify_frame_detections(frame, detections, scene_type)
     
     # Add scene info to each detection
