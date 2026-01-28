@@ -24,6 +24,10 @@ dependencies = [
     "numpy==1.26.4", "scikit-learn==1.2.2", "opencv-python>=4.8.0",
     "timm==1.0.15", "einops==0.6.1", "ultralytics==8.3.217",
     "hdbscan", "mediapipe>=0.10.14", "pillow>=10.0.0", "rich",
+    "tqdm", "omegaconf", "moviepy==1.0.3", "plyfile",
+    "huggingface-hub", "trimesh", "imageio", "open3d",
+    "requests", "typer", "safetensors", "pillow-heif",
+    "evo", "e3nn", "pycolmap",
     # Phase 1 additions
     "scipy>=1.10.0",  # For Hungarian algorithm in tracker
     "shapely>=2.0.0",  # For spatial zone geometry

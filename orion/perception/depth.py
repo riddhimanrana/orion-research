@@ -162,7 +162,11 @@ class DepthEstimator:
                 print(f"[DepthEstimator] ✗ Failed to download model weights: {e}")
                 raise e
 
-        model.load_state_dict(torch.load(weights_path, map_location=self.device))
+        try:
+            model.load_state_dict(torch.load(weights_path, map_location=self.device, weights_only=False))
+        except TypeError:
+            # Fallback for older torch versions that don't have weights_only
+            model.load_state_dict(torch.load(weights_path, map_location=self.device))
         
         return model
         
