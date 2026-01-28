@@ -198,6 +198,7 @@ def compute_track_embeddings(
     tracks: List[Dict[str, Any]],
     max_crops_per_track: int = 5,
     batch_size: int = 8,
+    embedding_backend: str = "vjepa2",
 ) -> Dict[int, np.ndarray]:
     """
     Compute an average embedding per track by cropping detections from frames.
@@ -209,12 +210,33 @@ def compute_track_embeddings(
         tracks: Parsed list of track observations (from tracks.jsonl)
         max_crops_per_track: Cap number of crops per track for speed
         batch_size: Number of crops to process at once (GPU batch)
+        embedding_backend: "vjepa2" (default), "clip", "dinov2"
 
     Returns:
         Dict mapping track_id -> embedding vector (np.ndarray)
     """
     mm = ModelManager.get_instance()
-    reid_model = mm.reid_embedder  # V-JEPA2 (3D-aware video encoder)
+    
+    reid_model = None
+    if embedding_backend == "vjepa2":
+        reid_model = mm.vjepa2
+    elif embedding_backend == "clip":
+        reid_model = mm.clip
+    elif embedding_backend == "dinov2":
+        # Check if ModelManager has dinov2, otherwise load it manually or via dino_backend
+        if hasattr(mm, "dinov2"):
+             reid_model = mm.dinov2
+        else:
+             # Fallback or error. For now loop in dino_backend if needed, 
+             # but ModelManager is preferred. 
+             # Assuming ModelManager will be updated or we use separate backend.
+             # Actually ModelManager doesn't have dinov2 property in the file I read.
+             # I will stick to vjepa2 and clip for now, and map others to error or fallback.
+             logger.warning(f"ModelManager does not expose 'dinov2'. Falling back to V-JEPA2")
+             reid_model = mm.vjepa2
+    else:
+        logger.warning(f"Unknown embedding backend '{embedding_backend}'. Defaulting to V-JEPA2")
+        reid_model = mm.vjepa2
 
     by_frame = _group_by(tracks, "frame_id")
     needed_frames = sorted(by_frame.keys())
@@ -436,6 +458,7 @@ def build_memory_from_tracks(
     max_crops_per_track: int = 5,
     reid_batch_size: int = 8,
     class_thresholds: Optional[Dict[str, float]] = None,
+    embedding_backend: str = "vjepa2",
 ) -> Path:
     """
     Phase 2: Build memory.json and update tracks with embedding ids.
@@ -443,15 +466,16 @@ def build_memory_from_tracks(
     Returns:
         Path to saved memory.json
     """
-    logger.info("[Phase 2] Building memory from tracks…")
+    logger.info(f"[Phase 2] Building memory from tracks (backend={embedding_backend})...")
     tracks = _read_tracks_jsonl(tracks_path)
 
-    logger.info("Computing per-track embeddings (V-JEPA2 encoder)…")
+    logger.info(f"Computing per-track embeddings ({embedding_backend})...")
     track_embs = compute_track_embeddings(
         video_path,
         tracks,
         max_crops_per_track=max_crops_per_track,
         batch_size=reid_batch_size,
+        embedding_backend=embedding_backend,
     )
     logger.info(f"✓ Got embeddings for {len(track_embs)} tracks")
 

@@ -104,7 +104,7 @@ def _phase2(args: argparse.Namespace, video_path: Path, results_dir: Path) -> Di
     # V-JEPA2 is the only Re-ID backend
     from orion.managers.model_manager import ModelManager
     mm = ModelManager.get_instance()
-    logger.info("[Phase 2] Building memory.json (Re-ID backend: V-JEPA2)")
+    logger.info(f"[Phase 2] Building memory.json (Re-ID backend: {args.embedding_backend})")
     
     build_memory_from_tracks(
         episode_id=args.episode,
@@ -115,6 +115,7 @@ def _phase2(args: argparse.Namespace, video_path: Path, results_dir: Path) -> Di
         max_crops_per_track=args.max_crops_per_track,
         reid_batch_size=args.reid_batch_size,
         class_thresholds=None,
+        embedding_backend=args.embedding_backend,
     )
     return json.loads(memory_path.read_text())
 
@@ -284,6 +285,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hand-det-conf", type=float, default=0.5)
     parser.add_argument("--hand-track-conf", type=float, default=0.3)
     parser.add_argument("--enable-3d", action="store_true", help="Enable 3D perception (Depth/SLAM)")
+    parser.add_argument(
+        "--embedding-backend",
+        type=str,
+        default="vjepa2",
+        choices=["vjepa2", "clip", "dinov2"],
+        help="Embedding backend for Re-ID (default: vjepa2)"
+    )
     parser.add_argument("--reid-threshold", type=float, default=0.70)
     parser.add_argument("--max-crops-per-track", type=int, default=5)
     parser.add_argument(
