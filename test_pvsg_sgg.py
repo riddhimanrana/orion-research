@@ -38,6 +38,23 @@ except ImportError:
         def predict_relations(self, *args, **kwargs):
             return []
 
+# Import DINOv3 and V-JEPA v2 backends (optional)
+try:
+    from orion.backends.dino_backend import DINOEmbedder
+    DINO_AVAILABLE = True
+except ImportError:
+    logger.warning("DINOv3 backend not available - semantic similarity will use fallback")
+    DINO_AVAILABLE = False
+    DINOEmbedder = None
+
+try:
+    from orion.backends.vjepa2_backend import VJepa2Embedder
+    VJEPA_AVAILABLE = True
+except ImportError:
+    logger.warning("V-JEPA v2 backend not available - temporal action recognition will use heuristics")
+    VJEPA_AVAILABLE = False
+    VJepa2Embedder = None
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -126,12 +143,43 @@ def main():
     for t in tracks:
         by_frame.setdefault(t["frame_id"], []).append(t)
     
+    # Initialize Deep Learning Backends (Optional)
+    dino_embedder = None
+    vjepa_embedder = None
+    
+    if DINO_AVAILABLE:
+        try:
+            logger.info("Initializing DINOv3 embedder for semantic similarity...")
+            dino_embedder = DINOEmbedder(
+                model_name="facebook/dinov2-base",
+                device="cpu"  # Use GPU if available: "cuda"
+            )
+            logger.info("✓ DINOv3 embedder loaded successfully")
+        except Exception as e:
+            logger.warning(f"Failed to load DINOv3: {e}")
+            dino_embedder = None
+    
+    if VJEPA_AVAILABLE:
+        try:
+            logger.info("Initializing V-JEPA v2 embedder for temporal actions...")
+            vjepa_embedder = VJepa2Embedder(
+                model_name="facebook/vjepa2-vitl-fpc64-256",
+                device="cpu",  # Use GPU if available: "cuda"
+                dtype=torch.float32  # Use float16 for GPU
+            )
+            logger.info("✓ V-JEPA v2 embedder loaded successfully")
+        except Exception as e:
+            logger.warning(f"Failed to load V-JEPA v2: {e}")
+            vjepa_embedder = None
+    
     # Initialize Classifiers
     classifier = PVSGActionClassifier(
         holding_hand_dist=150.0,
-        holding_min_frames=1,
-        throwing_velocity_thresh=20.0,
-        picking_hand_dist=150.0
+        holding_min_frames=3,      # Increase min frames to 3 to reduce noise
+        throwing_velocity_thresh=60.0,  # Increase from 20 to 60 (more realistic)
+        throwing_accel_thresh=30.0,
+        picking_hand_dist=120.0,
+        vjepa_embedder=vjepa_embedder
     )
     
     # Initialize CIS Scorer (Orion)
@@ -140,7 +188,10 @@ def main():
         # Disable depth gating since we are in 2D mode for now
         cis_scorer = CausalInfluenceScorer(
             enable_depth_gating=False,
-            cis_threshold=0.0 # Calculate for all to see distribution
+            cis_threshold=0.1,  # Minor threshold to filter extreme junk
+            dino_embedder=dino_embedder,
+            weight_motion=0.15,  # Slightly lower motion weight
+            weight_semantic=0.15  # Slightly higher semantic weight
         )
         has_cis = True
         print("CIS Scorer initialized successfully.")

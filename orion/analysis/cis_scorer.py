@@ -112,6 +112,7 @@ class CausalInfluenceScorer:
         cis_threshold: float = 0.50,
         depth_gate_mm: float = 200.0,  # 3D depth gating threshold (200mm = 20cm)
         enable_depth_gating: bool = True,  # Whether to apply depth gating
+        dino_embedder: Any = None,  # Optional DINOv3 embedder for semantic similarity
     ):
         self.weight_temporal = weight_temporal
         self.weight_spatial = weight_spatial
@@ -125,9 +126,13 @@ class CausalInfluenceScorer:
         self.cis_threshold = cis_threshold
         self.depth_gate_mm = depth_gate_mm
         self.enable_depth_gating = enable_depth_gating
+        self.dino_embedder = dino_embedder
         
         # Type compatibility table (heuristic)
         self.type_compatibility = self._build_type_compatibility()
+        
+        # Cache for visual embeddings (bbox_key -> embedding)
+        self._embedding_cache = {}
     
     def calculate_cis(
         self,
@@ -380,30 +385,49 @@ class CausalInfluenceScorer:
     def _semantic_score(self, agent: Any, patient: Any) -> float:
         """Semantic similarity + type compatibility.
         
-        Handles missing embeddings gracefully by using neutral score.
+        Uses DINOv3 visual embeddings if available, otherwise falls back to
+        existing embedding similarity or neutral score.
         """
-        # Embedding similarity
-        emb_sim = 0.5  # Neutral default when embeddings unavailable
+        # Visual similarity using DINOv3
+        emb_sim = 0.5  # Neutral default
         
-        agent_emb = getattr(agent, 'average_embedding', None)
-        patient_emb = getattr(patient, 'average_embedding', None)
-        
-        if agent_emb is not None and patient_emb is not None:
+        if self.dino_embedder is not None:
+            # Try to extract visual features using DINOv3
             try:
-                # Ensure numpy arrays
-                if not isinstance(agent_emb, np.ndarray):
-                    agent_emb = np.array(agent_emb)
-                if not isinstance(patient_emb, np.ndarray):
-                    patient_emb = np.array(patient_emb)
-                    
-                # Cosine similarity
-                dot = np.dot(agent_emb, patient_emb)
-                norm = np.linalg.norm(agent_emb) * np.linalg.norm(patient_emb)
-                if norm > 1e-6:
-                    emb_sim = (dot / norm + 1.0) / 2.0
+                agent_visual_emb = self._get_visual_embedding(agent)
+                patient_visual_emb = self._get_visual_embedding(patient)
+                
+                if agent_visual_emb is not None and patient_visual_emb is not None:
+                    # Cosine similarity between DINOv3 embeddings
+                    dot = np.dot(agent_visual_emb, patient_visual_emb)
+                    norm = np.linalg.norm(agent_visual_emb) * np.linalg.norm(patient_visual_emb)
+                    if norm > 1e-6:
+                        emb_sim = (dot / norm + 1.0) / 2.0  # Normalize to [0, 1]
             except Exception:
-                # Fall back to neutral on any error
-                emb_sim = 0.5
+                # Fall back to existing embedding logic
+                pass
+        
+        # Fallback to existing embedding similarity if DINOv3 not available or failed
+        if emb_sim == 0.5:
+            agent_emb = getattr(agent, 'average_embedding', None)
+            patient_emb = getattr(patient, 'average_embedding', None)
+            
+            if agent_emb is not None and patient_emb is not None:
+                try:
+                    # Ensure numpy arrays
+                    if not isinstance(agent_emb, np.ndarray):
+                        agent_emb = np.array(agent_emb)
+                    if not isinstance(patient_emb, np.ndarray):
+                        patient_emb = np.array(patient_emb)
+                        
+                    # Cosine similarity
+                    dot = np.dot(agent_emb, patient_emb)
+                    norm = np.linalg.norm(agent_emb) * np.linalg.norm(patient_emb)
+                    if norm > 1e-6:
+                        emb_sim = (dot / norm + 1.0) / 2.0
+                except Exception:
+                    # Fall back to neutral on any error
+                    emb_sim = 0.5
                 
         # Type compatibility
         agent_cls = str(getattr(agent, 'object_class', 'unknown'))
@@ -411,6 +435,50 @@ class CausalInfluenceScorer:
         type_compat = self._check_type_compatibility(agent_cls, patient_cls)
         
         return 0.6 * emb_sim + 0.4 * type_compat
+
+    def _get_visual_embedding(self, entity: Any) -> Optional[np.ndarray]:
+        """Extract visual embedding for an entity using DINOv3.
+        
+        Args:
+            entity: Detection object with bbox and frame_image attributes
+            
+        Returns:
+            DINOv3 embedding (normalized) or None if extraction fails
+        """
+        if self.dino_embedder is None:
+            return None
+            
+        # Check cache first
+        bbox = getattr(entity, 'bbox', None)
+        frame_id = getattr(entity, 'frame_id', None)
+        if bbox is not None and frame_id is not None:
+            cache_key = (frame_id, tuple(bbox))
+            if cache_key in self._embedding_cache:
+                return self._embedding_cache[cache_key]
+        
+        # Extract crop from frame
+        frame_image = getattr(entity, 'frame_image', None)
+        if frame_image is None or bbox is None:
+            return None
+            
+        try:
+            # Crop bbox region
+            x1, y1, x2, y2 = [int(v) for v in bbox]
+            crop = frame_image[y1:y2, x1:x2]
+            
+            if crop.size == 0:
+                return None
+                
+            # Encode with DINOv3
+            embedding = self.dino_embedder.encode_image(crop, normalize=True)
+            
+            # Cache result
+            if cache_key is not None:
+                self._embedding_cache[cache_key] = embedding
+                
+            return embedding
+        except Exception:
+            return None
 
     def _hand_bonus_3d(
         self,

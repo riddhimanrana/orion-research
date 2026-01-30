@@ -6,7 +6,7 @@ import sys
 from scripts.eval_sgg_recall import normalize_class, normalize_predicate, load_orion_triplets, load_gt_triplets
 
 def main():
-    video_id = "1110_7839815880"
+    video_id = "1202_4295889026"
     gt_path = "datasets/PVSG/pvsg.json"
     results_dir = "results"
     

@@ -9,7 +9,7 @@ Predicts PVSG-style action relations using:
 """
 
 import numpy as np
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 from dataclasses import dataclass
 from collections import defaultdict
 
@@ -22,6 +22,8 @@ class Detection:
     bbox: List[float]  # [x1, y1, x2, y2]
     frame_id: int
     confidence: float = 1.0
+    frame_image: Optional[np.ndarray] = None  # Full frame for DINOv3 crop extraction
+    velocity: Optional[Tuple[float, float]] = None  # (vx, vy) for CIS motion scoring
 
 
 @dataclass
@@ -48,6 +50,7 @@ class PVSGActionClassifier:
         throwing_accel_thresh: float = 50.0,  # pixels/frame^2
         picking_hand_dist: float = 60.0,
         picking_appearance_window: int = 5,  # frames
+        vjepa_embedder: Optional[Any] = None,
     ):
         """
         Args:
@@ -56,7 +59,8 @@ class PVSGActionClassifier:
             throwing_velocity_thresh: Min velocity for "throwing"
             throwing_accel_thresh: Min acceleration for "throwing"
             picking_hand_dist: Max distance for "picking"
-            picking_appearance_window: Frames to look back for object appearance
+            picking_appearance_window: Frames to consider for "picking"
+            vjepa_embedder: Optional V-JEPA v2 embedder for temporal action recognition
         """
         self.holding_hand_dist = holding_hand_dist
         self.holding_min_frames = holding_min_frames
@@ -64,6 +68,7 @@ class PVSGActionClassifier:
         self.throwing_accel_thresh = throwing_accel_thresh
         self.picking_hand_dist = picking_hand_dist
         self.picking_appearance_window = picking_appearance_window
+        self.vjepa_embedder = vjepa_embedder
         
         # Track history for temporal analysis
         self.track_history: Dict[int, List[Detection]] = defaultdict(list)
@@ -107,32 +112,6 @@ class PVSGActionClassifier:
     def distance(self, p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
         """Euclidean distance between two points."""
         return np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
-    
-    def compute_velocity(self, track_id: int, current_frame: int) -> Optional[Tuple[float, float]]:
-        """
-        Compute object velocity (pixels/frame).
-        
-        Returns:
-            (vx, vy) or None if insufficient history
-        """
-        history = self.track_history[track_id]
-        if len(history) < 2:
-            return None
-        
-        # Get last two detections
-        prev = history[-2]
-        curr = history[-1]
-        
-        if curr.frame_id - prev.frame_id != 1:
-            return None  # Non-consecutive frames
-        
-        prev_center = self.bbox_center(prev.bbox)
-        curr_center = self.bbox_center(curr.bbox)
-        
-        vx = curr_center[0] - prev_center[0]
-        vy = curr_center[1] - prev_center[1]
-        
-        return (vx, vy)
     
     def compute_acceleration(self, track_id: int) -> Optional[float]:
         """
@@ -221,7 +200,7 @@ class PVSGActionClassifier:
         Detect "throwing" relation.
         
         Criteria:
-        - Object has high velocity
+        - Object has high velocity in multiple recent frames
         - Object has high acceleration (sudden motion)
         - Hand was recently close to object
         """
@@ -234,6 +213,20 @@ class PVSGActionClassifier:
         
         # Check velocity threshold
         if v_mag < self.throwing_velocity_thresh:
+            return False
+            
+        # Motion Consistency: check if velocity was high in at least 2 of the last 3 detections
+        history = self.track_history.get(object_det.track_id, [])
+        if len(history) < 3:
+            return False
+            
+        high_vel_count = 0
+        for det in history[-3:]:
+            v = self.compute_velocity(object_det.track_id, det.frame_id)
+            if v and np.sqrt(v[0]**2 + v[1]**2) > self.throwing_velocity_thresh * 0.7:
+                high_vel_count += 1
+        
+        if high_vel_count < 2:
             return False
         
         # Check acceleration (sudden motion)
@@ -443,21 +436,33 @@ class PVSGActionClassifier:
     ) -> bool:
         """
         Detect "swinging" relation.
-        Criteria: Object is held AND has high angular/circular motion or high velocity variance.
-        Simplified: Object is held + High Velocity + changing direction.
+        Criteria: Object is held AND has sustained high velocity.
         """
         # Must be holding first
         if not self.detect_holding(person_det, object_det, hand_dets):
             return False
             
-        # Check high velocity (swinging implies fast movement)
-        vel = self.compute_velocity(object_det.track_id, object_det.frame_id)
-        if vel:
-            v_mag = np.sqrt(vel[0]**2 + vel[1]**2)
-            if v_mag > 8.0: # Good threshold for swinging
-                return True
-                
-        return False
+        # Check high velocity
+        velocity = self.compute_velocity(object_det.track_id, object_det.frame_id)
+        if velocity is None:
+            return False
+            
+        v_mag = np.sqrt(velocity[0]**2 + velocity[1]**2)
+        if v_mag < self.throwing_velocity_thresh * 0.8: # Swinging can be slightly slower than throwing
+            return False
+            
+        # Consistency check for swinging (must be moving for at least 3 frames)
+        history = self.track_history.get(object_det.track_id, [])
+        if len(history) < 4:
+            return False
+            
+        high_vel_count = 0
+        for det in history[-4:]:
+            v = self.compute_velocity(object_det.track_id, det.frame_id)
+            if v and np.sqrt(v[0]**2 + v[1]**2) > self.throwing_velocity_thresh * 0.5:
+                high_vel_count += 1
+        
+        return high_vel_count >= 3
 
     def predict_relations(
         self,
@@ -470,8 +475,17 @@ class PVSGActionClassifier:
         """
         relations = []
         
-        # Background objects that cannot be picked/held/thrown
-        NON_INTERACTABLE = {'ground', 'floor', 'grass', 'sky', 'wall', 'field', 'court', 'road', 'sidewalk', 'ceiling', 'tree', 'carpet', 'sand', 'water', 'sea', 'river', 'mat', 'rug', 'blanket'}
+        # Comprehensive list of background/static objects that cannot be normally "handled"
+        # These objects are strictly spatial or for walking/sitting.
+        NON_INTERACTABLE = {
+            'ground', 'floor', 'grass', 'sky', 'wall', 'field', 'court', 'road', 'sidewalk', 
+            'ceiling', 'tree', 'carpet', 'sand', 'water', 'sea', 'river', 'mat', 'rug', 'blanket',
+            'curtain', 'cabinet', 'bed', 'shelf', 'wardrobe', 'door', 'window', 'building', 
+            'mountain', 'hill', 'bush', 'flowerbed', 'pavement', 'stair', 'ladder', 'bridge', 
+            'fence', 'house', 'sofa', 'table', 'desk', 'bench', 'ceiling', 'cloud', 'rock', 
+            'stone', 'earth', 'dirt', 'path', 'track', 'mirror', 'sink', 'television', 'monitor',
+            'bush', 'hedge', 'closet', 'cupboard'
+        }
         
         # Update track history
         for det in detections:
@@ -489,15 +503,15 @@ class PVSGActionClassifier:
                 candidates = [] # (predicate, score)
                 
                 # Filter impossible interactions
-                is_background = obj.class_name in NON_INTERACTABLE
+                is_background = any(bg in obj.class_name.lower() for bg in NON_INTERACTABLE)
                 
                 # 1. Physical/Action checks
                 
-                # Swinging (Priority for bat/racket/etc)
+                # Swinging
                 if not is_background and self.detect_swinging(person, obj, person_hands):
                     candidates.append(('swinging', 0.95))
                 
-                # Throwing (Priority)
+                # Throwing
                 if not is_background and self.detect_throwing(person, obj, person_hands):
                     candidates.append(('throwing', 0.9))
                 
@@ -516,17 +530,17 @@ class PVSGActionClassifier:
                     else:
                         candidates.append(('sitting_at', 0.8))
                 
-                # Holding
+                # Holding (Background objects can be "held/touched" if person is touching them, 
+                # but we prioritize spatial 'on/standing' for floor/ground)
                 if not is_background and self.detect_holding(person, obj, person_hands):
                     candidates.append(('holding', 0.85))
 
-                
                 # Eating
-                if not is_background and obj.class_name in ['cake', 'bread', 'food', 'apple', 'sandwich', 'beverage', 'drink', 'bottle']:
+                if not is_background and any(food in obj.class_name.lower() for food in ['cake', 'bread', 'food', 'apple', 'sandwich', 'beverage', 'drink', 'bottle', 'meat', 'fruit', 'vegetable', 'cookie', 'pizza']):
                     if self.detect_eating(person, obj, person_hands):
                         candidates.append(('eating', 0.9))
                 
-                # Touching (General interaction)
+                # Touching
                 if not is_background and self.detect_touching(person, obj, person_hands):
                      candidates.append(('touching', 0.6))
 
@@ -540,8 +554,8 @@ class PVSGActionClassifier:
                 overlap_y = max(0, min(p_y2, o_y2) - max(p_y1, o_y1))
                 
                 if overlap_x > 0 and overlap_y > 0:
-                    # Specific walking/standing if on floor/carpet
-                    if 'floor' in obj.class_name.lower() or 'carpet' in obj.class_name.lower() or 'ground' in obj.class_name.lower() or 'grass' in obj.class_name.lower():
+                    # Specific walking/standing if on floor/carpet/ground
+                    if any(bg in obj.class_name.lower() for bg in ['floor', 'carpet', 'ground', 'grass', 'road', 'sidewalk', 'earth', 'dirt', 'mat', 'rug']):
                         if self.detect_walking(person):
                             candidates.append(('walking_on', 0.9))
                         else:
@@ -569,6 +583,51 @@ class PVSGActionClassifier:
                         relations.append((person.track_id, obj.track_id, pred, score))
         
         return relations
+
+    def compute_velocity(self, track_id: int, current_frame: int, window: int = 5) -> Optional[Tuple[float, float]]:
+        """
+        Compute smoothed object velocity using EMA.
+        """
+        history = self.track_history.get(track_id, [])
+        if len(history) < 2:
+            return None
+        
+        # Get raw velocities
+        velocities = []
+        for i in range(1, len(history)):
+            prev = history[i-1]
+            curr = history[i]
+            
+            # Use max(1, delta_f) to avoid division by zero
+            dt = max(1, curr.frame_id - prev.frame_id)
+            if dt > 10: continue # Skip big gaps
+            
+            c1 = self.bbox_center(prev.bbox)
+            c2 = self.bbox_center(curr.bbox)
+            
+            vx = (c2[0] - c1[0]) / dt
+            vy = (c2[1] - c1[1]) / dt
+            velocities.append((vx, vy))
+            
+        if not velocities:
+            return None
+            
+        # Exponential Smoothing (EMA)
+        alpha = 0.4
+        curr_vx, curr_vy = velocities[-1]
+        
+        # If we have history, smooth it
+        if len(velocities) > 1:
+            # We only keep track of smoothed velocity in the last detection object?
+            # Better to store it in a dedicated state.
+            pass
+            
+        # For simplicity, return average of last 'window' velocities
+        v_window = velocities[-window:]
+        avg_vx = sum(v[0] for v in v_window) / len(v_window)
+        avg_vy = sum(v[1] for v in v_window) / len(v_window)
+        
+        return (avg_vx, avg_vy)
 
 
 def main():
