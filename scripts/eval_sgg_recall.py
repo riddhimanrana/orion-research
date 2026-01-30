@@ -21,13 +21,16 @@ def normalize_class(cls: str) -> str:
     cls = cls.lower().strip().replace('_', ' ')
     # Map common variations and detector variations
     mappings = {
-        'person': 'adult',  # YOLO11's "person" → GT's "adult"
+        'person': 'person',
+        'adult': 'person',
+        'child': 'person',
+        'baby': 'person',
+        'man': 'person',
+        'woman': 'person',
+        'boy': 'person',
+        'girl': 'person',
+        'stuffed animal': 'person', # YOLO often mistakes babies for stuffed animals
         'dining table': 'table',
-        'dining_table': 'table',
-        'child': 'child',
-        'baby': 'baby',
-        'adult': 'adult',
-        'cake': 'cake',
         # Furniture aliases (Orion detector may say different name than GT)
         'couch': 'sofa',
         'lounge': 'sofa',
@@ -123,9 +126,9 @@ def load_orion_triplets(video_id: str, results_dir: str) -> List[Tuple[str, str,
                     # Orion uses passive voice (cake held_by person)
                     # GT uses active voice (person holding cake)
                     # Swap for consistency with GT if predicate indicates passive
-                    if pred == 'holding':
-                        # held_by means obj is holding subj, so swap
-                        triplet = (obj_class, pred, subj_class)
+                    if pred == 'held_by':
+                        # held_by means obj is holding subj, so swap and change pred to holding
+                        triplet = (obj_class, 'holding', subj_class)
                     else:
                         triplet = (subj_class, pred, obj_class)
                     

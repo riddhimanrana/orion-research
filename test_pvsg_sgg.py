@@ -1,10 +1,45 @@
+#!/usr/bin/env python3
+"""
+Test PVSG Scene Graph Generation with Improved Specificity
+"""
 
 import json
+import logging
 import math
 import argparse
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
+from dataclasses import asdict
+
 import numpy as np
+
+# Import the improved classifier
+try:
+    from orion.perception.pvsg_action_classifier import PVSGActionClassifier, Detection, HandDetection
+except ImportError:
+    # Fallback/Mock for local testing if orion not installed as package
+    print("WARNING: Could not import PVSGActionClassifier from orion.perception")
+    from typing import dataclass
+    
+    @dataclass
+    class Detection:
+        track_id: int
+        class_name: str
+        bbox: List[float]
+        frame_id: int
+        confidence: float = 1.0
+
+    @dataclass
+    class HandDetection:
+        bbox: List[float]
+        handedness: str = "unknown"
+
+    class PVSGActionClassifier:
+        def predict_relations(self, *args, **kwargs):
+            return []
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # PVSG Relation Vocabulary (index 0 to 56)
 PVSG_PREDICATES = [
@@ -22,228 +57,153 @@ def load_jsonl(path: Path) -> List[Dict[str, Any]]:
     with open(path, "r") as f:
         return [json.loads(line) for line in f if line.strip()]
 
-def get_depth(track: Dict[str, Any]) -> float:
-    # Try different fields
-    d = track.get("depth_mm", 0.0)
-    if d > 0: return d
-    b3d = track.get("bbox_3d")
-    if b3d and len(b3d) >= 3:
-        return b3d[2] # Z
-    return 0.0
-
-def get_centroid_3d(track: Dict[str, Any]) -> Tuple[float, float, float]:
-    # If explicit centroid_3d_mm exists
-    c = track.get("centroid_3d_mm")
-    if c: return tuple(c)
-    # Or from bbox_3d
-    b3d = track.get("bbox_3d")
-    if b3d and len(b3d) >= 3:
-        return (b3d[0], b3d[1], b3d[2])
-    # Fallback to 2D
-    b2d = track.get("bbox")
-    if b2d:
-        cx, cy = (b2d[0]+b2d[2])/2, (b2d[1]+b2d[3])/2
-        return (cx, cy, get_depth(track))
-    return (0,0,0)
-
-def iou(a: List[float], b: List[float]) -> float:
-    x1 = max(a[0], b[0])
-    y1 = max(a[1], b[1])
-    x2 = min(a[2], b[2])
-    y2 = min(a[3], b[3])
-    inter = max(0, x2-x1) * max(0, y2-y1)
-    area_a = (a[2]-a[0])*(a[3]-a[1])
-    area_b = (b[2]-b[0])*(b[3]-b[1])
-    union = area_a + area_b - inter + 1e-6
-    return inter / union
-
-def relation_classifier(sub: Dict, obj: Dict, frame_w: int, frame_h: int) -> List[Tuple[str, float]]:
-    """Heuristic classifier for PVSG relations."""
-    rels = []
+def estimate_hands_from_person(person_bbox: List[float]) -> List[HandDetection]:
+    """
+    Estimate hand positions from person bbox.
+    """
+    x1, y1, x2, y2 = person_bbox
+    width = x2 - x1
+    height = y2 - y1
     
-    s_cls = sub.get("category", sub.get("class_name", "object")).lower()
-    o_cls = obj.get("category", obj.get("class_name", "object")).lower()
+    # Estimate left and right hand positions
+    # Hands are typically at ~50-70% height depending on pose
+    hand_y = y1 + height * 0.6
+    hand_size = width * 0.2
     
-    s_box = sub.get("bbox")
-    o_box = obj.get("bbox")
+    left_hand = HandDetection(
+        bbox=[
+            x1,
+            hand_y - hand_size/2,
+            x1 + hand_size,
+            hand_y + hand_size/2
+        ],
+        handedness="left"
+    )
     
-    if not s_box or not o_box:
-        return []
-
-    # 3D info
-    s_z = get_depth(sub)
-    o_z = get_depth(obj)
-    s_pos = get_centroid_3d(sub)
-    o_pos = get_centroid_3d(obj)
+    right_hand = HandDetection(
+        bbox=[
+            x2 - hand_size,
+            hand_y - hand_size/2,
+            x2,
+            hand_y + hand_size/2
+        ],
+        handedness="right"
+    )
     
-    # Simple geometry
-    dist_2d = math.hypot((s_box[0]+s_box[2])/2 - (o_box[0]+o_box[2])/2, 
-                         (s_box[1]+s_box[3])/2 - (o_box[1]+o_box[3])/2)
-    diag = math.hypot(frame_w, frame_h)
-    norm_dist = dist_2d / diag
-    
-    depth_diff = abs(s_z - o_z)
-    has_depth = (s_z > 0 and o_z > 0)
-    
-    # 1. SPATIAL (on, next to, etc)
-    
-    # "on" / "sitting on" / "standing on" / "lying on" / "riding"
-    # Subject center Y < Object center Y (subject is higher, assuming Y down) NO wait Y is down.
-    # Subject center Y < Object center y means subject is ABOVE object visually?
-    # Actually "on" means subject max Y is near object min Y?
-    # Or subject bottom is near object top. 
-    # Y axis usually points DOWN in images. So Top is 0.
-    # Subject ON Object -> Subject Bottom (Max Y) approx Object Top (Min Y).
-    # Or Subject Bottom <= Object Bottom and overlapping horizontally.
-    
-    s_bottom = s_box[3]
-    o_top = o_box[1]
-    o_bottom = o_box[3]
-    
-    h_overlap = min(s_box[2], o_box[2]) - max(s_box[0], o_box[0])
-    h_union = max(s_box[2], o_box[2]) - min(s_box[0], o_box[0])
-    h_iou = h_overlap / h_union if h_union > 0 else 0
-    
-    is_vertically_aligned = h_iou > 0.3
-    is_above = (s_bottom < o_bottom) and abs(s_bottom - o_top) < (frame_h * 0.05)
-    
-    # Check simple "on"
-    if is_vertically_aligned and s_bottom <= o_bottom:
-        # Refine "on"
-        pred = "on"
-        if s_cls == "person":
-            if o_cls in ["chair", "couch", "sofa", "bench", "stool", "bed"]:
-                pred = "sitting on"
-            elif o_cls in ["ground", "floor", "grass", "road", "pavement"]:
-                # Could be standing or walking or sitting
-                # Use aspect ratio?
-                w = s_box[2]-s_box[0]
-                h = s_box[3]-s_box[1]
-                if h < w: pred = "lying on"
-                else: pred = "standing on"
-            elif o_cls in ["horse", "bike", "bicycle", "motorcycle", "car", "bus"]:
-                pred = "riding"
-            elif o_cls in ["table", "desk"]:
-                 # sitting on table? or just on
-                 pred = "on"
-            else:
-                 pred = "standing on" # Default person on object
-        
-        rels.append((pred, 0.8))
-        
-        if pred == "sitting on":
-             if o_cls == "bed": rels.append(("lying on", 0.6))
-
-    # "holding" / "carrying"
-    # If person and small object, and high overlap
-    interaction_iou = iou(s_box, o_box)
-    if s_cls == "person" and o_cls != "person" and interaction_iou > 0.1:
-        # Check geometric containment or proximity
-        # Simple heuristic: object center is within person box
-        o_cx, o_cy = (o_box[0]+o_box[2])/2, (o_box[1]+o_box[3])/2
-        if s_box[0] < o_cx < s_box[2] and s_box[1] < o_cy < s_box[3]:
-             rels.append(("holding", 0.7))
-             rels.append(("carrying", 0.6))
-             rels.append(("touching", 0.9))
-
-    # "next to" / "beside"
-    if norm_dist < 0.15 and not is_vertically_aligned:
-        # Check depth consistency
-        if has_depth and depth_diff < 500: # 500mm tolerance
-             rels.append(("next to", 0.8))
-             rels.append(("beside", 0.8))
-        elif not has_depth:
-             rels.append(("next to", 0.6))
-
-    # "in front of" / "behind" (PVSG only has "in front of")
-    # 3D check: large overlap 2D, but Z differs
-    if interaction_iou > 0.5 and has_depth:
-        if s_z < o_z - 300: # Subject is closer (smaller Z)
-             rels.append(("in front of", 0.8))
-    
-    # "looking at"
-    # Cone of view check? 
-    # Heuristic: person head (top 20%) -> object vector
-    if s_cls == "person":
-        # Estimate head position
-        head_x = (s_box[0]+s_box[2])/2
-        head_y = s_box[1] + (s_box[3]-s_box[1])*0.15
-        
-        vec_x = o_pos[0] - head_x
-        vec_y = o_pos[1] - head_y
-        # If object is somewhat in front (assuming person faces 'forward'?)
-        # Without pose, assume objects in front/center are looked at
-        rels.append(("looking at", 0.3)) # Low confidence default
-
-    return rels
+    return [left_hand, right_hand]
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--tracks", required=True)
-    parser.add_argument("--out", default="pvsg_relations.jsonl")
+    parser.add_argument("--tracks", required=True, help="Path to tracks.jsonl")
+    parser.add_argument("--out", default="pvsg_relations.jsonl", help="Output path")
+    parser.add_argument("--video_id", default=None, help="Explicit video ID. If not provided, inferred from path.")
     args = parser.parse_args()
     
-    tracks = load_jsonl(Path(args.tracks))
+    tracks_path = Path(args.tracks)
+    if not tracks_path.exists():
+        print(f"Error: Tracks file not found: {tracks_path}")
+        return
+
+    # Infer Video ID
+    video_id = args.video_id
+    if not video_id:
+        # Try parent directory name
+        # e.g. results/pvsg_batch_1_100/0001_4164158586/tracks.jsonl -> 0001_4164158586
+        parent_name = tracks_path.parent.name
+        # Simple heuristic: check if it looks like a PVSG ID (digits_digits)
+        if "_" in parent_name and any(c.isdigit() for c in parent_name):
+            video_id = parent_name
+        else:
+            video_id = "test_video"
+            print(f"Warning: Could not infer video_id from path {tracks_path}, using '{video_id}'")
+    
+    print(f"Processing tracks for video_id: {video_id}")
+    
+    tracks = load_jsonl(tracks_path)
     
     # Group by frame
     by_frame = {}
     for t in tracks:
         by_frame.setdefault(t["frame_id"], []).append(t)
     
+    # Initialize Classifier
+    classifier = PVSGActionClassifier(
+        holding_hand_dist=150.0,
+        holding_min_frames=1,
+        throwing_velocity_thresh=20.0,
+        picking_hand_dist=150.0
+    )
+    
     results = []
     
-    # Assume fixed resolution for simplicity or read from track
-    W, H = 1920, 1080 # default
-    if tracks:
-         # Try to guess from tracks? No field 'frame_width' in standard tracks.jsonl usually
-         # but build_scene_graphs heuristic usually has it.
-         pass
-
     print(f"Processing {len(by_frame)} frames...")
     
-    count = 0
     for fid, frame_tracks in sorted(by_frame.items()):
-        n = len(frame_tracks)
-        for i in range(n):
-            for j in range(n):
-                if i == j: continue
-                
-                sub = frame_tracks[i]
-                obj = frame_tracks[j]
-                
-                # Predict
-                preds = relation_classifier(sub, obj, W, H)
-                
-                for pred, conf in preds:
-                    if pred not in PVSG_PREDICATES:
-                        continue # Should not happen if heuristic matches list
-                    
-                    res = {
-                        "video_id": "test_vidor", # Placeholder
-                        "frame_id": fid,
-                        "subject_id": sub["track_id"],
-                        "object_id": obj["track_id"],
-                        "subject_class": sub.get("class_name"),
-                        "object_class": obj.get("class_name"),
-                        "predicate": pred,
-                        "confidence": conf,
-                        "pvsg_id": PVSG_PREDICATES.index(pred)
-                    }
-                    results.append(res)
-                    count += 1
-    
-    print(f"Generated {count} relations.")
-    
-    # Summary
-    counts = {}
-    for r in results:
-        p = r["predicate"]
-        counts[p] = counts.get(p, 0) + 1
-    
-    print("\nPredicate Counts:")
-    for p, c in sorted(counts.items(), key=lambda x: -x[1]):
-        print(f"  {p}: {c}")
-    
+        # Convert tracks to Detections
+        detections = []
+        hand_detections = {}
+        
+        for t in frame_tracks:
+            # Handle potential missing confidence
+            conf = t.get("confidence", 1.0)
+            
+            # Create Detection
+            det = Detection(
+                track_id=t.get("track_id", t.get("id")), # Fallback to 'id' if 'track_id' missing
+                class_name=t.get("category", t.get("class_name", t.get("label", "object"))),
+                bbox=t["bbox"],
+                frame_id=fid,
+                confidence=conf
+            )
+            detections.append(det)
+            
+            # Generate estimated hands for people
+            if det.class_name in ['person', 'adult', 'child', 'man', 'woman']:
+                hands = estimate_hands_from_person(det.bbox)
+                hand_detections[det.track_id] = hands
+        
+        # Predict
+        relations = classifier.predict_relations(detections, hand_detections, fid)
+        
+        # Format results as Scene Graph (nodes + edges)
+        nodes = []
+        edges = []
+        
+        # Add all detections as nodes
+        for det in detections:
+            nodes.append({
+                "memory_id": str(det.track_id),
+                "class": det.class_name,
+                "bbox": det.bbox,
+                "confidence": det.confidence
+            })
+            
+        # Add relations as edges
+        for subj_id, obj_id, pred, conf in relations:
+            pvsg_pred = pred.replace("_", " ")
+            
+            # Map predicates
+            if pvsg_pred not in PVSG_PREDICATES:
+                 if pvsg_pred == "sitting at": pvsg_pred = "sitting on"
+                 elif pred == "near": pvsg_pred = "next to"
+                 else: continue
+            
+            edges.append({
+                "subject": str(subj_id),
+                "object": str(obj_id),
+                "relation": pvsg_pred,
+                "confidence": conf
+            })
+            
+        results.append({
+            "video_id": video_id,
+            "frame_id": fid,
+            "nodes": nodes,
+            "edges": edges
+        })
+            
+    print(f"Generated graphs for {len(results)} frames.")
+        
     with open(args.out, "w") as f:
         for r in results:
             f.write(json.dumps(r) + "\n")

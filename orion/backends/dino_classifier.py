@@ -98,6 +98,19 @@ FINE_GRAINED_LABELS = {
         "office": ["coffee mug", "cup"],
         "default": ["cup", "mug"],
     },
+    "ball": {
+        "default": ["ball", "sports ball", "toy ball", "soccer ball", "basketball", "tennis ball"],
+    },
+    "toy": {
+        "default": ["toy", "teddy bear", "stuffed animal", "doll", "action figure"],
+    },
+    "bag": {
+        "default": ["bag", "backpack", "handbag", "purse", "tote bag", "shopping bag"],
+    },
+    "bowl": {
+        "kitchen": ["bowl", "mixing bowl", "serving bowl", "cereal bowl"],
+        "default": ["bowl", "dish"],
+    },
 }
 
 
