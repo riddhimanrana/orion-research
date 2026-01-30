@@ -126,7 +126,7 @@ def main():
     for t in tracks:
         by_frame.setdefault(t["frame_id"], []).append(t)
     
-    # Initialize Classifier
+    # Initialize Classifiers
     classifier = PVSGActionClassifier(
         holding_hand_dist=150.0,
         holding_min_frames=1,
@@ -134,36 +134,75 @@ def main():
         picking_hand_dist=150.0
     )
     
+    # Initialize CIS Scorer (Orion)
+    try:
+        from orion.analysis.cis_scorer import CausalInfluenceScorer
+        # Disable depth gating since we are in 2D mode for now
+        cis_scorer = CausalInfluenceScorer(
+            enable_depth_gating=False,
+            cis_threshold=0.0 # Calculate for all to see distribution
+        )
+        has_cis = True
+        print("CIS Scorer initialized successfully.")
+    except ImportError:
+        print("WARNING: Could not import CausalInfluenceScorer. CIS scores will be 0.0.")
+        cis_scorer = None
+        has_cis = False
+    
     results = []
     
     print(f"Processing {len(by_frame)} frames...")
     
-    for fid, frame_tracks in sorted(by_frame.items()):
+    # Track velocities for CIS (using PVSG classifier's tracker)
+    # Process frames strictly in order
+    sorted_frames = sorted(by_frame.items())
+    
+    for fid, frame_tracks in sorted_frames:
         # Convert tracks to Detections
         detections = []
         hand_detections = {}
         
+        # Map for CIS entity lookup
+        det_map = {}
+        
         for t in frame_tracks:
             # Handle potential missing confidence
             conf = t.get("confidence", 1.0)
+            track_id = t.get("track_id", t.get("id"))
             
             # Create Detection
             det = Detection(
-                track_id=t.get("track_id", t.get("id")), # Fallback to 'id' if 'track_id' missing
+                track_id=track_id,
                 class_name=t.get("category", t.get("class_name", t.get("label", "object"))),
                 bbox=t["bbox"],
                 frame_id=fid,
                 confidence=conf
             )
+            
+            # Pre-compute velocity using PVSGClassifier's history logic
+            # (We need to update history first in the loop below, but let's do it consistent with flow)
             detections.append(det)
+            det_map[track_id] = det
             
             # Generate estimated hands for people
-            if det.class_name in ['person', 'adult', 'child', 'man', 'woman']:
+            if det.class_name in ['person', 'adult', 'child', 'man', 'woman', 'boy', 'girl', 'stuffed animal']:
                 hands = estimate_hands_from_person(det.bbox)
                 hand_detections[det.track_id] = hands
         
-        # Predict
+        # 1. Predict PVSG Relations
+        # This returns candidates. Use a larger top-k internally in classifier or just take all.
+        # Ideally we'd modify classifier to return more, but for now we take the top-5 it gives.
         relations = classifier.predict_relations(detections, hand_detections, fid)
+        
+        # 2. Enrich with attributes needed for CIS (Velocity)
+        if has_cis:
+            for det in detections:
+                vel = classifier.compute_velocity(det.track_id, fid)
+                if vel:
+                    det.velocity = [vel[0], vel[1]]
+                else:
+                    det.velocity = [0.0, 0.0]
+                det.object_class = det.class_name
         
         # Format results as Scene Graph (nodes + edges)
         nodes = []
@@ -178,22 +217,97 @@ def main():
                 "confidence": det.confidence
             })
             
-        # Add relations as edges
-        for subj_id, obj_id, pred, conf in relations:
+        # 3. RE-RANKING LOGIC: Combine Action Score + CIS Score
+        scored_edges = []
+        
+        for subj_id, obj_id, pred, action_score in relations:
             pvsg_pred = pred.replace("_", " ")
             
             # Map predicates
             if pvsg_pred not in PVSG_PREDICATES:
                  if pvsg_pred == "sitting at": pvsg_pred = "sitting on"
                  elif pred == "near": pvsg_pred = "next to"
+                 elif pred == "touching": pvsg_pred = "touching"
+                 elif pred == "eating": pvsg_pred = "eating"
+                 elif pred == "swinging": pvsg_pred = "swinging"
                  else: continue
             
-            edges.append({
+            # Calculate CIS Score
+            cis_score = 0.0
+            cis_info = {}
+            if has_cis:
+                subj = det_map.get(subj_id)
+                obj = det_map.get(obj_id)
+                if subj and obj:
+                    score, components = cis_scorer.calculate_cis(
+                        agent_entity=subj,
+                        patient_entity=obj,
+                        time_delta=0.033
+                    )
+                    cis_score = score
+                    cis_info = {
+                        "temporal": components.temporal,
+                        "spatial": components.spatial,
+                        "motion": components.motion,
+                        "semantic": components.semantic
+                    }
+            
+            # Final Score Fusion
+            # Action Score (0.8-0.9 usually) + CIS Score (0.0-1.0)
+            # We enforce CIS as a validator for physical interaction predicates
+            if pred in ['picking', 'holding', 'touching', 'eating', 'swinging']:
+                # Physcial relations need decent CIS
+                # Boost if CIS is high, penalize if low
+                final_score = action_score * (0.5 + 0.5 * cis_score)
+            else:
+                # Spatial predicates (on, next to) rely less on motion/interaction CIS (except spatial component)
+                final_score = action_score
+                
+            scored_edges.append({
                 "subject": str(subj_id),
                 "object": str(obj_id),
                 "relation": pvsg_pred,
-                "confidence": conf
+                "confidence": round(final_score, 3), # Use fused score
+                "raw_action_score": action_score,
+                "cis_score": round(cis_score, 3),
+                "cis_components": cis_info
             })
+            
+        # Filter and optimize edges generally
+        
+        # 4. SPECIFICITY FILTERING (Deduplication)
+        # If a subject has specific spatial relation (grass, carpet), remove generic (ground, floor)
+        # Group by subject
+        subj_spatial = {} # subj_id -> list of (obj_name, index)
+        for i, e in enumerate(scored_edges):
+            if e['relation'] in ['walking on', 'standing on', 'on']:
+                # Find obj class
+                obj_id = e['object']
+                obj_det = det_map.get(int(obj_id))
+                if obj_det:
+                    subj = e['subject']
+                    if subj not in subj_spatial: subj_spatial[subj] = []
+                    subj_spatial[subj].append((obj_det.class_name, i))
+        
+        indices_to_remove = set()
+        for subj, items in subj_spatial.items():
+            classes = [x[0] for x in items]
+            has_specific = any(c in ['grass', 'carpet', 'mat', 'road', 'sidewalk', 'field'] for c in classes)
+            if has_specific:
+                # Remove generic 'ground', 'floor'
+                for cls_name, idx in items:
+                    if cls_name in ['ground', 'floor', 'earth']:
+                        indices_to_remove.add(idx)
+                        
+        final_edges = []
+        for i, e in enumerate(scored_edges):
+            if i in indices_to_remove:
+                continue
+            if e["confidence"] > 0.1:
+                final_edges.append(e)
+        
+        # Add to results
+        edges.extend(final_edges)
             
         results.append({
             "video_id": video_id,

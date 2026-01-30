@@ -372,6 +372,93 @@ class PVSGActionClassifier:
                 return True
         return True # Default assume standing if no motion info
 
+    def detect_eating(
+        self,
+        person_det: Detection,
+        object_det: Detection,
+        hand_dets: List[HandDetection]
+    ) -> bool:
+        """
+        Detect "eating" relation.
+        Criteria: Object near upper body/face region of person.
+        """
+        # 1. Object must be food-like (heuristic)
+        # In a general sense, we trust the caller to check class compatibility, 
+        # or we check generic overlap near top.
+        
+        p_x1, p_y1, p_x2, p_y2 = person_det.bbox
+        o_x1, o_y1, o_x2, o_y2 = object_det.bbox
+        
+        # Object center
+        obj_center = self.bbox_center(object_det.bbox)
+        
+        # Person "face region" estimate (top 20% of bbox)
+        face_y_threshold = p_y1 + (p_y2 - p_y1) * 0.3
+        
+        # Check if object is in the upper part of person bbox
+        if (p_x1 < obj_center[0] < p_x2) and (p_y1 < obj_center[1] < face_y_threshold):
+            return True
+            
+        return False
+
+    def detect_touching(
+        self,
+        person_det: Detection,
+        object_det: Detection,
+        hand_dets: List[HandDetection]
+    ) -> bool:
+        """
+        Detect "touching" relation.
+        Criteria: Hand very close to object (or object overlap), but maybe not holding (short duration?).
+        For now, we treat it as a spatial proximity weaker than holding.
+        """
+        obj_center = self.bbox_center(object_det.bbox)
+        
+        # 1. Hand proximity check
+        if hand_dets:
+            for hand in hand_dets:
+                hand_center = self.bbox_center(hand.bbox)
+                dist = self.distance(hand_center, obj_center)
+                
+                if dist < self.holding_hand_dist: # Re-use holding distance
+                    return True
+        
+        # 2. Bbox overlap fallback
+        p_x1, p_y1, p_x2, p_y2 = person_det.bbox
+        o_x1, o_y1, o_x2, o_y2 = object_det.bbox
+        
+        overlap_x = max(0, min(p_x2, o_x2) - max(p_x1, o_x1))
+        overlap_y = max(0, min(p_y2, o_y2) - max(p_y1, o_y1))
+        
+        if overlap_x > 0 and overlap_y > 0:
+            return True
+            
+        return False
+
+    def detect_swinging(
+        self,
+        person_det: Detection,
+        object_det: Detection,
+        hand_dets: List[HandDetection]
+    ) -> bool:
+        """
+        Detect "swinging" relation.
+        Criteria: Object is held AND has high angular/circular motion or high velocity variance.
+        Simplified: Object is held + High Velocity + changing direction.
+        """
+        # Must be holding first
+        if not self.detect_holding(person_det, object_det, hand_dets):
+            return False
+            
+        # Check high velocity (swinging implies fast movement)
+        vel = self.compute_velocity(object_det.track_id, object_det.frame_id)
+        if vel:
+            v_mag = np.sqrt(vel[0]**2 + vel[1]**2)
+            if v_mag > 8.0: # Good threshold for swinging
+                return True
+                
+        return False
+
     def predict_relations(
         self,
         detections: List[Detection],
@@ -380,23 +467,18 @@ class PVSGActionClassifier:
     ) -> List[Tuple[int, int, str, float]]:
         """
         Predict PVSG action relations for a frame.
-        
-        Args:
-            detections: All object detections in frame
-            hand_detections: Hand detections per person track
-            frame_id: Current frame ID
-        
-        Returns:
-            List of (subject_id, object_id, predicate) tuples
         """
         relations = []
+        
+        # Background objects that cannot be picked/held/thrown
+        NON_INTERACTABLE = {'ground', 'floor', 'grass', 'sky', 'wall', 'field', 'court', 'road', 'sidewalk', 'ceiling', 'tree', 'carpet', 'sand', 'water', 'sea', 'river', 'mat', 'rug', 'blanket'}
         
         # Update track history
         for det in detections:
             self.update_track_history(det)
         
         # Separate persons and objects
-        persons = [d for d in detections if d.class_name in ['person', 'adult', 'child', 'man', 'woman']]
+        persons = [d for d in detections if d.class_name in ['person', 'adult', 'child', 'man', 'woman', 'boy', 'girl']]
         objects = [d for d in detections if d not in persons]
         
         # For each person-object pair
@@ -406,13 +488,21 @@ class PVSGActionClassifier:
             for obj in objects:
                 candidates = [] # (predicate, score)
                 
+                # Filter impossible interactions
+                is_background = obj.class_name in NON_INTERACTABLE
+                
                 # 1. Physical/Action checks
+                
+                # Swinging (Priority for bat/racket/etc)
+                if not is_background and self.detect_swinging(person, obj, person_hands):
+                    candidates.append(('swinging', 0.95))
+                
                 # Throwing (Priority)
-                if self.detect_throwing(person, obj, person_hands):
+                if not is_background and self.detect_throwing(person, obj, person_hands):
                     candidates.append(('throwing', 0.9))
                 
                 # Picking
-                if self.detect_picking(person, obj, person_hands):
+                if not is_background and self.detect_picking(person, obj, person_hands):
                     candidates.append(('picking', 0.85))
                 
                 # Riding
@@ -427,12 +517,21 @@ class PVSGActionClassifier:
                         candidates.append(('sitting_at', 0.8))
                 
                 # Holding
-                if self.detect_holding(person, obj, person_hands):
+                if not is_background and self.detect_holding(person, obj, person_hands):
                     candidates.append(('holding', 0.85))
+
                 
-                # Standalone person predicates (if obj is floor/ground etc, or just for person)
-                # But here we are iterating over objects. 
-                # PVSG relations often include interaction with surroundings.
+                # Eating
+                if not is_background and obj.class_name in ['cake', 'bread', 'food', 'apple', 'sandwich', 'beverage', 'drink', 'bottle']:
+                    if self.detect_eating(person, obj, person_hands):
+                        candidates.append(('eating', 0.9))
+                
+                # Touching (General interaction)
+                if not is_background and self.detect_touching(person, obj, person_hands):
+                     candidates.append(('touching', 0.6))
+
+                # Standalone person predicates (interaction with surroundings)
+                # This is where we handle background objects specifically
                 
                 # 2. Add generic spatial fallbacks with low scores (Debiasing)
                 p_x1, p_y1, p_x2, p_y2 = person.bbox
@@ -442,18 +541,22 @@ class PVSGActionClassifier:
                 
                 if overlap_x > 0 and overlap_y > 0:
                     # Specific walking/standing if on floor/carpet
-                    if 'floor' in obj.class_name.lower() or 'carpet' in obj.class_name.lower() or 'ground' in obj.class_name.lower():
+                    if 'floor' in obj.class_name.lower() or 'carpet' in obj.class_name.lower() or 'ground' in obj.class_name.lower() or 'grass' in obj.class_name.lower():
                         if self.detect_walking(person):
                             candidates.append(('walking_on', 0.9))
                         else:
                             candidates.append(('standing_on', 0.85))
                     
-                    candidates.append(('on', 0.1)) # Baseline confidence for "on"
+                    if not is_background: # Only prioritize 'on' for non-background? Or is 'on table' valid?
+                         # 'person on carpet' is valid but covered by walking/standing_on
+                         # 'person on table' is valid.
+                         candidates.append(('on', 0.1)) 
                 else:
                     obj_center = self.bbox_center(obj.bbox)
                     subj_center = self.bbox_center(person.bbox)
                     if self.distance(obj_center, subj_center) < 200:
                         candidates.append(('near', 0.05))
+                        candidates.append(('next_to', 0.05))
 
                 # 3. Selection / Debiasing logic: 
                 # Return ALL candidates for Recall@K evaluation

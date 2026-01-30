@@ -82,7 +82,7 @@ def normalize_predicate(pred: str) -> str:
 def load_orion_triplets(video_id: str, results_dir: str) -> List[Tuple[str, str, str]]:
     """
     Load Orion predicted triplets from scene_graph.jsonl.
-    Returns: List of (subject_class, predicate, object_class) tuples
+    Returns: List of (subject_class, predicate, object_class) tuples, sorted by confidence
     """
     sg_file = os.path.join(results_dir, video_id, 'scene_graph.jsonl')
     if not os.path.exists(sg_file):
@@ -99,8 +99,8 @@ def load_orion_triplets(video_id: str, results_dir: str) -> List[Tuple[str, str,
                 cls = obj.get('class', obj.get('label', 'unknown'))
                 mem_to_class[mem_id] = cls
     
-    triplets = []
-    seen_triplets = set()
+    # Track triplets with their max confidence
+    triplet_confidence = {}  # triplet -> max_confidence
     
     with open(sg_file, 'r') as f:
         for line in f:
@@ -118,6 +118,7 @@ def load_orion_triplets(video_id: str, results_dir: str) -> List[Tuple[str, str,
                 subj_id = edge.get('subject', '')
                 obj_id = edge.get('object', '')
                 pred = normalize_predicate(edge.get('relation', ''))
+                confidence = edge.get('confidence', 0.0)
                 
                 if subj_id in node_map and obj_id in node_map:
                     subj_class = node_map[subj_id]
@@ -132,12 +133,15 @@ def load_orion_triplets(video_id: str, results_dir: str) -> List[Tuple[str, str,
                     else:
                         triplet = (subj_class, pred, obj_class)
                     
-                    # Deduplicate triplets
-                    if triplet not in seen_triplets:
-                        triplets.append(triplet)
-                        seen_triplets.add(triplet)
+                    # Track max confidence for this triplet
+                    if triplet not in triplet_confidence:
+                        triplet_confidence[triplet] = confidence
+                    else:
+                        triplet_confidence[triplet] = max(triplet_confidence[triplet], confidence)
     
-    return triplets
+    # Sort by confidence (descending) and return triplets
+    sorted_triplets = sorted(triplet_confidence.items(), key=lambda x: x[1], reverse=True)
+    return [triplet for triplet, conf in sorted_triplets]
 
 def load_gt_triplets(video_data: Dict) -> List[Tuple[str, str, str]]:
     """
