@@ -317,100 +317,71 @@ def main():
     
     total_recall = {'R@20': [], 'R@50': [], 'R@100': []}
     
-    # Import locally to avoid top-level failures
+    # Import evaluation logic
     try:
-        from scripts.eval_sgg_recall import load_orion_triplets, load_gt_triplets, compute_recall_at_k
+        from scripts.eval_sgg_recall import evaluate_video, load_pvsg_ground_truth
     except ImportError:
-        try:
-             sys.path.append(os.getcwd())
-             from scripts.eval_sgg_recall import load_orion_triplets, load_gt_triplets, compute_recall_at_k
-        except ImportError:
-             logger.error("Could not import eval logic from scripts/eval_sgg_recall.py")
-             return
+        import sys
+        sys.path.append(os.getcwd())
+        from scripts.eval_sgg_recall import evaluate_video, load_pvsg_ground_truth
 
     # We'll also store per-video metrics to print specific one if requested
     video_metrics = {}
 
     for video_id in processed_videos:
-        # HACK: If directory name has suffix (e.g. _yoloworld), strip it to find GT
-        gt_id = video_id
-        if gt_id not in gt_map:
-            # Try splitting by underscore basics
-            parts = gt_id.split('_')
-            if len(parts) >= 2:
-                 # Check if prefix works "0003_3396832512"
-                 candidate = f"{parts[0]}_{parts[1]}"
-                 if candidate in gt_map:
-                     gt_id = candidate
-             
-        if gt_id not in gt_map:
-            # If user ran a random video not in GT, simple warning and skip
-            if args.video:
-                 logger.warning(f"[{video_id}] Video not in PVSG GT. Cannot compute mR@K.")
-                 print("\n[NOTE] Video is not in Ground Truth dataset. SGG generated but Recall cannot be calculated.\n")
-            else:
-                 logger.warning(f"[{video_id}] Not found in GT (ID {gt_id}). Skipping eval.")
-            continue
-            
-        # Get Predictions
-        pred_triplets = load_orion_triplets(video_id, str(batch_dir))
-        gt_triplets = load_gt_triplets(gt_map[gt_id])
+        # Load GT dictionary for evaluate_video compatibility
+        gt_videos = {v['video_id']: v for v in pvsg_data['data']}
+        res = evaluate_video(video_id, str(batch_dir), gt_videos)
         
-        if not gt_triplets:
-             logger.warning(f"[{video_id}] No GT triplets found.")
+        if 'error' in res:
+             logger.warning(f"[{video_id}] Eval Error: {res['error']}")
              continue
-
-        r20 = compute_recall_at_k(pred_triplets, gt_triplets, 20)
-        r50 = compute_recall_at_k(pred_triplets, gt_triplets, 50)
-        r100 = compute_recall_at_k(pred_triplets, gt_triplets, 100)
-        
-        total_recall['R@20'].append(r20)
-        total_recall['R@50'].append(r50)
-        total_recall['R@100'].append(r100)
-        
-        # MEAN RECALL (R * 0.95 approximation as per script)
-        mr20 = r20 * 0.95
-        mr50 = r50 * 0.95
-        mr100 = r100 * 0.95
-        
-        video_metrics[video_id] = {
-            'mR@20': mr20, 'mR@50': mr50, 'mR@100': mr100,
-            'R@20': r20, 'R@50': r50, 'R@100': r100
-        }
-
-        res_str = f"[{video_id}] R@20: {r20:.1f} | R@50: {r50:.1f} | R@100: {r100:.1f}"
-        logger.info(res_str)
+             
+        video_metrics[video_id] = res
+        logger.info(f"[{video_id}] Pred={res['pred_count']} GT={res['gt_count']} R@20: {res['R@20']:.1f} | mR@20: {res['mR@20']:.1f}")
+        logger.info(f"[{video_id}] R@20: {res['R@20']:.1f} | R@50: {res['R@50']:.1f} | R@100: {res['R@100']:.1f}")
         
     # Summary
     if video_metrics:
-        import numpy as np
         
         print("\n\n")
         print("############################################################")
         print("#                   SGG EVALUATION RESULTS                 #")
         print("############################################################")
         
-        if (args.video or args.video_id) and len(processed_videos) == 1:
-             vid = processed_videos[0]
-             m = video_metrics.get(vid)
-             if m:
-                 print(f"\nVIDEO: {vid}")
-                 print("-" * 60)
-                 print(f"R@20:   {m['R@20']:.2f}%  (mR@20:  {m['mR@20']:.2f})")
-                 print(f"R@50:   {m['R@50']:.2f}%  (mR@50:  {m['mR@50']:.2f})")
-                 print(f"R@100:  {m['R@100']:.2f}%  (mR@100: {m['mR@100']:.2f})")
-                 print("-" * 60)
+        if (args.video or args.video_id) and len(video_metrics) == 1:
+             vid = list(video_metrics.keys())[0]
+             m = video_metrics[vid]
+             print(f"\nVIDEO: {vid}")
+             print("-" * 60)
+             print(f"R@20:   {m['R@20']:.2f}%  (mR@20:  {m['mR@20']:.2f})")
+             print(f"R@50:   {m['R@50']:.2f}%  (mR@50:  {m['mR@50']:.2f})")
+             print(f"R@100:  {m['R@100']:.2f}%  (mR@100: {m['mR@100']:.2f})")
+             print("-" * 60)
         else:
-             # Aggregate
-             mR20_avg = np.mean([m['mR@20'] for m in video_metrics.values()])
-             mR50_avg = np.mean([m['mR@50'] for m in video_metrics.values()])
-             mR100_avg = np.mean([m['mR@100'] for m in video_metrics.values()])
+             # Aggregate pooled mR@K
+             def get_pooled_mr(k):
+                 cat_stats = defaultdict(lambda: [0, 0])
+                 for res in video_metrics.values():
+                     for p, (m, t) in res['pred_stats'][k].items():
+                         cat_stats[p][0] += m
+                         cat_stats[p][1] += t
+                 recalls = [m/t for m, t in cat_stats.values() if t > 0]
+                 return np.mean(recalls) * 100.0 if recalls else 0.0
+
+             mR20_avg = get_pooled_mr(20)
+             mR50_avg = get_pooled_mr(50)
+             mR100_avg = get_pooled_mr(100)
+             
+             R20_avg = np.mean([m['R@20'] for m in video_metrics.values()])
+             R50_avg = np.mean([m['R@50'] for m in video_metrics.values()])
+             R100_avg = np.mean([m['R@100'] for m in video_metrics.values()])
              
              print(f"\nAGGREGATE OVER {len(video_metrics)} VIDEOS")
              print("-" * 60)
-             print(f"MEAN mR@20:   {mR20_avg:.2f}")
-             print(f"MEAN mR@50:   {mR50_avg:.2f}")
-             print(f"MEAN mR@100:  {mR100_avg:.2f}")
+             print(f"MEAN R@20:    {R20_avg:.2f}%  |  MEAN mR@20:   {mR20_avg:.2f}%")
+             print(f"MEAN R@50:    {R50_avg:.2f}%  |  MEAN mR@50:   {mR50_avg:.2f}%")
+             print(f"MEAN R@100:   {R100_avg:.2f}%  |  MEAN mR@100:  {mR100_avg:.2f}%")
              print("-" * 60)
              
         print("############################################################\n")

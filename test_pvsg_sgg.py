@@ -12,6 +12,7 @@ from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import asdict
 
 import numpy as np
+import torch
 
 # Import the improved classifier
 try:

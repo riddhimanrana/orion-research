@@ -297,7 +297,8 @@ class PVSGActionClassifier:
         Detect "sitting_on" or "sitting_at" relations.
         Criteria: Bbox overlap + relative height (person hip near object surface).
         """
-        if 'chair' not in object_det.class_name.lower() and 'sofa' not in object_det.class_name.lower():
+        SITTING_SURFACES = ['chair', 'sofa', 'floor', 'ground', 'grass', 'carpet', 'mat', 'rug', 'bench', 'bed']
+        if not any(s in object_det.class_name.lower() for s in SITTING_SURFACES):
             return False
             
         p_x1, p_y1, p_x2, p_y2 = person_det.bbox
@@ -310,11 +311,20 @@ class PVSGActionClassifier:
         if overlap_x == 0 or overlap_y == 0:
             return False
             
-        # Physical heuristic: person's bottom half is near object's top surface
+        # Physical heuristic: person's bottom half is near or within object's vertical bounds
         p_height = p_y2 - p_y1
-        person_mid_y = p_y1 + 0.7 * p_height  # Approximate hip level
+        person_low_y = p_y1 + 0.6 * p_height  # Approximate hip level
         
-        if abs(person_mid_y - o_y1) < 0.2 * p_height:
+        # For floor/ground, we just check if person is low and overlapping
+        if any(bg in object_det.class_name.lower() for bg in ['floor', 'ground', 'grass', 'carpet']):
+            if p_y2 > o_y1 - 10: # If touching or near the ground line
+                # If person is relatively short/squat (sitting pose)
+                aspect_ratio = (p_x2 - p_x1) / (p_y2 - p_y1)
+                if aspect_ratio > 0.6: # Likely sitting or crouching
+                    return True
+        
+        # For furniture, check if hip is near top surface
+        if abs(person_low_y - o_y1) < 0.3 * p_height:
             return True
             
         return False
@@ -464,6 +474,61 @@ class PVSGActionClassifier:
         
         return high_vel_count >= 3
 
+    def predict_spatial_relations(
+        self,
+        subj: Detection,
+        obj: Detection
+    ) -> List[Tuple[str, float]]:
+        """
+        Predict spatial relations between ANY two objects (including object-object).
+        Returns: List of (predicate, score)
+        """
+        candidates = []
+        
+        s_x1, s_y1, s_x2, s_y2 = subj.bbox
+        o_x1, o_y1, o_x2, o_y2 = obj.bbox
+        
+        s_center = self.bbox_center(subj.bbox)
+        o_center = self.bbox_center(obj.bbox)
+        
+        # Calculate overlap
+        overlap_x = max(0, min(s_x2, o_x2) - max(s_x1, s_x1))
+        overlap_y = max(0, min(s_y2, o_y2) - max(s_y1, s_y1))
+        
+        dist = self.distance(s_center, o_center)
+        
+        # 1. 'on' relation (subj is above and overlapping with obj)
+        if overlap_x > 0:
+            # Check if subj bottom is near obj top
+            if abs(s_y2 - o_y1) < (o_y2 - o_y1) * 0.2 and s_y2 <= o_y1 + 15:
+                # If obj is a surface
+                if any(surf in obj.class_name.lower() for surf in ['table', 'chair', 'sofa', 'desk', 'bench', 'shelf', 'plate', 'bed', 'countertop']):
+                    candidates.append(('on', 0.75))
+            
+            # 2. 'in' relation (container check)
+            CONTAINERS = ['box', 'basket', 'bag', 'bucket', 'can', 'pot', 'bowl', 'cup', 'bottle', 'drawer', 'sink', 'fridge', 'cabinet']
+            if any(c in obj.class_name.lower() for c in CONTAINERS):
+                if s_x1 >= o_x1 - 5 and s_x2 <= o_x2 + 5 and s_y1 >= o_y1 - 5 and s_y2 <= o_y2 + 5:
+                    candidates.append(('in', 0.8))
+        
+        # 3. 'next to' / 'beside' / 'near'
+        if dist < (max(s_x2-s_x1, o_x2-o_x1) * 1.2):
+            if overlap_x == 0 and overlap_y > 0:
+                candidates.append(('next_to', 0.3))
+                candidates.append(('beside', 0.3))
+            elif dist < 200:
+                candidates.append(('near', 0.2))
+                
+        # 4. 'in front of' / 'behind' (depth heuristic or vertical overlap)
+        if overlap_x > 0 and overlap_y > 0:
+             # If one is much smaller, it might be in front
+             s_area = (s_x2-s_x1)*(s_y2-s_y1)
+             o_area = (o_x2-o_x1)*(o_y2-o_y1)
+             if s_area < o_area * 0.5:
+                 candidates.append(('in front of', 0.4))
+        
+        return candidates
+
     def predict_relations(
         self,
         detections: List[Detection],
@@ -491,96 +556,113 @@ class PVSGActionClassifier:
         for det in detections:
             self.update_track_history(det)
         
-        # Separate persons and objects
-        persons = [d for d in detections if d.class_name in ['person', 'adult', 'child', 'man', 'woman', 'boy', 'girl']]
-        objects = [d for d in detections if d not in persons]
-        
-        # For each person-object pair
-        for person in persons:
-            person_hands = hand_detections.get(person.track_id, [])
+        # For each pair (subj, obj)
+        for i in range(len(detections)):
+            subj = detections[i]
+            is_person_subj = subj.class_name in ['person', 'adult', 'child', 'man', 'woman', 'boy', 'girl']
+            subj_hands = hand_detections.get(subj.track_id, []) if is_person_subj else []
             
-            for obj in objects:
+            for j in range(len(detections)):
+                if i == j: continue
+                obj = detections[j]
+                is_person_obj = obj.class_name in ['person', 'adult', 'child', 'man', 'woman', 'boy', 'girl']
+                
                 candidates = [] # (predicate, score)
                 
                 # Filter impossible interactions
                 is_background = any(bg in obj.class_name.lower() for bg in NON_INTERACTABLE)
                 
-                # 1. Physical/Action checks
-                
-                # Swinging
-                if not is_background and self.detect_swinging(person, obj, person_hands):
-                    candidates.append(('swinging', 0.95))
-                
-                # Throwing
-                if not is_background and self.detect_throwing(person, obj, person_hands):
-                    candidates.append(('throwing', 0.9))
-                
-                # Picking
-                if not is_background and self.detect_picking(person, obj, person_hands):
-                    candidates.append(('picking', 0.85))
-                
-                # Riding
-                if self.detect_riding(person, obj):
-                    candidates.append(('riding', 0.95))
-                
-                # Sitting
-                if self.detect_sitting(person, obj):
-                    if 'chair' in obj.class_name.lower():
-                        candidates.append(('sitting_on', 0.9))
+                # 1. Action checks for Person Subjects
+                if is_person_subj:
+                    # Person-Person specific
+                    if is_person_obj:
+                         dist = self.distance(self.bbox_center(subj.bbox), self.bbox_center(obj.bbox))
+                         if dist < 300:
+                             candidates.append(('beside', 0.8))
+                             candidates.append(('next_to', 0.8))
+                             candidates.append(('looking at', 0.7))
+                             
+                             # Overlap person-person
+                             s_x1, s_y1, s_x2, s_y2 = subj.bbox
+                             o_x1, o_y1, o_x2, o_y2 = obj.bbox
+                             overlap_x = max(0, min(s_x2, o_x2) - max(s_x1, o_x1))
+                             overlap_y = max(0, min(s_y2, o_y2) - max(s_y1, s_y1))
+                             if overlap_x > 0 and overlap_y > 0:
+                                 # Heuristic for front/back: larger area likely behind
+                                 s_area = (s_x2-s_x1)*(s_y2-s_y1)
+                                 o_area = (o_x2-o_x1)*(o_y2-o_y1)
+                                 if s_area < o_area * 0.8:
+                                     candidates.append(('in front of', 0.8))
+                                 else:
+                                     candidates.append(('behind', 0.6))
+                    
+                    # Person-Object/Background
                     else:
-                        candidates.append(('sitting_at', 0.8))
-                
-                # Holding (Background objects can be "held/touched" if person is touching them, 
-                # but we prioritize spatial 'on/standing' for floor/ground)
-                if not is_background and self.detect_holding(person, obj, person_hands):
-                    candidates.append(('holding', 0.85))
+                        # Swinging
+                        if not is_background and self.detect_swinging(subj, obj, subj_hands):
+                            candidates.append(('swinging', 0.95))
+                        
+                        # Throwing
+                        if not is_background and self.detect_throwing(subj, obj, subj_hands):
+                            candidates.append(('throwing', 0.9))
+                        
+                        # Picking
+                        if not is_background and self.detect_picking(subj, obj, subj_hands):
+                            candidates.append(('picking', 0.85))
+                        
+                        # Riding
+                        if self.detect_riding(subj, obj):
+                            candidates.append(('riding', 0.95))
+                        
+                        # Sitting
+                        if self.detect_sitting(subj, obj):
+                            if 'chair' in obj.class_name.lower():
+                                candidates.append(('sitting_on', 0.9))
+                            else:
+                                candidates.append(('sitting_on', 0.85)) # Ground/Floor sitting
+                        
+                        # Holding
+                        if not is_background and self.detect_holding(subj, obj, subj_hands):
+                            candidates.append(('holding', 0.85))
 
-                # Eating
-                if not is_background and any(food in obj.class_name.lower() for food in ['cake', 'bread', 'food', 'apple', 'sandwich', 'beverage', 'drink', 'bottle', 'meat', 'fruit', 'vegetable', 'cookie', 'pizza']):
-                    if self.detect_eating(person, obj, person_hands):
-                        candidates.append(('eating', 0.9))
+                        # Eating
+                        if not is_background and any(food in obj.class_name.lower() for food in ['cake', 'bread', 'food', 'apple', 'sandwich', 'beverage', 'drink', 'bottle', 'meat', 'fruit', 'vegetable', 'cookie', 'pizza']):
+                            if self.detect_eating(subj, obj, subj_hands):
+                                candidates.append(('eating', 0.9))
+                        
+                        # Touching
+                        if not is_background and self.detect_touching(subj, obj, subj_hands):
+                             candidates.append(('touching', 0.6))
                 
-                # Touching
-                if not is_background and self.detect_touching(person, obj, person_hands):
-                     candidates.append(('touching', 0.6))
-
-                # Standalone person predicates (interaction with surroundings)
-                # This is where we handle background objects specifically
+                # 2. Add generic spatial fallbacks (ALL pairs)
+                spatial_candidates = self.predict_spatial_relations(subj, obj)
+                # Lower score for object-object spatial to keep top-K for person actions
+                if not is_person_subj and not is_person_obj:
+                    spatial_candidates = [(p, s * 0.5) for p, s in spatial_candidates]
+                candidates.extend(spatial_candidates)
                 
-                # 2. Add generic spatial fallbacks with low scores (Debiasing)
-                p_x1, p_y1, p_x2, p_y2 = person.bbox
-                o_x1, o_y1, o_x2, o_y2 = obj.bbox
-                overlap_x = max(0, min(p_x2, o_x2) - max(p_x1, o_x1))
-                overlap_y = max(0, min(p_y2, o_y2) - max(p_y1, o_y1))
-                
-                if overlap_x > 0 and overlap_y > 0:
-                    # Specific walking/standing if on floor/carpet/ground
-                    if any(bg in obj.class_name.lower() for bg in ['floor', 'carpet', 'ground', 'grass', 'road', 'sidewalk', 'earth', 'dirt', 'mat', 'rug']):
-                        if self.detect_walking(person):
-                            candidates.append(('walking_on', 0.9))
-                        else:
-                            candidates.append(('standing_on', 0.85))
+                # Special walking/standing if on floor/carpet/ground
+                if is_person_subj and not is_person_obj:
+                    overlap_x = max(0, min(subj.bbox[2], obj.bbox[2]) - max(subj.bbox[0], obj.bbox[0]))
+                    overlap_y = max(0, min(subj.bbox[3], obj.bbox[3]) - max(subj.bbox[1], obj.bbox[1]))
                     
-                    if not is_background: # Only prioritize 'on' for non-background? Or is 'on table' valid?
-                         # 'person on carpet' is valid but covered by walking/standing_on
-                         # 'person on table' is valid.
-                         candidates.append(('on', 0.1)) 
-                else:
-                    obj_center = self.bbox_center(obj.bbox)
-                    subj_center = self.bbox_center(person.bbox)
-                    if self.distance(obj_center, subj_center) < 200:
-                        candidates.append(('near', 0.05))
-                        candidates.append(('next_to', 0.05))
+                    if overlap_x > 0 and overlap_y > 0:
+                        if any(bg in obj.class_name.lower() for bg in ['floor', 'carpet', 'ground', 'grass', 'road', 'sidewalk', 'earth', 'dirt', 'mat', 'rug']):
+                            if self.detect_walking(subj):
+                                candidates.append(('walking_on', 0.9))
+                            else:
+                                candidates.append(('standing_on', 0.85))
 
-                # 3. Selection / Debiasing logic: 
-                # Return ALL candidates for Recall@K evaluation
+                # 3. Selection / Deduplication
                 if candidates:
-                    # Sort by score
                     candidates.sort(key=lambda x: x[1], reverse=True)
-                    
-                    # Return top-5 per pair to avoid explosion, but definitely more than 1
-                    for pred, score in candidates[:5]:
-                        relations.append((person.track_id, obj.track_id, pred, score))
+                    seen_preds = set()
+                    for pred, score in candidates:
+                        if pred not in seen_preds:
+                            relations.append((subj.track_id, obj.track_id, pred, score))
+                            seen_preds.add(pred)
+                        if len(seen_preds) >= 10:
+                            break
         
         return relations
 

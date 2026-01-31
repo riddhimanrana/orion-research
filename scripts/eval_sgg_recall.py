@@ -62,7 +62,6 @@ def normalize_class(cls: str) -> str:
 
 def normalize_predicate(pred: str) -> str:
     """Normalize predicate names."""
-    pred = pred.lower().strip()
     mappings = {
         'held_by': 'holding',
         'holding': 'holding',
@@ -76,7 +75,16 @@ def normalize_predicate(pred: str) -> str:
         'in': 'in',
         'at': 'at',
         'looking at': 'looking at',
+        'standing on': 'standing on',
+        'sitting on': 'sitting on',
+        'sitting at': 'sitting at',
+        'walking on': 'walking on',
+        'lying on': 'lying on',
+        'staying on': 'on',
+        'playing with': 'playing with',
     }
+    # Handle underscores (predicted relations often use them)
+    pred = pred.replace('_', ' ')
     return mappings.get(pred, pred)
 
 def load_orion_triplets(video_id: str, results_dir: str) -> List[Tuple[str, str, str]]:
@@ -99,8 +107,8 @@ def load_orion_triplets(video_id: str, results_dir: str) -> List[Tuple[str, str,
                 cls = obj.get('class', obj.get('label', 'unknown'))
                 mem_to_class[mem_id] = cls
     
-    # Track triplets with their max confidence
-    triplet_confidence = {}  # triplet -> max_confidence
+    # Track unique relational instances (by track ID) with their max confidence
+    instance_confidence = {}  # (subj_id, obj_id, pred) -> (subj_class, obj_class, max_conf)
     
     with open(sg_file, 'r') as f:
         for line in f:
@@ -115,33 +123,30 @@ def load_orion_triplets(video_id: str, results_dir: str) -> List[Tuple[str, str,
             
             # Extract triplets from edges
             for edge in frame_sg.get('edges', []):
-                subj_id = edge.get('subject', '')
-                obj_id = edge.get('object', '')
+                s_id = edge.get('subject', '')
+                o_id = edge.get('object', '')
                 pred = normalize_predicate(edge.get('relation', ''))
                 confidence = edge.get('confidence', 0.0)
                 
-                if subj_id in node_map and obj_id in node_map:
-                    subj_class = node_map[subj_id]
-                    obj_class = node_map[obj_id]
+                if s_id in node_map and o_id in node_map:
+                    s_cls = node_map[s_id]
+                    o_cls = node_map[o_id]
                     
-                    # Orion uses passive voice (cake held_by person)
-                    # GT uses active voice (person holding cake)
-                    # Swap for consistency with GT if predicate indicates passive
                     if pred == 'held_by':
-                        # held_by means obj is holding subj, so swap and change pred to holding
-                        triplet = (obj_class, 'holding', subj_class)
+                        key = (o_id, s_id, 'holding')
+                        val = (o_cls, 'holding', s_cls, confidence)
                     else:
-                        triplet = (subj_class, pred, obj_class)
+                        key = (s_id, o_id, pred)
+                        val = (s_cls, pred, o_cls, confidence)
                     
-                    # Track max confidence for this triplet
-                    if triplet not in triplet_confidence:
-                        triplet_confidence[triplet] = confidence
-                    else:
-                        triplet_confidence[triplet] = max(triplet_confidence[triplet], confidence)
+                    if key not in instance_confidence or confidence > instance_confidence[key][3]:
+                        instance_confidence[key] = val
     
-    # Sort by confidence (descending) and return triplets
-    sorted_triplets = sorted(triplet_confidence.items(), key=lambda x: x[1], reverse=True)
-    return [triplet for triplet, conf in sorted_triplets]
+    # Sort instances by confidence
+    sorted_instances = sorted(instance_confidence.values(), key=lambda x: x[3], reverse=True)
+    
+    # Return list of (subj_class, pred, obj_class) ranked by confidence
+    return [(s, p, o) for s, p, o, c in sorted_instances]
 
 def load_gt_triplets(video_data: Dict) -> List[Tuple[str, str, str]]:
     """
@@ -165,20 +170,42 @@ def load_gt_triplets(video_data: Dict) -> List[Tuple[str, str, str]]:
 
 def compute_recall_at_k(pred_triplets: List[Tuple], gt_triplets: List[Tuple], k: int) -> float:
     """
-    Compute Recall@K for scene graph triplets.
-    R@K = (# GT triplets matched in top-K predictions) / (# total GT triplets)
+    Compute Recall@K for scene graph triplets using greedy matching.
+    Correctly handles multiple GT instances as defined by the user.
     """
     if len(gt_triplets) == 0:
         return 0.0
     
-    # Take top-K predictions
-    top_k_preds = set(pred_triplets[:k])
-    gt_set = set(gt_triplets)
+    top_k_preds = pred_triplets[:k]
+    available_gt = list(gt_triplets)
+    matched_count = 0
     
-    # Count matches
-    matched = len(top_k_preds & gt_set)
+    for pred in top_k_preds:
+        if pred in available_gt:
+            matched_count += 1
+            available_gt.remove(pred)
+            
+    return (matched_count / len(gt_triplets)) * 100.0
+
+def compute_predicate_recalls(pred_triplets: List[Tuple], gt_triplets: List[Tuple], k: int) -> Dict[str, Tuple[int, int]]:
+    """
+    Compute per-predicate match counts.
+    """
+    top_k_preds = pred_triplets[:k]
+    available_gt = list(gt_triplets)
     
-    return (matched / len(gt_triplets)) * 100.0
+    # Group GT by predicate for totals
+    pred_stats = defaultdict(lambda: [0, 0])  # predicate -> [matched, total]
+    for gt in gt_triplets:
+        pred_stats[gt[1]][1] += 1
+        
+    # Greedy matching
+    for pred in top_k_preds:
+        if pred in available_gt:
+            pred_stats[pred[1]][0] += 1
+            available_gt.remove(pred)
+            
+    return {p: (m, t) for p, (m, t) in pred_stats.items()}
 
 def evaluate_video(video_id: str, results_dir: str, gt_videos: Dict) -> Dict:
     """Evaluate a single video."""
@@ -214,10 +241,18 @@ def evaluate_video(video_id: str, results_dir: str, gt_videos: Dict) -> Dict:
         'R@100': compute_recall_at_k(pred_triplets, gt_triplets, 100),
     }
     
-    # Compute mean Recall (with 0.95 adjustment factor)
-    results['mR@20'] = results['R@20'] * 0.95
-    results['mR@50'] = results['R@50'] * 0.95
-    results['mR@100'] = results['R@100'] * 0.95
+    # Compute per-video mR@K
+    for k in [20, 50, 100]:
+        stats = compute_predicate_recalls(pred_triplets, gt_triplets, k)
+        recalls = [(m / t) * 100.0 for m, t in stats.values() if t > 0]
+        results[f'mR@{k}'] = np.mean(recalls) if recalls else 0.0
+
+    # Per-predicate stats for mR@K (we'll aggregate these across videos)
+    results['pred_stats'] = {
+        20: compute_predicate_recalls(pred_triplets, gt_triplets, 20),
+        50: compute_predicate_recalls(pred_triplets, gt_triplets, 50),
+        100: compute_predicate_recalls(pred_triplets, gt_triplets, 100),
+    }
     
     return results
 
@@ -258,13 +293,29 @@ def main():
         print("\nNo valid results!")
         return
     
+    # Aggregate per-predicate recalls for mR@K
+    def calculate_mr(k_val):
+        category_stats = defaultdict(lambda: [0, 0]) # pred -> [matched, total]
+        for r in valid_results:
+            p_stats = r['pred_stats'][k_val]
+            for pred, (m, t) in p_stats.items():
+                category_stats[pred][0] += m
+                category_stats[pred][1] += t
+        
+        if not category_stats:
+            return 0.0
+        
+        # Mean of recalls across all categories present in GT
+        recalls = [(m / t) * 100.0 for p, (m, t) in category_stats.items() if t > 0]
+        return np.mean(recalls)
+
     avg_results = {
         'R@20': np.mean([r['R@20'] for r in valid_results]),
-        'mR@20': np.mean([r['mR@20'] for r in valid_results]),
+        'mR@20': calculate_mr(20),
         'R@50': np.mean([r['R@50'] for r in valid_results]),
-        'mR@50': np.mean([r['mR@50'] for r in valid_results]),
+        'mR@50': calculate_mr(50),
         'R@100': np.mean([r['R@100'] for r in valid_results]),
-        'mR@100': np.mean([r['mR@100'] for r in valid_results]),
+        'mR@100': calculate_mr(100),
     }
     
     # Print results table (matching paper format)
