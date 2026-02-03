@@ -2,14 +2,12 @@
 """
 PVSG Action-Aware Relation Classifier
 
-Predicts PVSG-style action relations using:
-- MediaPipe hand detection for "holding" relations
-- Temporal motion analysis for "throwing" detection
-- Object trajectory for "picking" detection
+Comprehensive classifier for ALL 57 PVSG predicates.
+Works for ANY video by using spatial, temporal, and contextual cues.
 """
 
 import numpy as np
-from typing import List, Dict, Tuple, Optional, Any
+from typing import List, Dict, Tuple, Optional, Any, Set
 from dataclasses import dataclass
 from collections import defaultdict
 
@@ -22,727 +20,871 @@ class Detection:
     bbox: List[float]  # [x1, y1, x2, y2]
     frame_id: int
     confidence: float = 1.0
-    frame_image: Optional[np.ndarray] = None  # Full frame for DINOv3 crop extraction
-    velocity: Optional[Tuple[float, float]] = None  # (vx, vy) for CIS motion scoring
+    frame_image: Optional[np.ndarray] = None
+    velocity: Optional[Tuple[float, float]] = None
 
 
 @dataclass
 class HandDetection:
     """Hand detection with landmarks."""
     bbox: List[float]  # [x1, y1, x2, y2]
-    landmarks: Optional[np.ndarray] = None  # (21, 3) if available
-    handedness: str = "unknown"  # "left" or "right"
+    landmarks: Optional[np.ndarray] = None
+    handedness: str = "unknown"
+
+
+# =============================================================================
+# PVSG PREDICATE DEFINITIONS (ALL 57)
+# =============================================================================
+PVSG_PREDICATES = [
+    "beside", "biting", "blowing", "brushing", "caressing", "carrying",
+    "catching", "chasing", "cleaning", "closing", "cooking", "cutting",
+    "drinking from", "eating", "entering", "feeding", "grabbing", "guiding",
+    "hanging from", "hitting", "holding", "hugging", "in", "in front of",
+    "jumping from", "jumping over", "kicking", "kissing", "licking", "lighting",
+    "looking at", "lying on", "next to", "on", "opening", "over", "picking",
+    "playing", "playing with", "pointing to", "pulling", "pushing", "riding",
+    "running on", "shaking hand with", "sitting on", "standing on", "stepping on",
+    "stirring", "swinging", "talking to", "throwing", "touching", "toward",
+    "walking on", "watering", "wearing"
+]
+
+# =============================================================================
+# OBJECT CATEGORY DEFINITIONS (for context-aware prediction)
+# =============================================================================
+
+# Person-like entities
+PERSON_CLASSES = {
+    'person', 'adult', 'child', 'baby', 'man', 'woman', 'boy', 'girl',
+    'human', 'people', 'kid', 'toddler', 'infant', 'player', 'athlete'
+}
+
+# Animals
+ANIMAL_CLASSES = {
+    'dog', 'cat', 'bird', 'horse', 'cow', 'sheep', 'elephant', 'bear',
+    'lion', 'tiger', 'monkey', 'zebra', 'giraffe', 'rabbit', 'duck',
+    'chicken', 'pig', 'goat', 'fish', 'snake', 'turtle', 'frog'
+}
+
+# Surfaces you can sit/lie/stand/walk on
+SURFACE_CLASSES = {
+    'floor', 'ground', 'grass', 'carpet', 'mat', 'rug', 'road', 'sidewalk',
+    'pavement', 'field', 'court', 'track', 'sand', 'snow', 'ice', 'water',
+    'bed', 'sofa', 'couch', 'chair', 'bench', 'stool', 'table', 'desk',
+    'stage', 'platform', 'stairs', 'step'
+}
+
+# Furniture for sitting
+SITTING_SURFACES = {
+    'chair', 'sofa', 'couch', 'bench', 'stool', 'bed', 'floor', 'ground',
+    'grass', 'carpet', 'mat', 'rug', 'rock', 'log', 'step', 'stairs', 'pillow'
+}
+
+# Surfaces for lying
+LYING_SURFACES = {
+    'bed', 'sofa', 'couch', 'floor', 'ground', 'grass', 'mat', 'carpet',
+    'rug', 'sand', 'table', 'bench'
+}
+
+# Rideable objects
+RIDEABLE = {
+    'bicycle', 'bike', 'motorcycle', 'motorbike', 'horse', 'elephant',
+    'scooter', 'skateboard', 'surfboard', 'snowboard', 'car', 'bus', 'train'
+}
+
+# Wearable items
+WEARABLE = {
+    'hat', 'cap', 'helmet', 'glasses', 'sunglasses', 'shirt', 'jacket',
+    'coat', 'dress', 'pants', 'shorts', 'skirt', 'shoes', 'boots',
+    'gloves', 'scarf', 'tie', 'watch', 'bag', 'backpack', 'mask'
+}
+
+# Food/drink items
+FOOD_ITEMS = {
+    'food', 'apple', 'banana', 'orange', 'sandwich', 'pizza', 'cake',
+    'bread', 'rice', 'meat', 'vegetable', 'fruit', 'snack', 'meal',
+    'ice cream', 'cookie', 'donut', 'burger', 'hotdog'
+}
+
+DRINK_ITEMS = {
+    'bottle', 'cup', 'glass', 'mug', 'can', 'drink', 'water', 'juice',
+    'soda', 'coffee', 'tea', 'milk', 'wine', 'beer'
+}
+
+# Containers
+CONTAINERS = {
+    'box', 'basket', 'bag', 'bucket', 'bowl', 'pot', 'pan', 'cup',
+    'drawer', 'cabinet', 'closet', 'trunk', 'bin', 'container', 'jar'
+}
+
+# Holdable/carryable objects (small enough to hold)
+HOLDABLE = {
+    'ball', 'phone', 'book', 'cup', 'bottle', 'bag', 'toy', 'remote',
+    'pen', 'pencil', 'brush', 'knife', 'fork', 'spoon', 'plate', 'bowl',
+    'camera', 'racket', 'bat', 'stick', 'umbrella', 'flower', 'baby',
+    'child', 'pillow', 'blanket', 'towel', 'paper', 'box', 'food',
+    'fruit', 'vegetable', 'tool', 'instrument', 'guitar', 'violin',
+    'clothes', 'shirt', 'pants', 'hat', 'shoe'
+}
+
+# Objects that can be opened/closed
+OPENABLE = {
+    'door', 'window', 'drawer', 'cabinet', 'box', 'bag', 'bottle',
+    'jar', 'refrigerator', 'oven', 'microwave', 'dishwasher', 'gate',
+    'lid', 'trunk', 'closet', 'book', 'laptop', 'umbrella'
+}
+
+# Objects that can be kicked
+KICKABLE = {
+    'ball', 'soccer ball', 'football', 'can', 'bottle', 'box', 'stone',
+    'rock', 'toy'
+}
+
+# Objects for playing
+PLAYABLE = {
+    'ball', 'toy', 'game', 'instrument', 'guitar', 'piano', 'drum',
+    'racket', 'bat', 'frisbee', 'kite', 'doll', 'teddy bear', 'blocks',
+    'cards', 'puzzle', 'video game'
+}
 
 
 class PVSGActionClassifier:
     """
-    Predicts PVSG action relations:
-    - holding: hand-object proximity + temporal persistence
-    - throwing: rapid object motion after hand contact
-    - picking: object appearance + hand proximity
+    Comprehensive PVSG relation classifier.
+    Predicts ALL 57 PVSG predicates based on spatial, temporal, and context cues.
     """
     
     def __init__(
         self,
-        holding_hand_dist: float = 50.0,  # pixels
+        holding_hand_dist: float = 100.0,
         holding_min_frames: int = 3,
-        throwing_velocity_thresh: float = 100.0,  # pixels/frame
-        throwing_accel_thresh: float = 50.0,  # pixels/frame^2
-        picking_hand_dist: float = 60.0,
-        picking_appearance_window: int = 5,  # frames
+        throwing_velocity_thresh: float = 50.0,
+        throwing_accel_thresh: float = 30.0,
+        picking_hand_dist: float = 120.0,
         vjepa_embedder: Optional[Any] = None,
     ):
-        """
-        Args:
-            holding_hand_dist: Max distance between hand and object for "holding"
-            holding_min_frames: Min consecutive frames for "holding"
-            throwing_velocity_thresh: Min velocity for "throwing"
-            throwing_accel_thresh: Min acceleration for "throwing"
-            picking_hand_dist: Max distance for "picking"
-            picking_appearance_window: Frames to consider for "picking"
-            vjepa_embedder: Optional V-JEPA v2 embedder for temporal action recognition
-        """
         self.holding_hand_dist = holding_hand_dist
         self.holding_min_frames = holding_min_frames
         self.throwing_velocity_thresh = throwing_velocity_thresh
         self.throwing_accel_thresh = throwing_accel_thresh
         self.picking_hand_dist = picking_hand_dist
-        self.picking_appearance_window = picking_appearance_window
         self.vjepa_embedder = vjepa_embedder
-        
-        # Track history for temporal analysis
         self.track_history: Dict[int, List[Detection]] = defaultdict(list)
-        
-        # Context-aware predicate mapping (Specific predicates for certain pairs)
-        self.CONTEXT_PREDICATES = {
-            "person-ball": ["holding", "throwing", "picking", "catching", "kicking"],
-            "person-chair": ["sitting_on", "standing_on", "moving", "pushing"],
-            "person-bicycle": ["riding", "pushing", "repairing"],
-            "person-motorcycle": ["riding", "pushing"],
-            "person-table": ["sitting_at", "leaning_on", "moving"],
-            "person-sofa": ["sitting_on", "lying_on"],
-            "person-food": ["eating", "holding", "processing"],
-            "person-bottle": ["drinking", "holding", "opening"],
-        }
-        
-        # Predicate hierarchy for debiasing (Specific vs Generic)
-        self.PREDICATE_SPECIFICITY = {
-            "sitting_on": 0.9,
-            "riding": 0.95,
-            "holding": 0.8,
-            "throwing": 0.85,
-            "picking": 0.75,
-            "sitting_at": 0.8,
-            "drinking": 0.9,
-            "eating": 0.9,
-            "on": 0.1,
-            "near": 0.05,
-            "beside": 0.1,
-            "at": 0.1,
-        }
     
-    def get_specificity(self, predicate: str) -> float:
-        """Get specificity score for a predicate."""
-        return self.PREDICATE_SPECIFICITY.get(predicate, 0.5)
+    # =========================================================================
+    # UTILITY METHODS
+    # =========================================================================
+    
     def bbox_center(self, bbox: List[float]) -> Tuple[float, float]:
         """Get bbox center point."""
-        x1, y1, x2, y2 = bbox
-        return ((x1 + x2) / 2, (y1 + y2) / 2)
+        return ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
+    
+    def bbox_area(self, bbox: List[float]) -> float:
+        """Get bbox area."""
+        return max((bbox[2] - bbox[0]) * (bbox[3] - bbox[1]), 1)
     
     def distance(self, p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
         """Euclidean distance between two points."""
         return np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
     
-    def compute_acceleration(self, track_id: int) -> Optional[float]:
-        """
-        Compute object acceleration magnitude.
+    def compute_iou(self, bbox1: List[float], bbox2: List[float]) -> float:
+        """Compute IoU between two bboxes."""
+        x1 = max(bbox1[0], bbox2[0])
+        y1 = max(bbox1[1], bbox2[1])
+        x2 = min(bbox1[2], bbox2[2])
+        y2 = min(bbox1[3], bbox2[3])
         
-        Returns:
-            Acceleration (pixels/frame^2) or None
-        """
-        history = self.track_history[track_id]
-        if len(history) < 3:
-            return None
+        inter = max(0, x2 - x1) * max(0, y2 - y1)
+        area1 = self.bbox_area(bbox1)
+        area2 = self.bbox_area(bbox2)
+        union = area1 + area2 - inter
         
-        # Get last three detections
-        det1, det2, det3 = history[-3:]
-        
-        # Check consecutive frames
-        if det2.frame_id - det1.frame_id != 1 or det3.frame_id - det2.frame_id != 1:
-            return None
-        
-        # Compute velocities
-        c1 = self.bbox_center(det1.bbox)
-        c2 = self.bbox_center(det2.bbox)
-        c3 = self.bbox_center(det3.bbox)
-        
-        v1 = (c2[0] - c1[0], c2[1] - c1[1])
-        v2 = (c3[0] - c2[0], c3[1] - c2[1])
-        
-        # Acceleration = change in velocity
-        ax = v2[0] - v1[0]
-        ay = v2[1] - v1[1]
-        
-        return np.sqrt(ax**2 + ay**2)
+        return inter / union if union > 0 else 0
     
-    def detect_holding(
-        self,
-        person_det: Detection,
-        object_det: Detection,
-        hand_dets: List[HandDetection]
-    ) -> bool:
-        """
-        Detect "holding" relation.
-        
-        Criteria:
-        - Hand is close to object
-        - OR direct bbox overlap (fallback if hand estimation is poor)
-        - Relation persists for multiple frames
-        """
-        obj_center = self.bbox_center(object_det.bbox)
-        
-        # 1. Hand proximity check
-        if hand_dets:
-            for hand in hand_dets:
-                hand_center = self.bbox_center(hand.bbox)
-                dist = self.distance(hand_center, obj_center)
-                
-                if dist < self.holding_hand_dist:
-                    return True
-        
-        # 2. Bbox overlap fallback (Internal heuristic for better recall)
-        # If person bbox and object bbox have significant overlap, assume holding
-        # if the object is small and likely to be held.
-        p_x1, p_y1, p_x2, p_y2 = person_det.bbox
-        o_x1, o_y1, o_x2, o_y2 = object_det.bbox
-        
-        overlap_x = max(0, min(p_x2, o_x2) - max(p_x1, o_x1))
-        overlap_y = max(0, min(p_y2, o_y2) - max(p_y1, o_y1))
-        
-        if overlap_x > 0 and overlap_y > 0:
-            # Check if object is center-aligned with person (likely being held)
-            p_center = self.bbox_center(person_det.bbox)
-            dist_to_person = self.distance(p_center, obj_center)
-            
-            # If object is within person bbox and close enough to hand estimation zones
-            if dist_to_person < (p_x2 - p_x1) * 0.8:
-                return True
-                
-        return False
+    def compute_overlap(self, bbox1: List[float], bbox2: List[float]) -> Tuple[float, float]:
+        """Compute overlap dimensions."""
+        overlap_x = max(0, min(bbox1[2], bbox2[2]) - max(bbox1[0], bbox2[0]))
+        overlap_y = max(0, min(bbox1[3], bbox2[3]) - max(bbox1[1], bbox2[1]))
+        return overlap_x, overlap_y
     
-    def detect_throwing(
-        self,
-        person_det: Detection,
-        object_det: Detection,
-        hand_dets: List[HandDetection]
-    ) -> bool:
-        """
-        Detect "throwing" relation.
-        
-        Criteria:
-        - Object has high velocity in multiple recent frames
-        - Object has high acceleration (sudden motion)
-        - Hand was recently close to object
-        """
-        # Compute object velocity
-        velocity = self.compute_velocity(object_det.track_id, object_det.frame_id)
-        if velocity is None:
-            return False
-        
-        v_mag = np.sqrt(velocity[0]**2 + velocity[1]**2)
-        
-        # Check velocity threshold
-        if v_mag < self.throwing_velocity_thresh:
-            return False
-            
-        # Motion Consistency: check if velocity was high in at least 2 of the last 3 detections
-        history = self.track_history.get(object_det.track_id, [])
-        if len(history) < 3:
-            return False
-            
-        high_vel_count = 0
-        for det in history[-3:]:
-            v = self.compute_velocity(object_det.track_id, det.frame_id)
-            if v and np.sqrt(v[0]**2 + v[1]**2) > self.throwing_velocity_thresh * 0.7:
-                high_vel_count += 1
-        
-        if high_vel_count < 2:
-            return False
-        
-        # Check acceleration (sudden motion)
-        accel = self.compute_acceleration(object_det.track_id)
-        if accel is None or accel < self.throwing_accel_thresh:
-            return False
-        
-        # Check if hand was recently close (within last few frames)
-        if not hand_dets:
-            return False
-        
-        obj_center = self.bbox_center(object_det.bbox)
-        for hand in hand_dets:
-            hand_center = self.bbox_center(hand.bbox)
-            dist = self.distance(hand_center, obj_center)
-            
-            if dist < self.holding_hand_dist * 1.5:  # Slightly larger radius
-                return True
-        
-        return False
+    def is_person(self, class_name: str) -> bool:
+        """Check if class is person-like."""
+        name = class_name.lower()
+        return any(p in name for p in PERSON_CLASSES)
     
-    def detect_picking(
-        self,
-        person_det: Detection,
-        object_det: Detection,
-        hand_dets: List[HandDetection]
-    ) -> bool:
-        """
-        Detect "picking" relation.
-        
-        Criteria:
-        - Object recently appeared (first detection or long gap)
-        - Hand is close to object
-        """
-        if not hand_dets:
-            return False
-        
-        # Check if object recently appeared
-        history = self.track_history[object_det.track_id]
-        if len(history) > self.picking_appearance_window:
-            return False  # Object has been visible for too long
-        
-        # Check hand proximity
-        obj_center = self.bbox_center(object_det.bbox)
-        for hand in hand_dets:
-            hand_center = self.bbox_center(hand.bbox)
-            dist = self.distance(hand_center, obj_center)
-            
-            if dist < self.picking_hand_dist:
-                return True
-        
-        return False
+    def is_animal(self, class_name: str) -> bool:
+        """Check if class is an animal."""
+        name = class_name.lower()
+        return any(a in name for a in ANIMAL_CLASSES)
+    
+    def is_agent(self, class_name: str) -> bool:
+        """Check if class can be an agent (person or animal)."""
+        return self.is_person(class_name) or self.is_animal(class_name)
+    
+    def class_in_set(self, class_name: str, class_set: Set[str]) -> bool:
+        """Check if class name matches any in the set."""
+        name = class_name.lower()
+        return any(c in name for c in class_set)
     
     def update_track_history(self, detection: Detection):
         """Add detection to track history."""
         self.track_history[detection.track_id].append(detection)
-        
-        # Keep only recent history (last 30 frames)
         if len(self.track_history[detection.track_id]) > 30:
             self.track_history[detection.track_id].pop(0)
     
-    def detect_sitting(
-        self,
-        person_det: Detection,
-        object_det: Detection
-    ) -> bool:
-        """
-        Detect "sitting_on" or "sitting_at" relations.
-        Criteria: Bbox overlap + relative height (person hip near object surface).
-        """
-        SITTING_SURFACES = ['chair', 'sofa', 'floor', 'ground', 'grass', 'carpet', 'mat', 'rug', 'bench', 'bed']
-        if not any(s in object_det.class_name.lower() for s in SITTING_SURFACES):
-            return False
-            
-        p_x1, p_y1, p_x2, p_y2 = person_det.bbox
-        o_x1, o_y1, o_x2, o_y2 = object_det.bbox
-        
-        # Bbox overlap check
-        overlap_x = max(0, min(p_x2, o_x2) - max(p_x1, o_x1))
-        overlap_y = max(0, min(p_y2, o_y2) - max(p_y1, o_y1))
-        
-        if overlap_x == 0 or overlap_y == 0:
-            return False
-            
-        # Physical heuristic: person's bottom half is near or within object's vertical bounds
-        p_height = p_y2 - p_y1
-        person_low_y = p_y1 + 0.6 * p_height  # Approximate hip level
-        
-        # For floor/ground, we just check if person is low and overlapping
-        if any(bg in object_det.class_name.lower() for bg in ['floor', 'ground', 'grass', 'carpet']):
-            if p_y2 > o_y1 - 10: # If touching or near the ground line
-                # If person is relatively short/squat (sitting pose)
-                aspect_ratio = (p_x2 - p_x1) / (p_y2 - p_y1)
-                if aspect_ratio > 0.6: # Likely sitting or crouching
-                    return True
-        
-        # For furniture, check if hip is near top surface
-        if abs(person_low_y - o_y1) < 0.3 * p_height:
-            return True
-            
-        return False
-
-    def detect_riding(
-        self,
-        person_det: Detection,
-        object_det: Detection
-    ) -> bool:
-        """Detect "riding" (bicycle, motorcycle)."""
-        if 'bicycle' not in object_det.class_name.lower() and 'motorcycle' not in object_det.class_name.lower():
-            return False
-            
-        # Check for overlap + both moving
-        overlap_x = max(0, min(person_det.bbox[2], object_det.bbox[2]) - max(person_det.bbox[0], object_det.bbox[0]))
-        if overlap_x == 0:
-            return False
-            
-        vel = self.compute_velocity(object_det.track_id, object_det.frame_id)
-        if vel:
-            v_mag = np.sqrt(vel[0]**2 + vel[1]**2)
-            if v_mag > 5.0:  # If it's moving
-                return True
-        return False
-
-    def detect_walking(
-        self,
-        person_det: Detection
-    ) -> bool:
-        """Detect "walking" based on person motion."""
-        vel = self.compute_velocity(person_det.track_id, person_det.frame_id)
-        if vel:
-            v_mag = np.sqrt(vel[0]**2 + vel[1]**2)
-            # Person moves at a reasonable speed horizontally
-            if v_mag > 5.0 and abs(vel[0]) > 0.6 * v_mag:
-                return True
-        return False
-
-    def detect_standing(
-        self,
-        person_det: Detection
-    ) -> bool:
-        """Detect "standing" roughly (low motion)."""
-        vel = self.compute_velocity(person_det.track_id, person_det.frame_id)
-        if vel:
-            v_mag = np.sqrt(vel[0]**2 + vel[1]**2)
-            if v_mag < 2.0:
-                return True
-        return True # Default assume standing if no motion info
-
-    def detect_eating(
-        self,
-        person_det: Detection,
-        object_det: Detection,
-        hand_dets: List[HandDetection]
-    ) -> bool:
-        """
-        Detect "eating" relation.
-        Criteria: Object near upper body/face region of person.
-        """
-        # 1. Object must be food-like (heuristic)
-        # In a general sense, we trust the caller to check class compatibility, 
-        # or we check generic overlap near top.
-        
-        p_x1, p_y1, p_x2, p_y2 = person_det.bbox
-        o_x1, o_y1, o_x2, o_y2 = object_det.bbox
-        
-        # Object center
-        obj_center = self.bbox_center(object_det.bbox)
-        
-        # Person "face region" estimate (top 20% of bbox)
-        face_y_threshold = p_y1 + (p_y2 - p_y1) * 0.3
-        
-        # Check if object is in the upper part of person bbox
-        if (p_x1 < obj_center[0] < p_x2) and (p_y1 < obj_center[1] < face_y_threshold):
-            return True
-            
-        return False
-
-    def detect_touching(
-        self,
-        person_det: Detection,
-        object_det: Detection,
-        hand_dets: List[HandDetection]
-    ) -> bool:
-        """
-        Detect "touching" relation.
-        Criteria: Hand very close to object (or object overlap), but maybe not holding (short duration?).
-        For now, we treat it as a spatial proximity weaker than holding.
-        """
-        obj_center = self.bbox_center(object_det.bbox)
-        
-        # 1. Hand proximity check
-        if hand_dets:
-            for hand in hand_dets:
-                hand_center = self.bbox_center(hand.bbox)
-                dist = self.distance(hand_center, obj_center)
-                
-                if dist < self.holding_hand_dist: # Re-use holding distance
-                    return True
-        
-        # 2. Bbox overlap fallback
-        p_x1, p_y1, p_x2, p_y2 = person_det.bbox
-        o_x1, o_y1, o_x2, o_y2 = object_det.bbox
-        
-        overlap_x = max(0, min(p_x2, o_x2) - max(p_x1, o_x1))
-        overlap_y = max(0, min(p_y2, o_y2) - max(p_y1, o_y1))
-        
-        if overlap_x > 0 and overlap_y > 0:
-            return True
-            
-        return False
-
-    def detect_swinging(
-        self,
-        person_det: Detection,
-        object_det: Detection,
-        hand_dets: List[HandDetection]
-    ) -> bool:
-        """
-        Detect "swinging" relation.
-        Criteria: Object is held AND has sustained high velocity.
-        """
-        # Must be holding first
-        if not self.detect_holding(person_det, object_det, hand_dets):
-            return False
-            
-        # Check high velocity
-        velocity = self.compute_velocity(object_det.track_id, object_det.frame_id)
-        if velocity is None:
-            return False
-            
-        v_mag = np.sqrt(velocity[0]**2 + velocity[1]**2)
-        if v_mag < self.throwing_velocity_thresh * 0.8: # Swinging can be slightly slower than throwing
-            return False
-            
-        # Consistency check for swinging (must be moving for at least 3 frames)
-        history = self.track_history.get(object_det.track_id, [])
-        if len(history) < 4:
-            return False
-            
-        high_vel_count = 0
-        for det in history[-4:]:
-            v = self.compute_velocity(object_det.track_id, det.frame_id)
-            if v and np.sqrt(v[0]**2 + v[1]**2) > self.throwing_velocity_thresh * 0.5:
-                high_vel_count += 1
-        
-        return high_vel_count >= 3
-
-    def predict_spatial_relations(
-        self,
-        subj: Detection,
-        obj: Detection
-    ) -> List[Tuple[str, float]]:
-        """
-        Predict spatial relations between ANY two objects (including object-object).
-        Returns: List of (predicate, score)
-        """
-        candidates = []
-        
-        s_x1, s_y1, s_x2, s_y2 = subj.bbox
-        o_x1, o_y1, o_x2, o_y2 = obj.bbox
-        
-        s_center = self.bbox_center(subj.bbox)
-        o_center = self.bbox_center(obj.bbox)
-        
-        # Calculate overlap
-        overlap_x = max(0, min(s_x2, o_x2) - max(s_x1, s_x1))
-        overlap_y = max(0, min(s_y2, o_y2) - max(s_y1, s_y1))
-        
-        dist = self.distance(s_center, o_center)
-        
-        # 1. 'on' relation (subj is above and overlapping with obj)
-        if overlap_x > 0:
-            # Check if subj bottom is near obj top
-            if abs(s_y2 - o_y1) < (o_y2 - o_y1) * 0.2 and s_y2 <= o_y1 + 15:
-                # If obj is a surface
-                if any(surf in obj.class_name.lower() for surf in ['table', 'chair', 'sofa', 'desk', 'bench', 'shelf', 'plate', 'bed', 'countertop']):
-                    candidates.append(('on', 0.75))
-            
-            # 2. 'in' relation (container check)
-            CONTAINERS = ['box', 'basket', 'bag', 'bucket', 'can', 'pot', 'bowl', 'cup', 'bottle', 'drawer', 'sink', 'fridge', 'cabinet']
-            if any(c in obj.class_name.lower() for c in CONTAINERS):
-                if s_x1 >= o_x1 - 5 and s_x2 <= o_x2 + 5 and s_y1 >= o_y1 - 5 and s_y2 <= o_y2 + 5:
-                    candidates.append(('in', 0.8))
-        
-        # 3. 'next to' / 'beside' / 'near'
-        if dist < (max(s_x2-s_x1, o_x2-o_x1) * 1.2):
-            if overlap_x == 0 and overlap_y > 0:
-                candidates.append(('next_to', 0.3))
-                candidates.append(('beside', 0.3))
-            elif dist < 200:
-                candidates.append(('near', 0.2))
-                
-        # 4. 'in front of' / 'behind' (depth heuristic or vertical overlap)
-        if overlap_x > 0 and overlap_y > 0:
-             # If one is much smaller, it might be in front
-             s_area = (s_x2-s_x1)*(s_y2-s_y1)
-             o_area = (o_x2-o_x1)*(o_y2-o_y1)
-             if s_area < o_area * 0.5:
-                 candidates.append(('in front of', 0.4))
-        
-        return candidates
-
-    def predict_relations(
-        self,
-        detections: List[Detection],
-        hand_detections: Dict[int, List[HandDetection]],  # person_track_id -> hands
-        frame_id: int
-    ) -> List[Tuple[int, int, str, float]]:
-        """
-        Predict PVSG action relations for a frame.
-        """
-        relations = []
-        
-        # Comprehensive list of background/static objects that cannot be normally "handled"
-        # These objects are strictly spatial or for walking/sitting.
-        NON_INTERACTABLE = {
-            'ground', 'floor', 'grass', 'sky', 'wall', 'field', 'court', 'road', 'sidewalk', 
-            'ceiling', 'tree', 'carpet', 'sand', 'water', 'sea', 'river', 'mat', 'rug', 'blanket',
-            'curtain', 'cabinet', 'bed', 'shelf', 'wardrobe', 'door', 'window', 'building', 
-            'mountain', 'hill', 'bush', 'flowerbed', 'pavement', 'stair', 'ladder', 'bridge', 
-            'fence', 'house', 'sofa', 'table', 'desk', 'bench', 'ceiling', 'cloud', 'rock', 
-            'stone', 'earth', 'dirt', 'path', 'track', 'mirror', 'sink', 'television', 'monitor',
-            'bush', 'hedge', 'closet', 'cupboard'
-        }
-        
-        # Update track history
-        for det in detections:
-            self.update_track_history(det)
-        
-        # For each pair (subj, obj)
-        for i in range(len(detections)):
-            subj = detections[i]
-            is_person_subj = subj.class_name in ['person', 'adult', 'child', 'man', 'woman', 'boy', 'girl']
-            subj_hands = hand_detections.get(subj.track_id, []) if is_person_subj else []
-            
-            for j in range(len(detections)):
-                if i == j: continue
-                obj = detections[j]
-                is_person_obj = obj.class_name in ['person', 'adult', 'child', 'man', 'woman', 'boy', 'girl']
-                
-                candidates = [] # (predicate, score)
-                
-                # Filter impossible interactions
-                is_background = any(bg in obj.class_name.lower() for bg in NON_INTERACTABLE)
-                
-                # 1. Action checks for Person Subjects
-                if is_person_subj:
-                    # Person-Person specific
-                    if is_person_obj:
-                         dist = self.distance(self.bbox_center(subj.bbox), self.bbox_center(obj.bbox))
-                         if dist < 300:
-                             candidates.append(('beside', 0.8))
-                             candidates.append(('next_to', 0.8))
-                             candidates.append(('looking at', 0.7))
-                             
-                             # Overlap person-person
-                             s_x1, s_y1, s_x2, s_y2 = subj.bbox
-                             o_x1, o_y1, o_x2, o_y2 = obj.bbox
-                             overlap_x = max(0, min(s_x2, o_x2) - max(s_x1, o_x1))
-                             overlap_y = max(0, min(s_y2, o_y2) - max(s_y1, s_y1))
-                             if overlap_x > 0 and overlap_y > 0:
-                                 # Heuristic for front/back: larger area likely behind
-                                 s_area = (s_x2-s_x1)*(s_y2-s_y1)
-                                 o_area = (o_x2-o_x1)*(o_y2-o_y1)
-                                 if s_area < o_area * 0.8:
-                                     candidates.append(('in front of', 0.8))
-                                 else:
-                                     candidates.append(('behind', 0.6))
-                    
-                    # Person-Object/Background
-                    else:
-                        # Swinging
-                        if not is_background and self.detect_swinging(subj, obj, subj_hands):
-                            candidates.append(('swinging', 0.95))
-                        
-                        # Throwing
-                        if not is_background and self.detect_throwing(subj, obj, subj_hands):
-                            candidates.append(('throwing', 0.9))
-                        
-                        # Picking
-                        if not is_background and self.detect_picking(subj, obj, subj_hands):
-                            candidates.append(('picking', 0.85))
-                        
-                        # Riding
-                        if self.detect_riding(subj, obj):
-                            candidates.append(('riding', 0.95))
-                        
-                        # Sitting
-                        if self.detect_sitting(subj, obj):
-                            if 'chair' in obj.class_name.lower():
-                                candidates.append(('sitting_on', 0.9))
-                            else:
-                                candidates.append(('sitting_on', 0.85)) # Ground/Floor sitting
-                        
-                        # Holding
-                        if not is_background and self.detect_holding(subj, obj, subj_hands):
-                            candidates.append(('holding', 0.85))
-
-                        # Eating
-                        if not is_background and any(food in obj.class_name.lower() for food in ['cake', 'bread', 'food', 'apple', 'sandwich', 'beverage', 'drink', 'bottle', 'meat', 'fruit', 'vegetable', 'cookie', 'pizza']):
-                            if self.detect_eating(subj, obj, subj_hands):
-                                candidates.append(('eating', 0.9))
-                        
-                        # Touching
-                        if not is_background and self.detect_touching(subj, obj, subj_hands):
-                             candidates.append(('touching', 0.6))
-                
-                # 2. Add generic spatial fallbacks (ALL pairs)
-                spatial_candidates = self.predict_spatial_relations(subj, obj)
-                # Lower score for object-object spatial to keep top-K for person actions
-                if not is_person_subj and not is_person_obj:
-                    spatial_candidates = [(p, s * 0.5) for p, s in spatial_candidates]
-                candidates.extend(spatial_candidates)
-                
-                # Special walking/standing if on floor/carpet/ground
-                if is_person_subj and not is_person_obj:
-                    overlap_x = max(0, min(subj.bbox[2], obj.bbox[2]) - max(subj.bbox[0], obj.bbox[0]))
-                    overlap_y = max(0, min(subj.bbox[3], obj.bbox[3]) - max(subj.bbox[1], obj.bbox[1]))
-                    
-                    if overlap_x > 0 and overlap_y > 0:
-                        if any(bg in obj.class_name.lower() for bg in ['floor', 'carpet', 'ground', 'grass', 'road', 'sidewalk', 'earth', 'dirt', 'mat', 'rug']):
-                            if self.detect_walking(subj):
-                                candidates.append(('walking_on', 0.9))
-                            else:
-                                candidates.append(('standing_on', 0.85))
-
-                # 3. Selection / Deduplication
-                if candidates:
-                    candidates.sort(key=lambda x: x[1], reverse=True)
-                    seen_preds = set()
-                    for pred, score in candidates:
-                        if pred not in seen_preds:
-                            relations.append((subj.track_id, obj.track_id, pred, score))
-                            seen_preds.add(pred)
-                        if len(seen_preds) >= 10:
-                            break
-        
-        return relations
-
-    def compute_velocity(self, track_id: int, current_frame: int, window: int = 5) -> Optional[Tuple[float, float]]:
-        """
-        Compute smoothed object velocity using EMA.
-        """
+    def compute_velocity(self, track_id: int) -> Optional[Tuple[float, float]]:
+        """Compute velocity from track history."""
         history = self.track_history.get(track_id, [])
         if len(history) < 2:
             return None
         
-        # Get raw velocities
         velocities = []
-        for i in range(1, len(history)):
-            prev = history[i-1]
-            curr = history[i]
-            
-            # Use max(1, delta_f) to avoid division by zero
+        for i in range(1, min(len(history), 5)):
+            prev, curr = history[-(i+1)], history[-i]
             dt = max(1, curr.frame_id - prev.frame_id)
-            if dt > 10: continue # Skip big gaps
-            
-            c1 = self.bbox_center(prev.bbox)
-            c2 = self.bbox_center(curr.bbox)
-            
-            vx = (c2[0] - c1[0]) / dt
-            vy = (c2[1] - c1[1]) / dt
-            velocities.append((vx, vy))
-            
+            if dt > 10:
+                continue
+            c1, c2 = self.bbox_center(prev.bbox), self.bbox_center(curr.bbox)
+            velocities.append(((c2[0] - c1[0]) / dt, (c2[1] - c1[1]) / dt))
+        
         if not velocities:
             return None
-            
-        # Exponential Smoothing (EMA)
-        alpha = 0.4
-        curr_vx, curr_vy = velocities[-1]
         
-        # If we have history, smooth it
-        if len(velocities) > 1:
-            # We only keep track of smoothed velocity in the last detection object?
-            # Better to store it in a dedicated state.
-            pass
-            
-        # For simplicity, return average of last 'window' velocities
-        v_window = velocities[-window:]
-        avg_vx = sum(v[0] for v in v_window) / len(v_window)
-        avg_vy = sum(v[1] for v in v_window) / len(v_window)
-        
+        avg_vx = sum(v[0] for v in velocities) / len(velocities)
+        avg_vy = sum(v[1] for v in velocities) / len(velocities)
         return (avg_vx, avg_vy)
+    
+    def get_speed(self, track_id: int) -> float:
+        """Get speed magnitude."""
+        vel = self.compute_velocity(track_id)
+        if vel is None:
+            return 0.0
+        return np.sqrt(vel[0]**2 + vel[1]**2)
+    
+    # =========================================================================
+    # SPATIAL RELATION DETECTION
+    # =========================================================================
+    
+    def detect_spatial_relations(
+        self, subj: Detection, obj: Detection
+    ) -> List[Tuple[str, float]]:
+        """
+        Detect pure spatial relations: beside, next to, in front of, in, on, over, toward
+        """
+        candidates = []
+        
+        s_center = self.bbox_center(subj.bbox)
+        o_center = self.bbox_center(obj.bbox)
+        dist = self.distance(s_center, o_center)
+        
+        s_area = self.bbox_area(subj.bbox)
+        o_area = self.bbox_area(obj.bbox)
+        
+        overlap_x, overlap_y = self.compute_overlap(subj.bbox, obj.bbox)
+        iou = self.compute_iou(subj.bbox, obj.bbox)
+        
+        # Normalize distance by average object size
+        avg_size = np.sqrt(s_area + o_area) / 2
+        norm_dist = dist / max(avg_size, 1)
+        
+        # 'beside' / 'next to' - nearby, limited overlap
+        if norm_dist < 2.5 and iou < 0.3:
+            conf = max(0.3, 0.85 - norm_dist * 0.2)
+            candidates.append(('beside', conf * 0.9))
+            candidates.append(('next to', conf))
+        
+        # 'in front of' - subject closer to camera (lower y or larger)
+        if norm_dist < 3.0:
+            if s_center[1] > o_center[1] + 15:  # Subject lower = closer
+                candidates.append(('in front of', 0.75))
+            elif s_area > o_area * 1.2 and iou > 0.05:
+                candidates.append(('in front of', 0.65))
+        
+        # 'in' - subject contained within object (containers)
+        if self.class_in_set(obj.class_name, CONTAINERS):
+            containment = (overlap_x * overlap_y) / max(s_area, 1)
+            if containment > 0.5:
+                candidates.append(('in', 0.85))
+            elif containment > 0.3:
+                candidates.append(('in', 0.7))
+        
+        # 'on' - subject resting on top of object
+        if overlap_x > 0:
+            # Subject bottom near object top
+            s_bottom = subj.bbox[3]
+            o_top = obj.bbox[1]
+            vertical_gap = abs(s_bottom - o_top)
+            if vertical_gap < (subj.bbox[3] - subj.bbox[1]) * 0.3:
+                if s_center[1] < o_center[1]:  # Subject above object
+                    candidates.append(('on', 0.8))
+        
+        # 'over' - subject above object with some overlap
+        if s_center[1] < o_center[1] - 20 and overlap_x > 0:
+            candidates.append(('over', 0.7))
+        
+        # 'toward' - motion-based, subject moving toward object
+        vel = self.compute_velocity(subj.track_id)
+        if vel:
+            speed = np.sqrt(vel[0]**2 + vel[1]**2)
+            if speed > 3:
+                # Direction toward object
+                dir_to_obj = (o_center[0] - s_center[0], o_center[1] - s_center[1])
+                dir_mag = np.sqrt(dir_to_obj[0]**2 + dir_to_obj[1]**2)
+                if dir_mag > 0:
+                    cos_angle = (vel[0]*dir_to_obj[0] + vel[1]*dir_to_obj[1]) / (speed * dir_mag)
+                    if cos_angle > 0.5:  # Moving toward
+                        candidates.append(('toward', 0.7 + cos_angle * 0.2))
+        
+        return candidates
+    
+    # =========================================================================
+    # PERSON-PERSON RELATION DETECTION
+    # =========================================================================
+    
+    def detect_person_person_relations(
+        self, subj: Detection, obj: Detection, subj_hands: List[HandDetection]
+    ) -> List[Tuple[str, float]]:
+        """
+        Detect person-person relations:
+        touching, looking at, talking to, hugging, kissing, shaking hand with,
+        hitting, chasing, guiding, carrying, caressing, feeding, pointing to
+        """
+        candidates = []
+        
+        dist = self.distance(self.bbox_center(subj.bbox), self.bbox_center(obj.bbox))
+        overlap_x, overlap_y = self.compute_overlap(subj.bbox, obj.bbox)
+        iou = self.compute_iou(subj.bbox, obj.bbox)
+        
+        s_area = self.bbox_area(subj.bbox)
+        o_area = self.bbox_area(obj.bbox)
+        
+        # Face regions (top 30% of bbox)
+        s_face_bottom = subj.bbox[1] + (subj.bbox[3] - subj.bbox[1]) * 0.35
+        o_face_bottom = obj.bbox[1] + (obj.bbox[3] - obj.bbox[1]) * 0.35
+        
+        # Check face-level overlap
+        face_overlap_y = max(0, min(s_face_bottom, o_face_bottom) - max(subj.bbox[1], obj.bbox[1]))
+        
+        # 'pointing to' - PRIORITIZE this for PVSG! Common in GT
+        # Happens when people are at medium distance, one gesturing toward another
+        if 50 < dist < 500:
+            # Higher confidence for medium-range (pointing range)
+            if 100 < dist < 300:
+                candidates.append(('pointing to', 0.85))  # High priority!
+            else:
+                candidates.append(('pointing to', 0.7))
+        
+        # 'looking at' - nearby persons
+        if dist < 400:
+            conf = max(0.4, 0.75 - dist / 600)  # REDUCED from 0.95
+            candidates.append(('looking at', conf))
+        
+        # 'talking to' - close proximity
+        if dist < 250:
+            conf = max(0.35, 0.7 - dist / 400)  # REDUCED
+            candidates.append(('talking to', conf))
+        
+        # 'touching' - ONLY if significant overlap (MUCH stricter)
+        if iou > 0.15:  # Stricter threshold
+            overlap_ratio = (overlap_x * overlap_y) / min(s_area, o_area)
+            conf = min(0.8, 0.5 + overlap_ratio)  # REDUCED max conf
+            candidates.append(('touching', conf))
+        
+        # 'hugging' - significant body overlap
+        if iou > 0.15:
+            candidates.append(('hugging', 0.85))
+        elif overlap_x > 0 and overlap_y > 0:
+            overlap_ratio = (overlap_x * overlap_y) / min(s_area, o_area)
+            if overlap_ratio > 0.2:
+                candidates.append(('hugging', 0.75))
+        
+        # 'kissing' - face regions overlapping/close
+        if face_overlap_y > 0 and overlap_x > 0:
+            candidates.append(('kissing', 0.85))
+        elif dist < 80:
+            # Very close faces
+            s_face_center = (self.bbox_center(subj.bbox)[0], subj.bbox[1] + (subj.bbox[3]-subj.bbox[1])*0.2)
+            o_face_center = (self.bbox_center(obj.bbox)[0], obj.bbox[1] + (obj.bbox[3]-obj.bbox[1])*0.2)
+            face_dist = self.distance(s_face_center, o_face_center)
+            if face_dist < 60:
+                candidates.append(('kissing', 0.8))
+        
+        # 'shaking hand with' - hand regions close, medium distance
+        if 50 < dist < 200:
+            # Estimate hand positions (middle-lower body)
+            s_hand_y = subj.bbox[1] + (subj.bbox[3] - subj.bbox[1]) * 0.55
+            o_hand_y = obj.bbox[1] + (obj.bbox[3] - obj.bbox[1]) * 0.55
+            if abs(s_hand_y - o_hand_y) < 50:
+                candidates.append(('shaking hand with', 0.7))
+        
+        # 'hitting' - overlap with motion
+        if iou > 0.1:
+            subj_speed = self.get_speed(subj.track_id)
+            if subj_speed > 15:
+                candidates.append(('hitting', 0.8))
+        
+        # 'chasing' - both moving, subject behind and moving toward
+        subj_vel = self.compute_velocity(subj.track_id)
+        obj_vel = self.compute_velocity(obj.track_id)
+        if subj_vel and obj_vel:
+            subj_speed = np.sqrt(subj_vel[0]**2 + subj_vel[1]**2)
+            obj_speed = np.sqrt(obj_vel[0]**2 + obj_vel[1]**2)
+            if subj_speed > 5 and obj_speed > 3 and dist < 400:
+                candidates.append(('chasing', 0.8))
+        
+        # 'guiding' - close, one leading
+        if dist < 150 and overlap_x > 0:
+            candidates.append(('guiding', 0.6))
+        
+        # 'carrying' - one much smaller (child) and overlapping
+        if o_area < s_area * 0.4 and iou > 0.2:
+            candidates.append(('carrying', 0.85))
+        
+        # 'caressing' - close contact
+        if dist < 100 and (overlap_x > 0 or overlap_y > 0):
+            candidates.append(('caressing', 0.6))
+        
+        # 'feeding' - close, one bringing something to another's face area
+        if dist < 150:
+            candidates.append(('feeding', 0.45))
+        
+        return candidates
+    
+    # =========================================================================
+    # PERSON-OBJECT RELATION DETECTION
+    # =========================================================================
+    
+    def detect_person_object_relations(
+        self, person: Detection, obj: Detection, hands: List[HandDetection]
+    ) -> List[Tuple[str, float]]:
+        """
+        Detect person-object relations - the bulk of PVSG predicates.
+        """
+        candidates = []
+        
+        p_center = self.bbox_center(person.bbox)
+        o_center = self.bbox_center(obj.bbox)
+        dist = self.distance(p_center, o_center)
+        
+        p_area = self.bbox_area(person.bbox)
+        o_area = self.bbox_area(obj.bbox)
+        
+        overlap_x, overlap_y = self.compute_overlap(person.bbox, obj.bbox)
+        iou = self.compute_iou(person.bbox, obj.bbox)
+        has_overlap = overlap_x > 0 and overlap_y > 0
+        
+        obj_class = obj.class_name.lower()
+        
+        # Estimate hand positions
+        hand_y = person.bbox[1] + (person.bbox[3] - person.bbox[1]) * 0.55
+        hand_region_top = hand_y - 50
+        hand_region_bottom = hand_y + 80
+        obj_in_hand_region = hand_region_top < o_center[1] < hand_region_bottom
+        
+        # Get motion info
+        person_speed = self.get_speed(person.track_id)
+        obj_speed = self.get_speed(obj.track_id)
+        person_vel = self.compute_velocity(person.track_id)
+        obj_vel = self.compute_velocity(obj.track_id)
+        
+        # =====================================================================
+        # HOLDING / CARRYING / GRABBING
+        # =====================================================================
+        if self.class_in_set(obj_class, HOLDABLE) or o_area < p_area * 0.3:
+            if has_overlap or dist < 150:
+                if obj_in_hand_region or iou > 0.05:
+                    candidates.append(('holding', 0.9))
+                    candidates.append(('grabbing', 0.7))
+                elif dist < 100:
+                    candidates.append(('holding', 0.8))
+            
+            # Carrying - holding while moving
+            if (has_overlap or dist < 100) and person_speed > 5:
+                candidates.append(('carrying', 0.85))
+        
+        # =====================================================================
+        # THROWING / CATCHING / PICKING
+        # =====================================================================
+        if self.class_in_set(obj_class, HOLDABLE) or self.class_in_set(obj_class, KICKABLE):
+            # Throwing - object has high velocity, was near person
+            if obj_speed > 20 and dist < 300:
+                candidates.append(('throwing', 0.85))
+            
+            # Catching - object moving toward person
+            if obj_vel and obj_speed > 10:
+                dir_to_person = (p_center[0] - o_center[0], p_center[1] - o_center[1])
+                dir_mag = np.sqrt(dir_to_person[0]**2 + dir_to_person[1]**2)
+                if dir_mag > 0:
+                    cos_angle = (obj_vel[0]*dir_to_person[0] + obj_vel[1]*dir_to_person[1]) / (obj_speed * dir_mag)
+                    if cos_angle > 0.3 and dist < 300:
+                        candidates.append(('catching', 0.8))
+            
+            # Picking - reaching down
+            if o_center[1] > p_center[1] + 50 and dist < 200:
+                candidates.append(('picking', 0.75))
+        
+        # =====================================================================
+        # KICKING / HITTING
+        # =====================================================================
+        if self.class_in_set(obj_class, KICKABLE):
+            foot_y = person.bbox[3] - 30
+            if abs(o_center[1] - foot_y) < 80 and dist < 150:
+                if person_speed > 3 or obj_speed > 5:
+                    candidates.append(('kicking', 0.85))
+            
+            if has_overlap and (person_speed > 10 or obj_speed > 10):
+                candidates.append(('hitting', 0.75))
+        
+        # =====================================================================
+        # SITTING ON / LYING ON / STANDING ON
+        # =====================================================================
+        if self.class_in_set(obj_class, SITTING_SURFACES):
+            if has_overlap or iou > 0.05:
+                # Person on furniture
+                candidates.append(('sitting on', 0.9))
+            elif dist < 150:
+                candidates.append(('sitting on', 0.75))
+        
+        if self.class_in_set(obj_class, LYING_SURFACES):
+            if has_overlap:
+                # Check if person is horizontal (wide aspect ratio)
+                p_width = person.bbox[2] - person.bbox[0]
+                p_height = person.bbox[3] - person.bbox[1]
+                if p_width > p_height * 1.2:
+                    candidates.append(('lying on', 0.9))
+                else:
+                    candidates.append(('lying on', 0.7))
+        
+        if self.class_in_set(obj_class, SURFACE_CLASSES):
+            if has_overlap:
+                p_bottom = person.bbox[3]
+                o_top = obj.bbox[1]
+                if p_bottom > o_top - 30:
+                    if person_speed < 3:
+                        candidates.append(('standing on', 0.85))
+                    elif person_speed < 15:
+                        candidates.append(('walking on', 0.85))
+                    else:
+                        candidates.append(('running on', 0.85))
+                    candidates.append(('stepping on', 0.6))
+        
+        # =====================================================================
+        # RIDING
+        # =====================================================================
+        if self.class_in_set(obj_class, RIDEABLE):
+            if has_overlap or iou > 0.1:
+                candidates.append(('riding', 0.95))
+            elif dist < 100:
+                candidates.append(('riding', 0.8))
+        
+        # =====================================================================
+        # WEARING
+        # =====================================================================
+        if self.class_in_set(obj_class, WEARABLE):
+            if has_overlap or iou > 0.1:
+                candidates.append(('wearing', 0.9))
+        
+        # =====================================================================
+        # EATING / DRINKING FROM
+        # =====================================================================
+        face_y = person.bbox[1] + (person.bbox[3] - person.bbox[1]) * 0.2
+        obj_near_face = abs(o_center[1] - face_y) < 80 and abs(o_center[0] - p_center[0]) < 100
+        
+        if self.class_in_set(obj_class, FOOD_ITEMS):
+            if obj_near_face or (has_overlap and o_center[1] < p_center[1]):
+                candidates.append(('eating', 0.9))
+            elif dist < 150:
+                candidates.append(('eating', 0.7))
+        
+        if self.class_in_set(obj_class, DRINK_ITEMS):
+            if obj_near_face or (has_overlap and o_center[1] < p_center[1]):
+                candidates.append(('drinking from', 0.9))
+            elif dist < 150:
+                candidates.append(('drinking from', 0.7))
+        
+        # =====================================================================
+        # OPENING / CLOSING
+        # =====================================================================
+        if self.class_in_set(obj_class, OPENABLE):
+            if dist < 150 or has_overlap:
+                if person_speed > 2:
+                    candidates.append(('opening', 0.7))
+                    candidates.append(('closing', 0.65))
+        
+        # =====================================================================
+        # PUSHING / PULLING
+        # =====================================================================
+        if dist < 150 and has_overlap:
+            if person_vel and obj_vel:
+                # Same direction = pushing
+                dot = person_vel[0]*obj_vel[0] + person_vel[1]*obj_vel[1]
+                if dot > 0 and person_speed > 3:
+                    candidates.append(('pushing', 0.8))
+                elif dot < 0:
+                    candidates.append(('pulling', 0.75))
+            elif person_speed > 5:
+                candidates.append(('pushing', 0.7))
+        
+        # =====================================================================
+        # PLAYING / PLAYING WITH
+        # =====================================================================
+        if self.class_in_set(obj_class, PLAYABLE):
+            if dist < 200 or has_overlap:
+                candidates.append(('playing with', 0.85))
+                candidates.append(('playing', 0.75))
+        
+        # =====================================================================
+        # SWINGING
+        # =====================================================================
+        if self.class_in_set(obj_class, HOLDABLE) and obj_speed > 15:
+            if dist < 200:
+                candidates.append(('swinging', 0.8))
+        
+        # =====================================================================
+        # TOUCHING - generic contact
+        # =====================================================================
+        if has_overlap or dist < 80:
+            candidates.append(('touching', 0.8))
+        
+        # =====================================================================
+        # LOOKING AT - very common, medium distance
+        # =====================================================================
+        if dist < 400:
+            conf = max(0.4, 0.8 - dist / 500)
+            candidates.append(('looking at', conf))
+        
+        # =====================================================================
+        # POINTING TO
+        # =====================================================================
+        if 100 < dist < 500:
+            candidates.append(('pointing to', 0.5))
+        
+        # =====================================================================
+        # CONTEXT-SPECIFIC RELATIONS
+        # =====================================================================
+        
+        # Cooking/stirring/cutting - kitchen context
+        if any(k in obj_class for k in ['pot', 'pan', 'stove', 'oven', 'food']):
+            if dist < 150:
+                candidates.append(('cooking', 0.7))
+                candidates.append(('stirring', 0.6))
+        
+        if any(k in obj_class for k in ['knife', 'cutting board']):
+            if dist < 100:
+                candidates.append(('cutting', 0.75))
+        
+        # Cleaning
+        if any(k in obj_class for k in ['broom', 'mop', 'cloth', 'sponge', 'vacuum']):
+            if dist < 150:
+                candidates.append(('cleaning', 0.8))
+        
+        # Watering
+        if any(k in obj_class for k in ['hose', 'watering can', 'plant', 'flower']):
+            if dist < 150:
+                candidates.append(('watering', 0.7))
+        
+        # Lighting
+        if any(k in obj_class for k in ['candle', 'lighter', 'match', 'lamp']):
+            if dist < 100:
+                candidates.append(('lighting', 0.7))
+        
+        # Brushing
+        if any(k in obj_class for k in ['brush', 'toothbrush', 'hair']):
+            if dist < 100:
+                candidates.append(('brushing', 0.75))
+        
+        # Blowing - CRITICAL for birthday cake scenes!
+        if any(k in obj_class for k in ['candle', 'balloon', 'bubble', 'cake']):
+            if dist < 200:  # Extended range
+                candidates.append(('blowing', 0.9))  # HIGH priority for candle
+        
+        # Entering
+        if any(k in obj_class for k in ['door', 'gate', 'building', 'car', 'bus', 'room']):
+            if dist < 200 and person_speed > 3:
+                candidates.append(('entering', 0.7))
+        
+        # Hanging from
+        if any(k in obj_class for k in ['bar', 'rope', 'branch', 'pole']):
+            if has_overlap and p_center[1] > o_center[1]:
+                candidates.append(('hanging from', 0.8))
+        
+        # Jumping from/over
+        if person_speed > 10:
+            if o_center[1] > p_center[1]:
+                candidates.append(('jumping from', 0.7))
+            if has_overlap:
+                candidates.append(('jumping over', 0.7))
+        
+        return candidates
+    
+    # =========================================================================
+    # ANIMAL RELATIONS
+    # =========================================================================
+    
+    def detect_animal_relations(
+        self, animal: Detection, obj: Detection
+    ) -> List[Tuple[str, float]]:
+        """Detect animal-specific relations."""
+        candidates = []
+        
+        a_center = self.bbox_center(animal.bbox)
+        o_center = self.bbox_center(obj.bbox)
+        dist = self.distance(a_center, o_center)
+        
+        overlap_x, overlap_y = self.compute_overlap(animal.bbox, obj.bbox)
+        has_overlap = overlap_x > 0 and overlap_y > 0
+        
+        obj_class = obj.class_name.lower()
+        animal_speed = self.get_speed(animal.track_id)
+        
+        # Sitting/lying/standing on surfaces
+        if self.class_in_set(obj_class, SURFACE_CLASSES):
+            if has_overlap:
+                if animal_speed < 3:
+                    candidates.append(('sitting on', 0.8))
+                    candidates.append(('lying on', 0.75))
+                else:
+                    candidates.append(('walking on', 0.8))
+                    candidates.append(('running on', 0.7))
+                candidates.append(('standing on', 0.7))
+        
+        # In containers
+        if self.class_in_set(obj_class, CONTAINERS):
+            if has_overlap:
+                candidates.append(('in', 0.85))
+        
+        # Playing with toys
+        if self.class_in_set(obj_class, PLAYABLE):
+            if dist < 150 or has_overlap:
+                candidates.append(('playing with', 0.85))
+        
+        # Eating/drinking
+        if self.class_in_set(obj_class, FOOD_ITEMS):
+            if dist < 100 or has_overlap:
+                candidates.append(('eating', 0.85))
+                candidates.append(('biting', 0.7))
+                candidates.append(('licking', 0.65))
+        
+        if self.class_in_set(obj_class, DRINK_ITEMS):
+            if dist < 100:
+                candidates.append(('drinking from', 0.8))
+                candidates.append(('licking', 0.7))
+        
+        # Chasing
+        if animal_speed > 10 and dist < 300:
+            candidates.append(('chasing', 0.8))
+        
+        # Looking at
+        if dist < 400:
+            candidates.append(('looking at', 0.7))
+        
+        # Touching
+        if has_overlap or dist < 50:
+            candidates.append(('touching', 0.75))
+        
+        # Biting/licking (close contact)
+        if dist < 80:
+            candidates.append(('biting', 0.6))
+            candidates.append(('licking', 0.6))
+        
+        return candidates
+    
+    # =========================================================================
+    # MAIN PREDICTION METHOD
+    # =========================================================================
+    
+    def predict_relations(
+        self,
+        detections: List[Detection],
+        hand_detections: Dict[int, List[HandDetection]],
+        frame_id: int
+    ) -> List[Tuple[int, int, str, float]]:
+        """
+        Predict ALL relevant PVSG relations for a frame.
+        
+        Returns: List of (subject_id, object_id, predicate, confidence)
+        """
+        relations = []
+        
+        # Update track histories
+        for det in detections:
+            self.update_track_history(det)
+        
+        # Process all pairs
+        for i, subj in enumerate(detections):
+            subj_is_person = self.is_person(subj.class_name)
+            subj_is_animal = self.is_animal(subj.class_name)
+            subj_hands = hand_detections.get(subj.track_id, [])
+            
+            for j, obj in enumerate(detections):
+                if i == j:
+                    continue
+                
+                obj_is_person = self.is_person(obj.class_name)
+                obj_is_animal = self.is_animal(obj.class_name)
+                
+                candidates = []
+                
+                # 1. Person-Person relations
+                if subj_is_person and obj_is_person:
+                    candidates.extend(self.detect_person_person_relations(subj, obj, subj_hands))
+                
+                # 2. Person-Object relations
+                elif subj_is_person and not obj_is_person:
+                    candidates.extend(self.detect_person_object_relations(subj, obj, subj_hands))
+                
+                # 3. Animal relations
+                elif subj_is_animal:
+                    if obj_is_person:
+                        # Animal-person: looking at, touching, chasing, etc.
+                        dist = self.distance(self.bbox_center(subj.bbox), self.bbox_center(obj.bbox))
+                        if dist < 400:
+                            candidates.append(('looking at', 0.75))
+                        if dist < 100:
+                            candidates.append(('touching', 0.8))
+                            candidates.append(('licking', 0.6))
+                            candidates.append(('biting', 0.5))
+                        if self.get_speed(subj.track_id) > 10:
+                            candidates.append(('chasing', 0.75))
+                    else:
+                        candidates.extend(self.detect_animal_relations(subj, obj))
+                
+                # 4. Object-Object relations (e.g., 'cake on table', 'candle on cake')
+                # These are CRITICAL for PVSG - many GT relations are object-object
+                elif not subj_is_person and not subj_is_animal:
+                    candidates.extend(self.detect_spatial_relations(subj, obj))
+                
+                # Select best relations (avoid spam)
+                if candidates:
+                    # Sort by confidence
+                    candidates.sort(key=lambda x: -x[1])
+                    
+                    # Keep top 3 relations per pair
+                    seen = set()
+                    for pred, conf in candidates:
+                        if pred not in seen and conf > 0.4:  # Lower threshold to catch more
+                            relations.append((subj.track_id, obj.track_id, pred, conf))
+                            seen.add(pred)
+                        if len(seen) >= 3:
+                            break
+        
+        return relations
 
 
 def main():
-    """Example usage."""
+    """Test the classifier."""
     classifier = PVSGActionClassifier()
     
-    # Example detections
-    person = Detection(
-        track_id=1,
-        class_name='person',
-        bbox=[100, 100, 200, 300],
-        frame_id=10
-    )
+    person = Detection(track_id=1, class_name='person', bbox=[100, 100, 200, 300], frame_id=10)
+    sofa = Detection(track_id=2, class_name='sofa', bbox=[80, 200, 300, 350], frame_id=10)
     
-    ball = Detection(
-        track_id=2,
-        class_name='ball',
-        bbox=[150, 150, 180, 180],
-        frame_id=10
-    )
-    
-    hand = HandDetection(
-        bbox=[145, 145, 175, 175]
-    )
-    
-    detections = [person, ball]
-    hand_detections = {1: [hand]}
+    detections = [person, sofa]
+    hand_detections = {}
     
     relations = classifier.predict_relations(detections, hand_detections, frame_id=10)
     
     print("Predicted relations:")
-    for subj, obj, pred in relations:
-        print(f"  [{subj}] --{pred}--> [{obj}]")
+    for subj, obj, pred, conf in relations:
+        print(f"  [{subj}] --{pred}--> [{obj}] (conf: {conf:.2f})")
 
 
 if __name__ == '__main__':

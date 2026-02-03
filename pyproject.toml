@@ -19,22 +19,47 @@ authors = [
 ]
 keywords = ["research", "orion", "computer-vision", "transformers", "video-understanding", "re-id"]
 dependencies = [
-    "torch==2.6.0", "torchvision==0.21.0",
-    "transformers>=4.47.1", "tokenizers==0.21.0",
-    "numpy==1.26.4", "scikit-learn==1.2.2", "opencv-python>=4.8.0",
-    "timm==1.0.15", "einops==0.6.1", "ultralytics==8.3.217",
-    "hdbscan", "mediapipe>=0.10.14", "pillow>=10.0.0", "rich",
-    "tqdm", "omegaconf", "moviepy==1.0.3", "plyfile",
-    "huggingface-hub", "trimesh", "imageio", "open3d",
-    "requests", "typer", "safetensors", "pillow-heif",
+    # Core ML frameworks
+    "torch>=2.0.0", "torchvision>=0.15.0",
+    "transformers>=4.47.1", "tokenizers>=0.21.0",
+    "numpy>=1.24.0", "scikit-learn>=1.2.0",
+    
+    # Image/Video processing
+    "opencv-python>=4.8.0",
+    "pillow>=10.0.0",  # Required for GroundingDINO, DINOv3, VLM backends
+    "pillow-heif",
+    "imageio>=2.30.0",
+    "moviepy==1.0.3",
+    
+    # Detection & Vision models
+    "ultralytics>=8.3.0",  # YOLOWorld fallback
+    "timm>=1.0.0",  # DINOv2/DINOv3 embedder
+    "einops>=0.6.0",
+    
+    # Tracking & Spatial
+    "scipy>=1.10.0",  # Hungarian algorithm in tracker
+    "shapely>=2.0.0",  # Spatial zone geometry
+    "hdbscan",  # Clustering
+    
+    # 3D & Depth
+    "trimesh", "plyfile", "open3d",
+    
+    # Utilities
+    "huggingface-hub>=0.20.0",
+    "safetensors",
+    "tqdm", "rich",
+    "omegaconf",
+    "requests", "typer",
+    
+    # Phase 3: Semantic filtering
+    "sentence-transformers>=2.2.0",  # all-mpnet-base-v2
+    
+    # Phase 5: Validation
+    "google-genai>=0.3.0",  # Gemini validation
+    
+    # Optional but commonly needed
+    "mediapipe>=0.10.14",
     "evo", "e3nn", "pycolmap",
-    # Phase 1 additions
-    "scipy>=1.10.0",  # For Hungarian algorithm in tracker
-    "shapely>=2.0.0",  # For spatial zone geometry
-    # Phase 3 additions
-    "sentence-transformers>=2.2.0",  # For semantic filtering (all-mpnet-base-v2)
-    # Phase 5 additions
-    "google-genai>=0.3.0",  # For Gemini validation (google.genai)
 ]
 
 [project.optional-dependencies]

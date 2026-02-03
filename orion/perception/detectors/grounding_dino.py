@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, dict, list, Optional
+from typing import Any, Dict, List, Optional
 
 import cv2
 import numpy as np
@@ -17,7 +17,7 @@ from transformers import (
 logger = logging.getLogger(__name__)
 
 
-def _resolve_torch_device(preferred: str Optional = None) -> torch.device:
+def _resolve_torch_device(preferred: Optional[str] = None) -> torch.device:
     """Resolve torch device string into a valid ``torch.device`` object."""
     if preferred in {None, "auto"}:
         if torch.cuda.is_available():
@@ -38,7 +38,7 @@ class GroundingDINOWrapper:
     def __init__(
         self,
         model_id: str = "IDEA-Research/grounding-dino-base",
-        device: str Optional = None,
+        device: Optional[str] = None,
         use_half_precision: bool = True,
     ) -> None:
         self.model_id = model_id
@@ -68,7 +68,7 @@ class GroundingDINOWrapper:
         box_threshold: float,
         text_threshold: float,
         max_detections: int,
-    ) -> list[dict[str, Any]]:
+    ) -> List[Dict[str, Any]]:
         """Run zero-shot detection on a single frame."""
         if frame_bgr is None:
             return []
@@ -95,7 +95,7 @@ class GroundingDINOWrapper:
             target_sizes=target_sizes,
         )
 
-        detections: list[dict[str, Any]] = []
+        detections: List[Dict[str, Any]] = []
         if not processed:
             return detections
 
